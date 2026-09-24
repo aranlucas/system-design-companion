@@ -49,7 +49,10 @@ export function Home() {
 
   return (
     <main className="home">
-      <h1>System Design</h1>
+      <h1>
+        <img src="/icons/system-design-128.png" width="40" height="40" alt="" />
+        System Design
+      </h1>
       <p className="muted">
         A shared Excalidraw canvas that you, your interviewer, and Claude edit together.
       </p>

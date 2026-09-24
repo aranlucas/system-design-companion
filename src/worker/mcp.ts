@@ -126,7 +126,24 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
   const origin = url.origin;
 
   const server = new McpServer(
-    { name: "system-design", title: "System Design", version: "0.2.0" },
+    {
+      name: "system-design",
+      title: "System Design",
+      version: "0.2.0",
+      websiteUrl: origin,
+      icons: [
+        {
+          src: `${origin}/icons/system-design-128.png`,
+          mimeType: "image/png",
+          sizes: ["128x128"],
+        },
+        {
+          src: `${origin}/icons/system-design-512.png`,
+          mimeType: "image/png",
+          sizes: ["512x512"],
+        },
+      ],
+    },
     { instructions: INSTRUCTIONS, capabilities: { tools: {}, prompts: {}, resources: {} } },
   );
 
