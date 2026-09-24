@@ -114,7 +114,10 @@ export function newId(): string {
 export function measureText(text: string, fontSize: number) {
   const lines = text.split("\n");
   const longest = Math.max(...lines.map((l) => l.length), 1);
-  return { width: Math.ceil(longest * fontSize * CHAR_W), height: Math.ceil(lines.length * fontSize * LINE_HEIGHT) };
+  return {
+    width: Math.ceil(longest * fontSize * CHAR_W),
+    height: Math.ceil(lines.length * fontSize * LINE_HEIGHT),
+  };
 }
 
 const boxOf = (e: El): Box => ({ x: e.x, y: e.y, w: e.width, h: e.height });
@@ -157,7 +160,9 @@ export class Scene {
   live(): El[] {
     return [...this.els.values()]
       .filter((e) => !e.isDeleted)
-      .sort((a, b) => ((a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0));
+      .sort((a, b) =>
+        (a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0,
+      );
   }
 
   changedElements(): El[] {
@@ -165,7 +170,9 @@ export class Scene {
     return [...this.changed]
       .map((id) => this.els.get(id)!)
       .filter(Boolean)
-      .sort((a, b) => ((a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0));
+      .sort((a, b) =>
+        (a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0,
+      );
   }
 
   /** Excalidraw invariant: a bound text must sit above its container in z-order. */
@@ -174,13 +181,15 @@ export class Scene {
       const t = this.els.get(id);
       if (!t || t.type !== "text" || !t.containerId || t.isDeleted) continue;
       const c = this.els.get(t.containerId);
-      if (c && c.index && t.index && t.index <= c.index) this.mutate(t, { index: generateKeyBetween(this.maxIndex(), null) });
+      if (c && c.index && t.index && t.index <= c.index)
+        this.mutate(t, { index: generateKeyBetween(this.maxIndex(), null) });
     }
   }
 
   private maxIndex(): string | null {
     let max: string | null = null;
-    for (const e of this.els.values()) if (e.index && (max === null || e.index > max)) max = e.index;
+    for (const e of this.els.values())
+      if (e.index && (max === null || e.index > max)) max = e.index;
     return max;
   }
 
@@ -234,7 +243,13 @@ export class Scene {
     };
   }
 
-  private textEl(text: string, box: Box, author: Author, fontSize: number, extra: Partial<El> = {}): El {
+  private textEl(
+    text: string,
+    box: Box,
+    author: Author,
+    fontSize: number,
+    extra: Partial<El> = {},
+  ): El {
     const el = this.base("text", box, author, {
       strokeColor: extra.containerId ? "#1e1e1e" : author === "agent" ? AGENT_STROKE : "#1e1e1e",
       text,
@@ -255,7 +270,8 @@ export class Scene {
     const ref = (container.boundElements ?? []).find((b: any) => b.type === "text");
     const t = ref ? this.els.get(ref.id) : undefined;
     if (t && !t.isDeleted) return t;
-    for (const e of this.els.values()) if (!e.isDeleted && e.type === "text" && e.containerId === container.id) return e;
+    for (const e of this.els.values())
+      if (!e.isDeleted && e.type === "text" && e.containerId === container.id) return e;
     return undefined;
   }
 
@@ -284,7 +300,9 @@ export class Scene {
     );
     if (matches.length === 1) return matches[0];
     if (matches.length > 1) {
-      throw new Error(`"${target}" is ambiguous (${matches.length} matches: ${matches.map((m) => m.id).join(", ")}); use an id`);
+      throw new Error(
+        `"${target}" is ambiguous (${matches.length} matches: ${matches.map((m) => m.id).join(", ")}); use an id`,
+      );
     }
     throw new Error(`no element "${target}" (use an id, a unique label, or a ref from this batch)`);
   }
@@ -300,15 +318,31 @@ export class Scene {
 
   private obstacles(exclude: Set<string>): Box[] {
     return this.live()
-      .filter((e) => !exclude.has(e.id) && e.type !== "frame" && e.type !== "arrow" && !(e.type === "text" && e.containerId))
+      .filter(
+        (e) =>
+          !exclude.has(e.id) &&
+          e.type !== "frame" &&
+          e.type !== "arrow" &&
+          !(e.type === "text" && e.containerId),
+      )
       .map(boxOf);
   }
 
   sceneBounds(): Box | null {
-    return unionBox(this.live().filter((e) => e.type !== "arrow").map(boxOf));
+    return unionBox(
+      this.live()
+        .filter((e) => e.type !== "arrow")
+        .map(boxOf),
+    );
   }
 
-  private place(spec: Placement | undefined, w: number, h: number, frame: El | null, exclude = new Set<string>()): Box {
+  private place(
+    spec: Placement | undefined,
+    w: number,
+    h: number,
+    frame: El | null,
+    exclude = new Set<string>(),
+  ): Box {
     const gap = spec?.gap ?? 100;
     let x: number;
     let y: number;
@@ -364,10 +398,13 @@ export class Scene {
     const obs = this.obstacles(exclude);
     let box = { x, y, w, h };
     for (let i = 0; i < 60 && obs.some((o) => overlaps(box, o)); i++) {
-      if (axis === "y") box = { ...box, y: box.y + h + 40 };
+      if (axis === "y") box.y += h + 40;
       else {
-        box = { ...box, x: box.x + w + 40 };
-        if (frame && box.x + w > frame.x + frame.width - PAD) box = { ...box, x: frame.x + PAD, y: box.y + h + 40 };
+        box.x += w + 40;
+        if (frame && box.x + w > frame.x + frame.width - PAD) {
+          box.x = frame.x + PAD;
+          box.y += h + 40;
+        }
       }
     }
     return { x: Math.round(box.x), y: Math.round(box.y), w, h };
@@ -375,14 +412,21 @@ export class Scene {
 
   /** Grow a frame so it encloses all its children. */
   private fitFrame(frame: El) {
-    const kids = this.live().filter((e) => e.frameId === frame.id).map(boxOf);
+    const kids = this.live()
+      .filter((e) => e.frameId === frame.id)
+      .map(boxOf);
     const u = unionBox(kids);
     if (!u) return;
     const nx = Math.min(frame.x, u.x - PAD);
     const ny = Math.min(frame.y, u.y - PAD);
     const nr = Math.max(frame.x + frame.width, u.x + u.w + PAD);
     const nb = Math.max(frame.y + frame.height, u.y + u.h + PAD);
-    if (nx !== frame.x || ny !== frame.y || nr !== frame.x + frame.width || nb !== frame.y + frame.height) {
+    if (
+      nx !== frame.x ||
+      ny !== frame.y ||
+      nr !== frame.x + frame.width ||
+      nb !== frame.y + frame.height
+    ) {
       this.mutate(frame, { x: nx, y: ny, width: nr - nx, height: nb - ny });
     }
   }
@@ -401,13 +445,19 @@ export class Scene {
       this.mutate(t, { x: Math.round(mx - t.width / 2), y: Math.round(my - t.height / 2) });
     } else {
       const c = center(boxOf(container));
-      this.mutate(t, { x: Math.round(c.x - t.width / 2), y: Math.round(c.y - t.height / 2), frameId: container.frameId ?? null });
+      this.mutate(t, {
+        x: Math.round(c.x - t.width / 2),
+        y: Math.round(c.y - t.height / 2),
+        frameId: container.frameId ?? null,
+      });
     }
   }
 
   private arrowsBoundTo(id: string): El[] {
     return this.live().filter(
-      (e) => (e.type === "arrow" || e.type === "line") && (e.startBinding?.elementId === id || e.endBinding?.elementId === id),
+      (e) =>
+        (e.type === "arrow" || e.type === "line") &&
+        (e.startBinding?.elementId === id || e.endBinding?.elementId === id),
     );
   }
 
@@ -450,7 +500,9 @@ export class Scene {
 
   private removeBound(container: El, id: string) {
     if (!container.boundElements?.some((b: any) => b.id === id)) return;
-    this.mutate(container, { boundElements: container.boundElements.filter((b: any) => b.id !== id) });
+    this.mutate(container, {
+      boundElements: container.boundElements.filter((b: any) => b.id !== id),
+    });
   }
 
   private setLabel(container: El, label: string, author: Author) {
@@ -461,17 +513,24 @@ export class Scene {
       this.mutate(existing, { text: label, originalText: label, width: m.width, height: m.height });
     } else {
       const t = this.add(
-        this.textEl(label, { x: container.x, y: container.y, w: m.width, h: m.height }, author, fontSize, {
-          containerId: container.id,
-          frameId: container.frameId ?? null,
-        }),
+        this.textEl(
+          label,
+          { x: container.x, y: container.y, w: m.width, h: m.height },
+          author,
+          fontSize,
+          {
+            containerId: container.id,
+            frameId: container.frameId ?? null,
+          },
+        ),
       );
       this.addBound(container, { id: t.id, type: "text" });
     }
     if (container.type !== "arrow") {
       const w = Math.max(container.width, m.width + PAD);
       const h = Math.max(container.height, m.height + PAD);
-      if (w !== container.width || h !== container.height) this.moveNode(container, { x: container.x, y: container.y, w, h });
+      if (w !== container.width || h !== container.height)
+        this.moveNode(container, { x: container.x, y: container.y, w, h });
     }
     this.centerLabel(container);
   }
@@ -488,7 +547,8 @@ export class Scene {
       }
     }
     if (el.type === "frame") {
-      for (const k of this.live().filter((e) => e.frameId === el.id)) this.mutate(k, { frameId: null });
+      for (const k of this.live().filter((e) => e.frameId === el.id))
+        this.mutate(k, { frameId: null });
     }
   }
 
@@ -570,7 +630,11 @@ export class Scene {
     if (o.color !== undefined) this.mutate(el, { backgroundColor: COLORS[o.color] ?? o.color });
     if (o.dashed !== undefined) this.mutate(el, { strokeStyle: o.dashed ? "dashed" : "solid" });
     if (o.shape && SHAPE_TYPES.has(el.type)) {
-      this.mutate(el, { type: o.shape, roundness: o.shape === "rectangle" ? { type: 3 } : o.shape === "diamond" ? { type: 2 } : null });
+      this.mutate(el, {
+        type: o.shape,
+        roundness:
+          o.shape === "rectangle" ? { type: 3 } : o.shape === "diamond" ? { type: 2 } : null,
+      });
     }
     if (o.frame !== undefined) {
       const f = o.frame === null ? null : this.frameOf(o.frame);
@@ -578,15 +642,22 @@ export class Scene {
       const t = this.boundText(el);
       if (t) this.mutate(t, { frameId: f?.id ?? null });
       if (f && !o.move) {
-        const inside = el.x >= f.x && el.y >= f.y && el.x + el.width <= f.x + f.width && el.y + el.height <= f.y + f.height;
-        if (!inside) this.moveNode(el, this.place(undefined, el.width, el.height, f, new Set([el.id])));
+        const inside =
+          el.x >= f.x &&
+          el.y >= f.y &&
+          el.x + el.width <= f.x + f.width &&
+          el.y + el.height <= f.y + f.height;
+        if (!inside)
+          this.moveNode(el, this.place(undefined, el.width, el.height, f, new Set([el.id])));
       }
       if (f) this.fitFrame(f);
     }
     if (o.move || o.width || o.height) {
       const w = o.width ?? el.width;
       const h = o.height ?? el.height;
-      const box = o.move ? this.place(o.move, w, h, null, new Set([el.id])) : { x: el.x, y: el.y, w, h };
+      const box = o.move
+        ? this.place(o.move, w, h, null, new Set([el.id]))
+        : { x: el.x, y: el.y, w, h };
       this.moveNode(el, box);
       if (el.frameId) this.fitFrame(this.els.get(el.frameId)!);
     }
@@ -616,7 +687,9 @@ export class Scene {
     } else {
       box = this.place(o.place, o.width ?? 800, o.height ?? 500, null);
     }
-    const frame = this.add(this.base("frame", box, author, { name: o.name, strokeColor: "#bbb", roughness: 0 }));
+    const frame = this.add(
+      this.base("frame", box, author, { name: o.name, strokeColor: "#bbb", roughness: 0 }),
+    );
     for (const k of kids) {
       this.mutate(k, { frameId: frame.id });
       const t = this.boundText(k);
@@ -678,7 +751,9 @@ export class Scene {
   /** Auto-layout nodes with dagre. Scope: a frame (its children) or all top-level nodes. */
   layout(direction: "LR" | "TB", scopeFrame?: string) {
     const frame = this.frameOf(scopeFrame);
-    const nodes = this.live().filter((e) => this.isNode(e) && (frame ? e.frameId === frame.id : !e.frameId));
+    const nodes = this.live().filter(
+      (e) => this.isNode(e) && (frame ? e.frameId === frame.id : !e.frameId),
+    );
     if (!nodes.length) throw new Error("nothing to lay out");
     const ids = new Set(nodes.map((n) => n.id));
     const before = unionBox(nodes.map(boxOf))!;
@@ -686,11 +761,17 @@ export class Scene {
     g.setGraph({ rankdir: direction, nodesep: 60, ranksep: 120, marginx: 0, marginy: 0 });
     g.setDefaultEdgeLabel(() => ({}));
     for (const n of nodes) g.setNode(n.id, { width: n.width, height: n.height });
-    for (const e of this.graph()._edgesRaw) if (ids.has(e.fromId ?? "") && ids.has(e.toId ?? "")) g.setEdge(e.fromId!, e.toId!);
+    for (const e of this.graph()._edgesRaw)
+      if (ids.has(e.fromId ?? "") && ids.has(e.toId ?? "")) g.setEdge(e.fromId!, e.toId!);
     dagre.layout(g);
     for (const n of nodes) {
       const p = g.node(n.id);
-      this.moveNode(n, { x: Math.round(before.x + p.x - n.width / 2), y: Math.round(before.y + p.y - n.height / 2), w: n.width, h: n.height });
+      this.moveNode(n, {
+        x: Math.round(before.x + p.x - n.width / 2),
+        y: Math.round(before.y + p.y - n.height / 2),
+        w: n.width,
+        h: n.height,
+      });
     }
     if (frame) this.fitFrame(frame);
     return nodes.length;
@@ -700,7 +781,9 @@ export class Scene {
   addForeign(elements: El[], author: Author) {
     const live = elements
       .filter((e) => !e.isDeleted)
-      .sort((a, b) => ((a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0));
+      .sort((a, b) =>
+        (a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0,
+      );
     const u = unionBox(live.map(boxOf));
     if (!u) return 0;
     const target = this.place(undefined, u.w, u.h, null);
@@ -743,7 +826,8 @@ export class Scene {
     const live = this.live();
     const nodes = live.filter((e) => this.isNode(e));
     const frames = live.filter((e) => e.type === "frame");
-    const frameName = (id: string | null | undefined) => (id ? (this.els.get(id)?.name ?? id) : undefined);
+    const frameName = (id: string | null | undefined) =>
+      id ? (this.els.get(id)?.name ?? id) : undefined;
     const labelCounts = new Map<string, number>();
     for (const n of nodes) {
       const l = this.labelOf(n);
@@ -755,7 +839,13 @@ export class Scene {
       return l && labelCounts.get(l) === 1 ? l : `${l || e.type}#${e.id}`;
     };
     const hit = (p: { x: number; y: number }) =>
-      nodes.find((n) => p.x >= n.x - 25 && p.x <= n.x + n.width + 25 && p.y >= n.y - 25 && p.y <= n.y + n.height + 25);
+      nodes.find(
+        (n) =>
+          p.x >= n.x - 25 &&
+          p.x <= n.x + n.width + 25 &&
+          p.y >= n.y - 25 &&
+          p.y <= n.y + n.height + 25,
+      );
 
     const edges: {
       id: string;
@@ -768,7 +858,15 @@ export class Scene {
       both?: true;
       inferred?: true;
     }[] = [];
-    const sketches: { id: string; type: string; x: number; y: number; w: number; h: number; frame?: string }[] = [];
+    const sketches: {
+      id: string;
+      type: string;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      frame?: string;
+    }[] = [];
 
     for (const e of live) {
       if (e.type !== "arrow" && e.type !== "line") continue;
@@ -798,18 +896,41 @@ export class Scene {
           ...(inferred ? { inferred: true as const } : {}),
         });
       } else {
-        sketches.push({ id: e.id, type: e.type, x: Math.round(e.x), y: Math.round(e.y), w: Math.round(e.width), h: Math.round(e.height), frame: frameName(e.frameId) });
+        sketches.push({
+          id: e.id,
+          type: e.type,
+          x: Math.round(e.x),
+          y: Math.round(e.y),
+          w: Math.round(e.width),
+          h: Math.round(e.height),
+          frame: frameName(e.frameId),
+        });
       }
     }
     for (const e of live) {
       if (e.type === "freedraw" || e.type === "image") {
-        sketches.push({ id: e.id, type: e.type, x: Math.round(e.x), y: Math.round(e.y), w: Math.round(e.width), h: Math.round(e.height), frame: frameName(e.frameId) });
+        sketches.push({
+          id: e.id,
+          type: e.type,
+          x: Math.round(e.x),
+          y: Math.round(e.y),
+          w: Math.round(e.width),
+          h: Math.round(e.height),
+          frame: frameName(e.frameId),
+        });
       }
     }
 
     const sel = selection && selection.size ? selection : undefined;
     return {
-      frames: frames.map((f) => ({ id: f.id, name: f.name ?? "", x: Math.round(f.x), y: Math.round(f.y), w: Math.round(f.width), h: Math.round(f.height) })),
+      frames: frames.map((f) => ({
+        id: f.id,
+        name: f.name ?? "",
+        x: Math.round(f.x),
+        y: Math.round(f.y),
+        w: Math.round(f.width),
+        h: Math.round(f.height),
+      })),
       nodes: nodes.map((n) => ({
         id: n.id,
         label: this.labelOf(n),
@@ -819,11 +940,16 @@ export class Scene {
         w: Math.round(n.width),
         h: Math.round(n.height),
         ...(n.frameId ? { frame: frameName(n.frameId) } : {}),
-        ...(n.backgroundColor && n.backgroundColor !== "transparent" ? { color: COLOR_NAMES[n.backgroundColor] ?? n.backgroundColor } : {}),
+        ...(n.backgroundColor && n.backgroundColor !== "transparent"
+          ? { color: COLOR_NAMES[n.backgroundColor] ?? n.backgroundColor }
+          : {}),
         ...(n.customData?.author === "agent" ? { by: "agent" } : {}),
         ...(sel?.has(n.id) ? { selected: true } : {}),
       })),
-      edges: edges.map(({ fromId, toId, ...rest }) => ({ ...rest, ...(sel?.has(rest.id) ? { selected: true } : {}) })),
+      edges: edges.map(({ fromId: _fromId, toId: _toId, ...rest }) => ({
+        ...rest,
+        ...(sel?.has(rest.id) ? { selected: true } : {}),
+      })),
       notes: live
         .filter((e) => e.type === "text" && !e.containerId)
         .map((t) => ({

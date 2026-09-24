@@ -1,6 +1,13 @@
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { buildServer } from "./mcp.ts";
-import { createDiagram, listTemplates, room, saveAsTemplate, shareLink, verifyKey } from "./store.ts";
+import {
+  createDiagram,
+  listTemplates,
+  room,
+  saveAsTemplate,
+  shareLink,
+  verifyKey,
+} from "./store.ts";
 
 export { DiagramRoom } from "./room.ts";
 
@@ -17,11 +24,16 @@ export default {
         return await handler.fetch(request);
       }
 
-      if (path === "/api/templates" && request.method === "GET") return json(await listTemplates(env));
+      if (path === "/api/templates" && request.method === "GET")
+        return json(await listTemplates(env));
 
       if (path === "/api/diagrams" && request.method === "POST") {
         const body = (await request.json()) as { name?: string; template?: string };
-        const d = await createDiagram(env, body.name?.trim() || "Untitled", body.template || undefined);
+        const d = await createDiagram(
+          env,
+          body.name?.trim() || "Untitled",
+          body.template || undefined,
+        );
         return json({ ...d, link: shareLink(url.origin, d.id, d.key) });
       }
 
@@ -37,11 +49,14 @@ export default {
         if (sub === "" && request.method === "GET") return json({ id: row.id, name: row.name });
         if (sub === "/rename" && request.method === "POST") {
           const { name } = (await request.json()) as { name: string };
-          await env.DB.prepare("UPDATE diagrams SET name = ?, updated_at = ? WHERE id = ?").bind(name, Date.now(), id).run();
+          await env.DB.prepare("UPDATE diagrams SET name = ?, updated_at = ? WHERE id = ?")
+            .bind(name, Date.now(), id)
+            .run();
           await stub.rename(name);
           return json({ ok: true });
         }
-        if (sub === "/snapshots" && request.method === "GET") return json(await stub.listSnapshots());
+        if (sub === "/snapshots" && request.method === "GET")
+          return json(await stub.listSnapshots());
         if (sub === "/snapshots" && request.method === "POST") {
           const { name } = (await request.json()) as { name: string };
           return json(await stub.snapshot(name || "manual", "named"));
@@ -51,7 +66,10 @@ export default {
           return json(await stub.restore(snapshotId));
         }
         if (sub === "/template" && request.method === "POST") {
-          const { name, description } = (await request.json()) as { name: string; description?: string };
+          const { name, description } = (await request.json()) as {
+            name: string;
+            description?: string;
+          };
           return json(await saveAsTemplate(env, id, name, description));
         }
       }

@@ -44,12 +44,18 @@ export function Home() {
   return (
     <main className="home">
       <h1>System Design Canvas</h1>
-      <p className="muted">A shared Excalidraw canvas that you, your interviewer, and Claude edit together.</p>
+      <p className="muted">
+        A shared Excalidraw canvas that you, your interviewer, and Claude edit together.
+      </p>
 
       <section className="card">
         <h2>New diagram</h2>
         <form onSubmit={create} className="row">
-          <input placeholder="Name, e.g. Design Twitter" value={name} onChange={(e) => setName(e.target.value)} />
+          <input
+            placeholder="Name, e.g. Design Twitter"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
           <select value={template} onChange={(e) => setTemplate(e.target.value)}>
             <option value="">Blank</option>
             {templates.map((t) => (
@@ -64,7 +70,10 @@ export function Home() {
 
       <section className="card">
         <h2>Connect your agent</h2>
-        <p className="muted">Run once in your terminal. Then paste a diagram's share link to the agent ("join &lt;link&gt;").</p>
+        <p className="muted">
+          Run once in your terminal. Then paste a diagram's share link to the agent ("join
+          &lt;link&gt;").
+        </p>
         {setupCommands().map(({ client, cmd }) => (
           <CopyRow key={client} label={client} text={cmd} />
         ))}
@@ -72,7 +81,9 @@ export function Home() {
 
       <section className="card">
         <h2>Your diagrams</h2>
-        {items.length === 0 && <p className="muted">Nothing yet. Diagrams you create or open appear here.</p>}
+        {items.length === 0 && (
+          <p className="muted">Nothing yet. Diagrams you create or open appear here.</p>
+        )}
         <ul className="list">
           {items.map((d) => (
             <li key={d.id}>

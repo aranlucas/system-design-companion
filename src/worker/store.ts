@@ -18,7 +18,9 @@ export function ensureSchema(env: Env) {
         id TEXT PRIMARY KEY, diagram_id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL,
         created_at INTEGER NOT NULL, element_count INTEGER NOT NULL)`,
     ),
-    env.DB.prepare("CREATE INDEX IF NOT EXISTS snapshots_by_diagram ON snapshots (diagram_id, created_at)"),
+    env.DB.prepare(
+      "CREATE INDEX IF NOT EXISTS snapshots_by_diagram ON snapshots (diagram_id, created_at)",
+    ),
   ]).catch((e) => {
     schemaReady = null;
     throw e;
@@ -42,10 +44,16 @@ export interface DiagramRow {
   description: string | null;
 }
 
-export async function verifyKey(env: Env, id: string, key: string | null | undefined): Promise<DiagramRow | null> {
+export async function verifyKey(
+  env: Env,
+  id: string,
+  key: string | null | undefined,
+): Promise<DiagramRow | null> {
   if (!key) return null;
   await ensureSchema(env);
-  const row = await env.DB.prepare("SELECT id, name, is_template, description, key_hash FROM diagrams WHERE id = ?")
+  const row = await env.DB.prepare(
+    "SELECT id, name, is_template, description, key_hash FROM diagrams WHERE id = ?",
+  )
     .bind(id)
     .first<DiagramRow & { key_hash: string }>();
   if (!row || row.key_hash !== (await sha256(key))) return null;
@@ -65,7 +73,11 @@ export async function listTemplates(env: Env) {
   ).all<{ id: string; name: string; description: string | null }>();
   return [
     ...BUILTIN_TEMPLATES.map(({ id, name, description }) => ({ id, name, description })),
-    ...results.map((r) => ({ id: r.id, name: r.name, description: r.description ?? "saved template" })),
+    ...results.map((r) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description ?? "saved template",
+    })),
   ];
 }
 
@@ -94,7 +106,12 @@ export async function createDiagram(env: Env, name: string, template?: string) {
   return { id, key, name };
 }
 
-export async function saveAsTemplate(env: Env, sourceId: string, name: string, description?: string) {
+export async function saveAsTemplate(
+  env: Env,
+  sourceId: string,
+  name: string,
+  description?: string,
+) {
   await ensureSchema(env);
   const elements = await room(env, sourceId).getRaw();
   const id = "tpl" + newId().replace(/[_-]/g, "x");

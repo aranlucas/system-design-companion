@@ -5,8 +5,8 @@ A live Excalidraw canvas that you, your interviewer, and Claude Code edit togeth
 ## Run locally
 
 ```sh
-npm install
-npm run dev          # http://localhost:5173
+pnpm install
+pnpm dev          # http://localhost:5173
 ```
 
 1. Open http://localhost:5173, create a diagram (optionally from a template).
@@ -20,7 +20,7 @@ npm run dev          # http://localhost:5173
 ```sh
 npx wrangler d1 create system-design-companion   # paste database_id into wrangler.jsonc if not auto-provisioned
 npx wrangler r2 bucket create system-design-companion
-npm run deploy
+pnpm deploy
 ```
 
 Then `claude mcp add --transport http canvas https://<your-worker>.workers.dev/mcp` (or `codex mcp add canvas --url …/mcp`).
@@ -32,9 +32,10 @@ Then `claude mcp add --transport http canvas https://<your-worker>.workers.dev/m
 - Claude's elements are violet, and a toast says when Claude changed something.
 - MCP prompts: `review_design`, `suggest_next_step`, `estimate_capacity`. Resource: `rubric://system-design`.
 
-## Test
+## Checks
 
 ```sh
-npm run typecheck
+pnpm check                    # typecheck, Oxlint, Oxfmt
+pnpm format                   # apply Oxfmt
 node scripts/scene-smoke.ts      # scene engine smoke test
 ```

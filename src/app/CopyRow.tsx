@@ -8,7 +8,7 @@ export function CopyRow({ label, text }: { label?: string; text: string }) {
       <code className="cmd">{text}</code>
       <button
         onClick={() => {
-          navigator.clipboard.writeText(text);
+          void navigator.clipboard.writeText(text);
           setCopied(true);
           setTimeout(() => setCopied(false), 1500);
         }}

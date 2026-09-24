@@ -31,12 +31,15 @@ export class DiagramRoom extends DurableObject<Env> {
   private els = new Map<string, El>();
   private diagramId = "";
   private name = "Untitled";
-  private pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  private pending = new Map<
+    string,
+    { resolve: (v: unknown) => void; reject: (e: Error) => void }
+  >();
   private lastFocusAt = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    ctx.blockConcurrencyWhile(async () => {
+    void ctx.blockConcurrencyWhile(async () => {
       const sql = ctx.storage.sql;
       sql.exec("CREATE TABLE IF NOT EXISTS elements (id TEXT PRIMARY KEY, json TEXT NOT NULL)");
       sql.exec("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)");
@@ -61,7 +64,11 @@ export class DiagramRoom extends DurableObject<Env> {
   private persist(changed: El[]) {
     for (const el of changed) {
       this.els.set(el.id, el);
-      this.ctx.storage.sql.exec("INSERT OR REPLACE INTO elements (id, json) VALUES (?, ?)", el.id, JSON.stringify(el));
+      this.ctx.storage.sql.exec(
+        "INSERT OR REPLACE INTO elements (id, json) VALUES (?, ?)",
+        el.id,
+        JSON.stringify(el),
+      );
     }
   }
 
@@ -101,30 +108,45 @@ export class DiagramRoom extends DurableObject<Env> {
 
   /** All elements (incl. tombstones) in z-order; Excalidraw re-indexes anything out of order. */
   private ordered(): El[] {
-    return [...this.els.values()].sort((a, b) => ((a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0));
+    return [...this.els.values()].sort((a, b) =>
+      (a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0,
+    );
   }
 
   // ---------- WebSocket (tabs) ----------
 
   async fetch(request: Request): Promise<Response> {
-    if (request.headers.get("Upgrade") !== "websocket") return new Response("expected websocket", { status: 426 });
+    if (request.headers.get("Upgrade") !== "websocket")
+      return new Response("expected websocket", { status: 426 });
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({ selection: [], focusedAt: 0 } satisfies TabState);
-    server.send(JSON.stringify({ type: "init", elements: this.ordered(), name: this.name } satisfies ServerMessage));
+    server.send(
+      JSON.stringify({
+        type: "init",
+        elements: this.ordered(),
+        name: this.name,
+      } satisfies ServerMessage),
+    );
     this.broadcast({ type: "peers", count: this.ctx.getWebSockets().length });
     return new Response(null, { status: 101, webSocket: client });
   }
 
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
-    const msg = JSON.parse(typeof raw === "string" ? raw : new TextDecoder().decode(raw)) as ClientMessage;
+    const msg = JSON.parse(
+      typeof raw === "string" ? raw : new TextDecoder().decode(raw),
+    ) as ClientMessage;
     switch (msg.type) {
       case "update": {
         const accepted: El[] = [];
         for (const el of msg.elements) {
           const cur = this.els.get(el.id);
-          if (!cur || el.version > cur.version || (el.version === cur.version && el.versionNonce < cur.versionNonce)) {
+          if (
+            !cur ||
+            el.version > cur.version ||
+            (el.version === cur.version && el.versionNonce < cur.versionNonce)
+          ) {
             accepted.push(el);
           }
         }
@@ -137,7 +159,11 @@ export class DiagramRoom extends DurableObject<Env> {
       case "presence": {
         const prev = ws.deserializeAttachment() as TabState;
         const focusedAt = msg.focused ? Date.now() : prev.focusedAt;
-        ws.serializeAttachment({ selection: msg.selection, viewport: msg.viewport, focusedAt } satisfies TabState);
+        ws.serializeAttachment({
+          selection: msg.selection,
+          viewport: msg.viewport,
+          focusedAt,
+        } satisfies TabState);
         if (msg.focused && focusedAt - this.lastFocusAt > 1000) {
           this.lastFocusAt = focusedAt;
           this.setMeta("focusAt", String(focusedAt));
@@ -172,7 +198,10 @@ export class DiagramRoom extends DurableObject<Env> {
 
   private callTab<T>(method: TabRpcMethod, params: unknown): Promise<T> {
     const tab = this.primaryTab();
-    if (!tab) return Promise.reject(new Error("No canvas tab is open for this diagram. Ask the user to open the share link."));
+    if (!tab)
+      return Promise.reject(
+        new Error("No canvas tab is open for this diagram. Ask the user to open the share link."),
+      );
     const reqId = crypto.randomUUID();
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -191,7 +220,13 @@ export class DiagramRoom extends DurableObject<Env> {
 
   async info() {
     const live = [...this.els.values()].filter((e) => !e.isDeleted).length;
-    return { id: this.diagramId, name: this.name, elements: live, tabs: this.ctx.getWebSockets().length, focusedAt: this.lastFocusAt };
+    return {
+      id: this.diagramId,
+      name: this.name,
+      elements: live,
+      tabs: this.ctx.getWebSockets().length,
+      focusedAt: this.lastFocusAt,
+    };
   }
 
   async getGraph() {
@@ -254,8 +289,17 @@ export class DiagramRoom extends DurableObject<Env> {
 
   async snapshot(name: string, kind: "auto" | "named" = "named"): Promise<SnapshotMeta> {
     const elements = await this.getRaw();
-    const meta: SnapshotMeta = { id: crypto.randomUUID(), name, kind, createdAt: Date.now(), elements: elements.length };
-    await this.env.BUCKET.put(`snapshots/${this.diagramId}/${meta.id}.json`, JSON.stringify(elements));
+    const meta: SnapshotMeta = {
+      id: crypto.randomUUID(),
+      name,
+      kind,
+      createdAt: Date.now(),
+      elements: elements.length,
+    };
+    await this.env.BUCKET.put(
+      `snapshots/${this.diagramId}/${meta.id}.json`,
+      JSON.stringify(elements),
+    );
     await this.env.DB.prepare(
       "INSERT INTO snapshots (id, diagram_id, name, kind, created_at, element_count) VALUES (?, ?, ?, ?, ?, ?)",
     )

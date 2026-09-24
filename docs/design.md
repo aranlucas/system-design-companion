@@ -36,18 +36,18 @@ Tabs report `focus`, `selection` and `viewport` to their room. `get_selection` a
 
 ## MCP surface
 
-| Tool | Purpose |
-|---|---|
-| `join_session(diagram)` | Validate the link, return summary |
-| `create_diagram(name, template?)` | New diagram, returns its link (the handle) |
-| `get_scene(diagram, format)` | `graph` (nodes/edges/frames/notes/sketches) or `raw` |
-| `get_selection(diagram)` | Current human selection + viewport, as graph |
-| `get_screenshot(diagram, scope)` | PNG rendered by an open tab |
-| `apply_patch(ops[])` | Batched semantic ops |
-| `layout(direction, scope?)` | Explicit dagre auto-layout |
-| `import_mermaid(source)` | Rendered by the open tab, added as agent elements |
-| `snapshot(name)` / `list_snapshots()` / `restore(snapshot_id)` | Versions |
-| `list_templates()` / `save_as_template(name)` | Starter layouts |
+| Tool                                                           | Purpose                                              |
+| -------------------------------------------------------------- | ---------------------------------------------------- |
+| `join_session(diagram)`                                        | Validate the link, return summary                    |
+| `create_diagram(name, template?)`                              | New diagram, returns its link (the handle)           |
+| `get_scene(diagram, format)`                                   | `graph` (nodes/edges/frames/notes/sketches) or `raw` |
+| `get_selection(diagram)`                                       | Current human selection + viewport, as graph         |
+| `get_screenshot(diagram, scope)`                               | PNG rendered by an open tab                          |
+| `apply_patch(ops[])`                                           | Batched semantic ops                                 |
+| `layout(direction, scope?)`                                    | Explicit dagre auto-layout                           |
+| `import_mermaid(source)`                                       | Rendered by the open tab, added as agent elements    |
+| `snapshot(name)` / `list_snapshots()` / `restore(snapshot_id)` | Versions                                             |
+| `list_templates()` / `save_as_template(name)`                  | Starter layouts                                      |
 
 **Prompts**: `review_design`, `suggest_next_step`, `estimate_capacity`. **Resource**: `rubric://system-design`.
 

@@ -19,7 +19,9 @@ Workflow:
 3. Edit with apply_patch: batch related ops in one call. Address nodes by id, unique label, or a ref defined earlier in the same batch. Use placement hints instead of coordinates. Every batch is auto-snapshotted and tinted violet, so the user can undo with restore.
 4. When asked for feedback, reply in chat. Only annotate the canvas (add_note) when asked. Keep labels short; put detail in notes.`;
 
-const target = z.string().describe("element id, unique label (case-insensitive), or a ref from this batch");
+const target = z
+  .string()
+  .describe("element id, unique label (case-insensitive), or a ref from this batch");
 const placement = z
   .object({
     right_of: target.optional(),
@@ -40,7 +42,10 @@ const opSchema = z.discriminatedUnion("op", [
     op: z.literal("add_node"),
     ref: z.string().optional().describe("name to refer to this node later in the same batch"),
     label: z.string(),
-    shape: z.enum(SHAPES).optional().describe("rectangle (default: services), ellipse (datastores/clients), diamond (decisions)"),
+    shape: z
+      .enum(SHAPES)
+      .optional()
+      .describe("rectangle (default: services), ellipse (datastores/clients), diamond (decisions)"),
     color: color.optional(),
     width: z.number().optional(),
     height: z.number().optional(),
@@ -88,9 +93,13 @@ const opSchema = z.discriminatedUnion("op", [
   }),
 ]);
 
-const diagramArg = z.string().describe("the diagram's share link (…/d/<id>?k=<key>) as given by the user or create_diagram");
+const diagramArg = z
+  .string()
+  .describe("the diagram's share link (…/d/<id>?k=<key>) as given by the user or create_diagram");
 
-const text = (v: unknown) => ({ content: [{ type: "text" as const, text: typeof v === "string" ? v : JSON.stringify(v) }] });
+const text = (v: unknown) => ({
+  content: [{ type: "text" as const, text: typeof v === "string" ? v : JSON.stringify(v) }],
+});
 const fail = (msg: string) => ({ content: [{ type: "text" as const, text: msg }], isError: true });
 
 export function buildServer(env: Env, ctx: McpRequestContext) {
@@ -112,11 +121,13 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
   }
 
   const guard =
-    <A,>(fn: (a: A) => Promise<unknown>) =>
+    <A>(fn: (a: A) => Promise<unknown>) =>
     async (a: A) => {
       try {
         const out = await fn(a);
-        return out && typeof out === "object" && "content" in (out as object) ? (out as ReturnType<typeof text>) : text(out);
+        return out && typeof out === "object" && "content" in (out as object)
+          ? (out as ReturnType<typeof text>)
+          : text(out);
       } catch (e) {
         return fail((e as Error).message);
       }
@@ -139,7 +150,9 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
         diagram: row.name,
         elements: info.elements,
         tabsOpen: info.tabs,
-        note: info.tabs ? "The user has the canvas open." : "No canvas tab is open; screenshots and mermaid import need one.",
+        note: info.tabs
+          ? "The user has the canvas open."
+          : "No canvas tab is open; screenshots and mermaid import need one.",
       };
     }),
   );
@@ -147,13 +160,21 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
   server.registerTool(
     "create_diagram",
     {
-      description: "Create a new diagram (optionally from a template), join it, and return its share link for the user to open.",
-      inputSchema: z.object({ name: z.string(), template: z.string().optional().describe("template id from list_templates") }),
+      description:
+        "Create a new diagram (optionally from a template), join it, and return its share link for the user to open.",
+      inputSchema: z.object({
+        name: z.string(),
+        template: z.string().optional().describe("template id from list_templates"),
+      }),
     },
     guard(async ({ name, template }: { name: string; template?: string }) => {
       const d = await createDiagram(env, name, template);
       const link = shareLink(origin, d.id, d.key);
-      return { name: d.name, diagram: link, note: "Pass this link as `diagram` to other tools, and give it to the user to open." };
+      return {
+        name: d.name,
+        diagram: link,
+        note: "Pass this link as `diagram` to other tools, and give it to the user to open.",
+      };
     }),
   );
 
@@ -176,20 +197,29 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
   server.registerTool(
     "get_selection",
     {
-      description: "What the user currently has selected in their canvas tab (and their viewport). Use this to resolve 'this', 'these', 'here'.",
+      description:
+        "What the user currently has selected in their canvas tab (and their viewport). Use this to resolve 'this', 'these', 'here'.",
       inputSchema: z.object({ diagram: diagramArg }),
       annotations: { readOnlyHint: true },
     },
-    guard(async ({ diagram }: { diagram: string }) => room(env, (await pick(diagram)).id).getSelection()),
+    guard(async ({ diagram }: { diagram: string }) =>
+      room(env, (await pick(diagram)).id).getSelection(),
+    ),
   );
 
   server.registerTool(
     "get_screenshot",
     {
-      description: "PNG of the canvas rendered by the user's open tab. Use for visual review, freehand sketches, or checking layout after edits.",
+      description:
+        "PNG of the canvas rendered by the user's open tab. Use for visual review, freehand sketches, or checking layout after edits.",
       inputSchema: z.object({
         diagram: diagramArg,
-        element_ids: z.array(z.string()).optional().describe("limit to these elements (e.g. a frame and its contents); default whole canvas"),
+        element_ids: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "limit to these elements (e.g. a frame and its contents); default whole canvas",
+          ),
       }),
       annotations: { readOnlyHint: true },
     },
@@ -208,39 +238,61 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
         "Apply a batch of semantic edits. Ops run in order; later ops can use refs from earlier ones. A snapshot is taken first (undo with restore). Returns per-op results; failed ops don't abort the batch.",
       inputSchema: z.object({ diagram: diagramArg, ops: z.array(opSchema).min(1) }),
     },
-    guard(async ({ diagram, ops }: { diagram: string; ops: Op[] }) => room(env, (await pick(diagram)).id).applyPatch(ops, "agent")),
+    guard(async ({ diagram, ops }: { diagram: string; ops: Op[] }) =>
+      room(env, (await pick(diagram)).id).applyPatch(ops, "agent"),
+    ),
   );
 
   server.registerTool(
     "layout",
     {
-      description: "Auto-arrange nodes with a layered layout. Only call when the user asks to tidy up: it moves their placements.",
+      description:
+        "Auto-arrange nodes with a layered layout. Only call when the user asks to tidy up: it moves their placements.",
       inputSchema: z.object({
         diagram: diagramArg,
         direction: z.enum(["LR", "TB"]).optional(),
-        frame: z.string().optional().describe("only lay out this frame's nodes; default: all nodes not in a frame"),
+        frame: z
+          .string()
+          .optional()
+          .describe("only lay out this frame's nodes; default: all nodes not in a frame"),
       }),
     },
-    guard(async ({ diagram, direction, frame }: { diagram: string; direction?: "LR" | "TB"; frame?: string }) =>
-      room(env, (await pick(diagram)).id).layout(direction ?? "LR", frame),
+    guard(
+      async ({
+        diagram,
+        direction,
+        frame,
+      }: {
+        diagram: string;
+        direction?: "LR" | "TB";
+        frame?: string;
+      }) => room(env, (await pick(diagram)).id).layout(direction ?? "LR", frame),
     ),
   );
 
   server.registerTool(
     "import_mermaid",
     {
-      description: "Draw a Mermaid flowchart/sequence diagram onto free canvas space (rendered by the user's tab). Good for sketching many nodes at once.",
+      description:
+        "Draw a Mermaid flowchart/sequence diagram onto free canvas space (rendered by the user's tab). Good for sketching many nodes at once.",
       inputSchema: z.object({ diagram: diagramArg, source: z.string() }),
     },
-    guard(async ({ diagram, source }: { diagram: string; source: string }) => room(env, (await pick(diagram)).id).importMermaid(source)),
+    guard(async ({ diagram, source }: { diagram: string; source: string }) =>
+      room(env, (await pick(diagram)).id).importMermaid(source),
+    ),
   );
 
   // ---------- versions & templates ----------
 
   server.registerTool(
     "snapshot",
-    { description: "Save a named version of the diagram.", inputSchema: z.object({ diagram: diagramArg, name: z.string() }) },
-    guard(async ({ diagram, name }: { diagram: string; name: string }) => room(env, (await pick(diagram)).id).snapshot(name, "named")),
+    {
+      description: "Save a named version of the diagram.",
+      inputSchema: z.object({ diagram: diagramArg, name: z.string() }),
+    },
+    guard(async ({ diagram, name }: { diagram: string; name: string }) =>
+      room(env, (await pick(diagram)).id).snapshot(name, "named"),
+    ),
   );
 
   server.registerTool(
@@ -250,13 +302,16 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       inputSchema: z.object({ diagram: diagramArg }),
       annotations: { readOnlyHint: true },
     },
-    guard(async ({ diagram }: { diagram: string }) => room(env, (await pick(diagram)).id).listSnapshots()),
+    guard(async ({ diagram }: { diagram: string }) =>
+      room(env, (await pick(diagram)).id).listSnapshots(),
+    ),
   );
 
   server.registerTool(
     "restore",
     {
-      description: "Restore the diagram to a snapshot (itself snapshotted first, so restore is undoable).",
+      description:
+        "Restore the diagram to a snapshot (itself snapshotted first, so restore is undoable).",
       inputSchema: z.object({ diagram: diagramArg, snapshot_id: z.string() }),
     },
     guard(async ({ diagram, snapshot_id }: { diagram: string; snapshot_id: string }) =>
@@ -266,7 +321,11 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
 
   server.registerTool(
     "list_templates",
-    { description: "Starter layouts usable with create_diagram.", inputSchema: z.object({}), annotations: { readOnlyHint: true } },
+    {
+      description: "Starter layouts usable with create_diagram.",
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true },
+    },
     guard(async () => listTemplates(env)),
   );
 
@@ -274,10 +333,22 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
     "save_as_template",
     {
       description: "Save the current diagram as a reusable template.",
-      inputSchema: z.object({ diagram: diagramArg, name: z.string(), description: z.string().optional() }),
+      inputSchema: z.object({
+        diagram: diagramArg,
+        name: z.string(),
+        description: z.string().optional(),
+      }),
     },
-    guard(async ({ diagram, name, description }: { diagram: string; name: string; description?: string }) =>
-      saveAsTemplate(env, (await pick(diagram)).id, name, description),
+    guard(
+      async ({
+        diagram,
+        name,
+        description,
+      }: {
+        diagram: string;
+        name: string;
+        description?: string;
+      }) => saveAsTemplate(env, (await pick(diagram)).id, name, description),
     ),
   );
 
@@ -287,16 +358,22 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
     "rubric",
     "rubric://system-design",
     { title: "System design interview rubric", mimeType: "text/markdown" },
-    async (uri: URL) => ({ contents: [{ uri: uri.href, mimeType: "text/markdown", text: RUBRIC }] }),
+    async (uri: URL) => ({
+      contents: [{ uri: uri.href, mimeType: "text/markdown", text: RUBRIC }],
+    }),
   );
 
-  const userMsg = (t: string) => ({ messages: [{ role: "user" as const, content: { type: "text" as const, text: t } }] });
+  const userMsg = (t: string) => ({
+    messages: [{ role: "user" as const, content: { type: "text" as const, text: t } }],
+  });
 
   server.registerPrompt(
     "review_design",
     {
       description: "Critique the current diagram against the system design rubric.",
-      argsSchema: z.object({ focus: z.string().optional().describe("e.g. 'scaling the write path'") }),
+      argsSchema: z.object({
+        focus: z.string().optional().describe("e.g. 'scaling the write path'"),
+      }),
     },
     ({ focus }: { focus?: string }) =>
       userMsg(`Review my system design on the shared canvas${focus ? `, focusing on: ${focus}` : ""}.
@@ -308,9 +385,14 @@ Do not edit the canvas unless I ask.`),
 
   server.registerPrompt(
     "suggest_next_step",
-    { description: "What to draw or discuss next, given the diagram so far.", argsSchema: z.object({}) },
+    {
+      description: "What to draw or discuss next, given the diagram so far.",
+      argsSchema: z.object({}),
+    },
     () =>
-      userMsg(`Look at the canvas (get_scene; include my selection) and tell me the single most valuable next step in this system design interview, in 2-3 sentences, plus the one-line talking point I should say out loud. Offer (don't apply) a concrete apply_patch if it involves drawing.`),
+      userMsg(
+        `Look at the canvas (get_scene; include my selection) and tell me the single most valuable next step in this system design interview, in 2-3 sentences, plus the one-line talking point I should say out loud. Offer (don't apply) a concrete apply_patch if it involves drawing.`,
+      ),
   );
 
   server.registerPrompt(

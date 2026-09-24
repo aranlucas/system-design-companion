@@ -9,7 +9,13 @@ import {
 import "@excalidraw/excalidraw/index.css";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClientMessage, El, MermaidParams, ScreenshotParams, ServerMessage } from "../shared/protocol.ts";
+import type {
+  ClientMessage,
+  El,
+  MermaidParams,
+  ScreenshotParams,
+  ServerMessage,
+} from "../shared/protocol.ts";
 import { CopyRow } from "./CopyRow.tsx";
 import { linkFor, remember, setupCommands } from "./local.ts";
 
@@ -58,7 +64,9 @@ export function Canvas({ id, k }: { id: string; k: string }) {
     const a = apiRef.current;
     if (!a) return;
     const st = a.getAppState();
-    const selection = Object.keys(st.selectedElementIds).filter((k) => st.selectedElementIds[k]);
+    const selection = Object.keys(st.selectedElementIds).filter(
+      (key) => st.selectedElementIds[key],
+    );
     const viewport = {
       x: Math.round(-st.scrollX),
       y: Math.round(-st.scrollY),
@@ -85,19 +93,32 @@ export function Canvas({ id, k }: { id: string; k: string }) {
         if (elementIds?.length) {
           const want = new Set(elementIds);
           elements = elements.filter(
-            (e) => want.has(e.id) || (e.frameId && want.has(e.frameId)) || ("containerId" in e && e.containerId && want.has(e.containerId)),
+            (e) =>
+              want.has(e.id) ||
+              (e.frameId && want.has(e.frameId)) ||
+              ("containerId" in e && e.containerId && want.has(e.containerId)),
           );
         }
         if (!elements.length) throw new Error("nothing to render");
         const blob = await exportToBlob({
           elements,
-          appState: { ...a.getAppState(), exportBackground: true, exportWithDarkMode: false, viewBackgroundColor: "#ffffff" },
+          appState: {
+            ...a.getAppState(),
+            exportBackground: true,
+            exportWithDarkMode: false,
+            viewBackgroundColor: "#ffffff",
+          },
           files: a.getFiles(),
           mimeType: "image/png",
           maxWidthOrHeight: 1600,
           exportPadding: 24,
         });
-        send({ type: "rpc_result", reqId: msg.reqId, ok: true, data: { base64: await blobToBase64(blob), mimeType: "image/png" } });
+        send({
+          type: "rpc_result",
+          reqId: msg.reqId,
+          ok: true,
+          data: { base64: await blobToBase64(blob), mimeType: "image/png" },
+        });
       } else if (msg.method === "mermaid") {
         const { source } = msg.params as MermaidParams;
         const { parseMermaidToExcalidraw } = await import("@excalidraw/mermaid-to-excalidraw");
@@ -137,17 +158,28 @@ export function Canvas({ id, k }: { id: string; k: string }) {
           remember({ id, key: k, name: msg.name });
           const remote = restoreElements(msg.elements as any, null);
           const local = api.getSceneElementsIncludingDeleted();
-          const merged = local.length ? reconcileElements(local, remote as any, api.getAppState()) : remote;
+          const merged = local.length
+            ? reconcileElements(local, remote as any, api.getAppState())
+            : remote;
           for (const e of msg.elements) synced.current.set(e.id, e.version);
           api.updateScene({ elements: merged, captureUpdate: CaptureUpdateAction.NEVER });
-          if (!local.length) api.scrollToContent(undefined, { fitToViewport: true, viewportZoomFactor: 0.8 });
+          if (!local.length)
+            api.scrollToContent(undefined, { fitToViewport: true, viewportZoomFactor: 0.8 });
           // Push anything drawn while offline.
           scheduleSend();
         } else if (msg.type === "update") {
-          const merged = reconcileElements(api.getSceneElementsIncludingDeleted(), msg.elements as any, api.getAppState());
-          for (const e of msg.elements) synced.current.set(e.id, Math.max(e.version, synced.current.get(e.id) ?? 0));
+          const merged = reconcileElements(
+            api.getSceneElementsIncludingDeleted(),
+            msg.elements as any,
+            api.getAppState(),
+          );
+          for (const e of msg.elements)
+            synced.current.set(e.id, Math.max(e.version, synced.current.get(e.id) ?? 0));
           api.updateScene({ elements: merged, captureUpdate: CaptureUpdateAction.NEVER });
-          if (msg.origin === "agent") flash(`Claude updated ${msg.elements.length} element${msg.elements.length === 1 ? "" : "s"}`);
+          if (msg.origin === "agent")
+            flash(
+              `Claude updated ${msg.elements.length} element${msg.elements.length === 1 ? "" : "s"}`,
+            );
         } else if (msg.type === "rpc") {
           void handleRpc(msg);
         } else if (msg.type === "peers") {
@@ -198,7 +230,7 @@ export function Canvas({ id, k }: { id: string; k: string }) {
 
   const shareLink = linkFor(id, k);
   const copy = (text: string, what: string) => {
-    navigator.clipboard.writeText(text);
+    void navigator.clipboard.writeText(text);
     flash(`${what} copied`);
   };
 
@@ -219,12 +251,18 @@ export function Canvas({ id, k }: { id: string; k: string }) {
             </span>
             <span className={`dot ${status}`} title={status} />
             <span className="muted">{peers} here</span>
-            <button onClick={() => setPanel(panel === "versions" ? null : "versions")}>Versions</button>
-            <button onClick={() => setPanel(panel === "share" ? null : "share")}>Share / Agent</button>
+            <button onClick={() => setPanel(panel === "versions" ? null : "versions")}>
+              Versions
+            </button>
+            <button onClick={() => setPanel(panel === "share" ? null : "share")}>
+              Share / Agent
+            </button>
           </div>
         )}
       />
-      {panel === "versions" && <VersionsPanel id={id} k={k} onClose={() => setPanel(null)} flash={flash} />}
+      {panel === "versions" && (
+        <VersionsPanel id={id} k={k} onClose={() => setPanel(null)} flash={flash} />
+      )}
       {panel === "share" && (
         <div className="panel">
           <header>
@@ -245,7 +283,9 @@ export function Canvas({ id, k }: { id: string; k: string }) {
           <p className="muted">Then tell the agent:</p>
           <div className="row">
             <code className="cmd">join {shareLink}</code>
-            <button onClick={() => copy(`Join my system design canvas: ${shareLink}`, "Prompt")}>Copy</button>
+            <button onClick={() => copy(`Join my system design canvas: ${shareLink}`, "Prompt")}>
+              Copy
+            </button>
           </div>
           <p className="muted">
             <a href="/">All diagrams →</a>
@@ -257,7 +297,17 @@ export function Canvas({ id, k }: { id: string; k: string }) {
   );
 }
 
-function VersionsPanel({ id, k, onClose, flash }: { id: string; k: string; onClose: () => void; flash: (m: string) => void }) {
+function VersionsPanel({
+  id,
+  k,
+  onClose,
+  flash,
+}: {
+  id: string;
+  k: string;
+  onClose: () => void;
+  flash: (m: string) => void;
+}) {
   const [snaps, setSnaps] = useState<Snapshot[] | null>(null);
   const [label, setLabel] = useState("");
   const q = `?k=${encodeURIComponent(k)}`;
@@ -271,9 +321,11 @@ function VersionsPanel({ id, k, onClose, flash }: { id: string; k: string; onClo
   }, []);
 
   const post = (path: string, body: unknown) =>
-    fetch(`/api/d/${id}${path}${q}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) =>
-      r.json(),
-    );
+    fetch(`/api/d/${id}${path}${q}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
 
   return (
     <div className="panel">
@@ -293,14 +345,20 @@ function VersionsPanel({ id, k, onClose, flash }: { id: string; k: string; onClo
           void load();
         }}
       >
-        <input placeholder="Name this version" value={label} onChange={(e) => setLabel(e.target.value)} />
+        <input
+          placeholder="Name this version"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+        />
         <button>Save</button>
       </form>
       <form
         className="row"
         onSubmit={async (e) => {
           e.preventDefault();
-          const input = (e.currentTarget.elements.namedItem("tpl") as HTMLInputElement).value.trim();
+          const input = (
+            e.currentTarget.elements.namedItem("tpl") as HTMLInputElement
+          ).value.trim();
           if (!input) return;
           await post("/template", { name: input });
           flash("Saved as template");
@@ -312,7 +370,9 @@ function VersionsPanel({ id, k, onClose, flash }: { id: string; k: string; onClo
       </form>
       <ul className="list snaps">
         {snaps === null && <li className="muted">Loading…</li>}
-        {snaps?.length === 0 && <li className="muted">No versions yet. Claude's edits are auto-saved here first.</li>}
+        {snaps?.length === 0 && (
+          <li className="muted">No versions yet. Claude's edits are auto-saved here first.</li>
+        )}
         {snaps?.map((s) => (
           <li key={s.id}>
             <span>

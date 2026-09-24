@@ -6,13 +6,19 @@
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/ws/*", "/mcp"]
+    "run_worker_first": ["/api/*", "/ws/*", "/mcp"],
   },
   "durable_objects": {
-    "bindings": [{ "name": "ROOM", "class_name": "DiagramRoom" }]
+    "bindings": [{ "name": "ROOM", "class_name": "DiagramRoom" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DiagramRoom"] }],
-  "d1_databases": [{ "binding": "DB", "database_name": "system-design-companion", "database_id": "821bb52f-1ad9-4534-9db0-09232af6e753" }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "system-design-companion",
+      "database_id": "821bb52f-1ad9-4534-9db0-09232af6e753",
+    },
+  ],
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "system-design-companion" }],
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
 }

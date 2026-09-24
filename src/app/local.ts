@@ -32,7 +32,10 @@ export function remember(e: Omit<LibraryEntry, "openedAt">) {
 }
 
 export function forget(id: string) {
-  write(LIB, library().filter((x) => x.id !== id));
+  write(
+    LIB,
+    library().filter((x) => x.id !== id),
+  );
 }
 
 export const mcpUrl = () => `${location.origin}/mcp`;
