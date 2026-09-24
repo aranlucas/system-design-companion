@@ -4,6 +4,8 @@
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
+  // Cloudflare's git builds run a bare `wrangler deploy`, so build the client, view and worker here.
+  "build": { "command": "pnpm build:view && vite build" },
   "assets": {
     "directory": "./dist/client",
     "binding": "ASSETS",
