@@ -65,6 +65,8 @@ export default {
           const { snapshotId } = (await request.json()) as { snapshotId: string };
           return json(await stub.restore(snapshotId));
         }
+        if (sub === "/tidy" && request.method === "POST")
+          return json(await stub.tidy(undefined, "system"));
         if (sub === "/template" && request.method === "POST") {
           const { name, description } = (await request.json()) as {
             name: string;

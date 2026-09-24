@@ -51,6 +51,11 @@ Tabs report `focus`, `selection` and `viewport` to their room. `get_selection` a
 
 **Prompts**: `review_design`, `suggest_next_step`, `estimate_capacity`. **Resource**: `rubric://system-design`.
 
+## Formatting without overriding
+
+- **Prevention on agent edits**: notes are word-wrapped at about 64 characters. New nodes and notes join the frame of whatever they are placed relative to, or the frame they land inside. Moving a frame moves its contents. A frame that grows pushes overlapping frames right or down, moving each as a block.
+- **`tidy`** (MCP tool, **Tidy** button, and automatically on the frames each agent patch touched): attach loose items to the frame they sit in, wrap over-long notes, snap nearly-aligned boxes onto the largest box in the row or column, separate overlaps with the smallest push, grow frames to fit, and pull overlapping frames apart. It never changes connections, labels, colours or relative order. It is idempotent: a second run changes nothing. It is snapshotted first, and the full dagre `layout` stays opt-in.
+
 ## Deferred (post-interview)
 
 In-room agent with chat panel and push reactions; anchored comment threads; GitHub OAuth; proposal/ghost layer; server-side lint.

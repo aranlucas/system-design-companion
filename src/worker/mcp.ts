@@ -1,5 +1,6 @@
 import { McpServer, type McpRequestContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
+import { COMPONENT_KINDS, COMPONENTS } from "../shared/components.ts";
 import { SHAPES, type Op } from "./scene.ts";
 import { RUBRIC } from "./rubric.ts";
 import {
@@ -16,8 +17,9 @@ const INSTRUCTIONS = `Collaborative Excalidraw canvas for system design. A human
 Workflow:
 1. Every diagram tool takes \`diagram\`: the canvas share link (…/d/<id>?k=<key>). If you don't have one, ask the user for it, or call create_diagram. Call join_session once to validate it and get an overview, then keep passing the same link.
 2. Read before you write: get_scene (semantic graph) and get_selection ("this"/"these" means the user's selection). Use get_screenshot when layout, freehand sketches, or visual clarity matter.
-3. Edit with apply_patch: batch related ops in one call. Address nodes by id, unique label, or a ref defined earlier in the same batch. Use placement hints instead of coordinates. Every batch is auto-snapshotted and tinted violet, so the user can undo with restore.
-4. When asked for feedback, reply in chat. Only annotate the canvas (add_note) when asked. Keep labels short; put detail in notes.`;
+3. Edit with apply_patch: batch related ops in one call. Address nodes by id, unique label, or a ref defined earlier in the same batch. Use placement hints instead of coordinates. Prefer add_node with a standard \`kind\` (sql_db, cache, queue, load_balancer, …) so colours stay consistent. Every batch is auto-snapshotted and tinted violet, so the user can undo with restore.
+4. Structure: put content inside frames (pass \`frame\`, or place relative to something already in the frame). Keep labels short; notes are word-wrapped automatically. Use tidy when things look cluttered; use layout only when asked to re-arrange.
+5. When asked for feedback, reply in chat. Only annotate the canvas (add_note) when asked. Keep labels short; put detail in notes.`;
 
 const target = z
   .string()
@@ -41,7 +43,16 @@ const opSchema = z.discriminatedUnion("op", [
   z.object({
     op: z.literal("add_node"),
     ref: z.string().optional().describe("name to refer to this node later in the same batch"),
-    label: z.string(),
+    kind: z
+      .enum(COMPONENT_KINDS)
+      .optional()
+      .describe(
+        "standard component: sets default label, shape and role colour (see components://catalog)",
+      ),
+    label: z
+      .string()
+      .optional()
+      .describe("required unless kind is given; e.g. kind=sql_db, label='Orders DB'"),
     shape: z
       .enum(SHAPES)
       .optional()
@@ -244,10 +255,25 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
   );
 
   server.registerTool(
+    "tidy",
+    {
+      description:
+        "Non-destructive cleanup: attach loose items to the frame they sit in, wrap over-long notes, snap nearly-aligned boxes, push apart overlaps with minimal moves, fit frames and separate overlapping frames. Never changes connections, labels or relative order. Snapshotted first. (apply_patch already tidies the frames it touches.)",
+      inputSchema: z.object({
+        diagram: diagramArg,
+        frame: z.string().optional().describe("only tidy this frame; default: whole diagram"),
+      }),
+    },
+    guard(async ({ diagram, frame }: { diagram: string; frame?: string }) =>
+      room(env, (await pick(diagram)).id).tidy(frame),
+    ),
+  );
+
+  server.registerTool(
     "layout",
     {
       description:
-        "Auto-arrange nodes with a layered layout. Only call when the user asks to tidy up: it moves their placements.",
+        "Full re-layout (layered graph) that moves every node in scope. Only when the user explicitly asks to re-arrange; prefer tidy for cleanup.",
       inputSchema: z.object({
         diagram: diagramArg,
         direction: z.enum(["LR", "TB"]).optional(),
@@ -353,6 +379,23 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
   );
 
   // ---------- review support ----------
+
+  server.registerResource(
+    "components",
+    "components://catalog",
+    { title: "Standard system design components", mimeType: "application/json" },
+    async (uri: URL) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "application/json",
+          text: JSON.stringify(
+            COMPONENTS.map(({ kind, label, shape, group }) => ({ kind, label, shape, group })),
+          ),
+        },
+      ],
+    }),
+  );
 
   server.registerResource(
     "rubric",

@@ -1,6 +1,7 @@
 // Scene engine: semantic ops ⇄ Excalidraw elements. Pure logic, no Workers APIs.
 import dagre from "@dagrejs/dagre";
 import { generateKeyBetween } from "fractional-indexing";
+import { componentByKind } from "../shared/components.ts";
 import { AGENT_STROKE, type El } from "../shared/protocol.ts";
 
 export type Author = "agent" | "human" | "template";
@@ -36,7 +37,8 @@ export type Op =
   | {
       op: "add_node";
       ref?: string;
-      label: string;
+      kind?: string;
+      label?: string;
       shape?: Shape;
       color?: string;
       width?: number;
@@ -111,6 +113,42 @@ export function newId(): string {
   return s;
 }
 
+const NOTE_WRAP = 64; // chars per line for notes the agent writes
+const FRAME_GAP = 80;
+
+/** Word-wrap long lines, keeping list markers as a hanging indent. */
+export function wrapText(text: string, max = NOTE_WRAP): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      if (line.length <= max) return line;
+      const lead = line.match(/^\s*(?:[-*•]|\d+[.)])?\s*/)?.[0] ?? "";
+      const hang = " ".repeat(lead.length);
+      const out: string[] = [];
+      let cur = lead;
+      let empty = true;
+      for (const w of line.slice(lead.length).split(/\s+/).filter(Boolean)) {
+        if (!empty && cur.length + 1 + w.length > max) {
+          out.push(cur);
+          cur = hang + w;
+        } else cur = empty ? cur + w : `${cur} ${w}`;
+        empty = false;
+      }
+      out.push(cur);
+      return out.join("\n");
+    })
+    .join("\n");
+}
+
+export interface TidyStats {
+  bound: number;
+  adopted: number;
+  wrapped: number;
+  aligned: number;
+  separated: number;
+  framesMoved: number;
+}
+
 export function measureText(text: string, fontSize: number) {
   const lines = text.split("\n");
   const longest = Math.max(...lines.map((l) => l.length), 1);
@@ -150,6 +188,7 @@ export class Scene {
   private changed = new Set<string>();
   private refs = new Map<string, string>();
   private lastPlaced: string | null = null;
+  private grownFrames = new Set<string>();
 
   constructor(elements: Iterable<El>) {
     this.els = new Map([...elements].map((e) => [e.id, e]));
@@ -166,6 +205,7 @@ export class Scene {
   }
 
   changedElements(): El[] {
+    this.enforceBindings();
     this.fixLabelOrder();
     return [...this.changed]
       .map((id) => this.els.get(id)!)
@@ -173,6 +213,21 @@ export class Scene {
       .sort((a, b) =>
         (a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0,
       );
+  }
+
+  /**
+   * Invariant: a bound arrow's geometry is derived from the shapes it is bound to.
+   * Re-route every arrow that changed or whose bound shape changed, whatever code path moved things.
+   */
+  enforceBindings() {
+    for (const a of this.live()) {
+      if (a.type !== "arrow" || (!a.startBinding && !a.endBinding)) continue;
+      const touched =
+        this.changed.has(a.id) ||
+        (a.startBinding && this.changed.has(a.startBinding.elementId)) ||
+        (a.endBinding && this.changed.has(a.endBinding.elementId));
+      if (touched) this.routeArrow(a);
+    }
   }
 
   /** Excalidraw invariant: a bound text must sit above its container in z-order. */
@@ -428,7 +483,85 @@ export class Scene {
       nb !== frame.y + frame.height
     ) {
       this.mutate(frame, { x: nx, y: ny, width: nr - nx, height: nb - ny });
+      this.grownFrames.add(frame.id);
     }
+  }
+
+  /** Smallest frame containing the centre of `b`. */
+  private frameAt(b: Box, exclude?: string): El | null {
+    const c = center(b);
+    const hits = this.live()
+      .filter(
+        (f) =>
+          f.type === "frame" &&
+          f.id !== exclude &&
+          c.x >= f.x &&
+          c.x <= f.x + f.width &&
+          c.y >= f.y &&
+          c.y <= f.y + f.height,
+      )
+      .sort((a, b) => a.width * a.height - b.width * b.height);
+    return hits[0] ?? null;
+  }
+
+  /** Frame to use for a new element: explicit, else the placement anchor's frame. */
+  private impliedFrame(explicit: string | undefined, place: Placement | undefined): El | null {
+    if (explicit) return this.frameOf(explicit);
+    const anchor = place?.right_of ?? place?.left_of ?? place?.below ?? place?.above ?? place?.near;
+    if (!anchor) return null;
+    const a = this.resolve(anchor);
+    const fid = a.type === "frame" ? a.id : a.frameId;
+    return fid ? (this.els.get(fid) ?? null) : null;
+  }
+
+  private setFrame(el: El, frame: El | null) {
+    if ((el.frameId ?? null) === (frame?.id ?? null)) return;
+    this.mutate(el, { frameId: frame?.id ?? null });
+    const t = this.boundText(el);
+    if (t) this.mutate(t, { frameId: frame?.id ?? null });
+  }
+
+  /** Translate a frame together with everything in it, re-routing arrows that leave it. */
+  private moveFrameBy(frame: El, dx: number, dy: number) {
+    if (!dx && !dy) return;
+    const isBoundArrow = (e: El) => e.type === "arrow" && (e.startBinding || e.endBinding);
+    const kids = this.live().filter((e) => {
+      if (e.frameId !== frame.id || isBoundArrow(e)) return false;
+      const c = e.containerId ? this.els.get(e.containerId) : undefined;
+      return !(c && isBoundArrow(c)); // arrow labels follow their arrow
+    });
+    this.mutate(frame, { x: frame.x + dx, y: frame.y + dy });
+    for (const k of kids) this.mutate(k, { x: k.x + dx, y: k.y + dy });
+    // Bound arrows are re-routed from their shapes by enforceBindings().
+  }
+
+  /** Push frames that overlap the `seed` frames out of the way (right or down, whichever is shorter). */
+  private separateFrames(seed: Iterable<string>): number {
+    const fixed = new Set(seed);
+    let moves = 0;
+    for (let pass = 0; pass < 30; pass++) {
+      const frames = this.live().filter((e) => e.type === "frame");
+      let changed = false;
+      for (const a of frames) {
+        if (!fixed.has(a.id)) continue;
+        for (const b of frames) {
+          if (b.id === a.id || !overlaps(boxOf(a), boxOf(b), FRAME_GAP / 2 - 1)) continue;
+          // Of two seeds, the one later in reading order yields.
+          const [anchor, mover] =
+            fixed.has(b.id) && (b.y < a.y || (b.y === a.y && b.x < a.x)) ? [b, a] : [a, b];
+          const right = anchor.x + anchor.width + FRAME_GAP - mover.x;
+          const down = anchor.y + anchor.height + FRAME_GAP - mover.y;
+          if (right <= 0 && down <= 0) continue;
+          const byRight = right > 0 && (down <= 0 || right <= down);
+          this.moveFrameBy(mover, byRight ? right : 0, byRight ? 0 : down);
+          fixed.add(mover.id);
+          moves++;
+          changed = true;
+        }
+      }
+      if (!changed) break;
+    }
+    return moves;
   }
 
   // ---------- geometry maintenance ----------
@@ -442,7 +575,10 @@ export class Scene {
       const b = pts[pts.length - 1];
       const mx = container.x + (a[0] + b[0]) / 2;
       const my = container.y + (a[1] + b[1]) / 2;
-      this.mutate(t, { x: Math.round(mx - t.width / 2), y: Math.round(my - t.height / 2) });
+      this.mutate(t, {
+        x: Math.round(mx - t.width / 2),
+        y: Math.round(my - t.height / 2),
+      });
     } else {
       const c = center(boxOf(container));
       this.mutate(t, {
@@ -461,33 +597,62 @@ export class Scene {
     );
   }
 
+  /** Re-derive a bound arrow's geometry from the shapes it is bound to (bends are kept). */
   private routeArrow(arrow: El) {
     const pts = arrow.points as [number, number][];
     const absStart = { x: arrow.x + pts[0][0], y: arrow.y + pts[0][1] };
     const absEnd = { x: arrow.x + pts[pts.length - 1][0], y: arrow.y + pts[pts.length - 1][1] };
     const s = arrow.startBinding ? this.els.get(arrow.startBinding.elementId) : undefined;
     const t = arrow.endBinding ? this.els.get(arrow.endBinding.elementId) : undefined;
-    const sc = s ? center(boxOf(s)) : absStart;
-    const tc = t ? center(boxOf(t)) : absEnd;
-    const start = s ? borderPoint(boxOf(s), tc, 8) : absStart;
-    const end = t ? borderPoint(boxOf(t), sc, 8) : absEnd;
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    this.mutate(arrow, {
-      x: Math.round(start.x),
-      y: Math.round(start.y),
-      points: [
-        [0, 0],
-        [Math.round(dx), Math.round(dy)],
-      ],
-      width: Math.abs(Math.round(dx)),
-      height: Math.abs(Math.round(dy)),
-    });
+    const sOk = s && !s.isDeleted ? s : undefined;
+    const tOk = t && !t.isDeleted ? t : undefined;
+    // Aim at the first/last bend when there is one, else at the other shape.
+    const firstBend = pts.length > 2 ? { x: arrow.x + pts[1][0], y: arrow.y + pts[1][1] } : null;
+    const lastBend =
+      pts.length > 2
+        ? { x: arrow.x + pts[pts.length - 2][0], y: arrow.y + pts[pts.length - 2][1] }
+        : null;
+    const sc = sOk ? center(boxOf(sOk)) : absStart;
+    const tc = tOk ? center(boxOf(tOk)) : absEnd;
+    const start = sOk ? borderPoint(boxOf(sOk), firstBend ?? tc, 8) : absStart;
+    const end = tOk ? borderPoint(boxOf(tOk), lastBend ?? sc, 8) : absEnd;
+    // Bends follow the average movement of the two ends.
+    const shift = {
+      x: (start.x - absStart.x + end.x - absEnd.x) / 2,
+      y: (start.y - absStart.y + end.y - absEnd.y) / 2,
+    };
+    const abs = [
+      start,
+      ...pts
+        .slice(1, -1)
+        .map(([px, py]) => ({ x: arrow.x + px + shift.x, y: arrow.y + py + shift.y })),
+      end,
+    ];
+    const x0 = Math.round(start.x);
+    const y0 = Math.round(start.y);
+    const points = abs.map((p) => [Math.round(p.x - x0), Math.round(p.y - y0)] as [number, number]);
+    const xs = points.map((p) => p[0]);
+    const ys = points.map((p) => p[1]);
+    const patch = {
+      x: x0,
+      y: y0,
+      points,
+      width: Math.max(...xs) - Math.min(...xs),
+      height: Math.max(...ys) - Math.min(...ys),
+    };
+    if (
+      arrow.x === patch.x &&
+      arrow.y === patch.y &&
+      JSON.stringify(arrow.points) === JSON.stringify(points)
+    )
+      return;
+    this.mutate(arrow, patch);
     this.centerLabel(arrow);
   }
 
   /** Move a node (and its label) and re-route attached arrows. */
   private moveNode(el: El, box: Box) {
+    if (el.x === box.x && el.y === box.y && el.width === box.w && el.height === box.h) return;
     this.mutate(el, { x: box.x, y: box.y, width: box.w, height: box.h });
     this.centerLabel(el);
     for (const a of this.arrowsBoundTo(el.id)) this.routeArrow(a);
@@ -510,7 +675,12 @@ export class Scene {
     const fontSize = existing?.fontSize ?? (container.type === "arrow" ? 16 : 20);
     const m = measureText(label, fontSize);
     if (existing) {
-      this.mutate(existing, { text: label, originalText: label, width: m.width, height: m.height });
+      this.mutate(existing, {
+        text: label,
+        originalText: label,
+        width: m.width,
+        height: m.height,
+      });
     } else {
       const t = this.add(
         this.textEl(
@@ -559,20 +729,27 @@ export class Scene {
   }
 
   addNode(o: Extract<Op, { op: "add_node" }>, author: Author): El {
-    const frame = this.frameOf(o.frame);
-    const m = measureText(o.label, 20);
+    const comp = o.kind ? componentByKind.get(o.kind) : undefined;
+    if (o.kind && !comp) throw new Error(`unknown kind "${o.kind}" (see the components resource)`);
+    const label = o.label ?? comp?.label;
+    if (!label) throw new Error("add_node needs a label or a kind");
+    let frame = this.impliedFrame(o.frame, o.place);
+    const m = measureText(label, 20);
     const w = Math.max(o.width ?? NODE_MIN_W, m.width + PAD);
     const h = Math.max(o.height ?? NODE_MIN_H, m.height + PAD);
     const box = this.place(o.place, w, h, frame);
-    const shape = o.shape ?? "rectangle";
+    const shape = o.shape ?? comp?.shape ?? "rectangle";
+    const fill = o.color ? (COLORS[o.color] ?? o.color) : (comp?.fill ?? "transparent");
     const node = this.add(
       this.base(shape, box, author, {
-        backgroundColor: o.color ? (COLORS[o.color] ?? o.color) : "transparent",
+        backgroundColor: fill,
         roundness: shape === "rectangle" ? { type: 3 } : shape === "diamond" ? { type: 2 } : null,
         frameId: frame?.id ?? null,
+        customData: { author, ...(comp ? { kind: comp.kind } : {}) },
       }),
     );
-    this.setLabel(node, o.label, author);
+    if (!frame && (frame = this.frameAt(box))) this.setFrame(node, frame);
+    this.setLabel(node, label, author);
     if (frame) this.fitFrame(frame);
     this.lastPlaced = node.id;
     this.setRef(o.ref, node.id);
@@ -623,8 +800,15 @@ export class Scene {
     if (o.label !== undefined) {
       if (el.type === "frame") this.mutate(el, { name: o.label });
       else if (el.type === "text") {
-        const m = measureText(o.label, el.fontSize ?? 20);
-        this.mutate(el, { text: o.label, originalText: o.label, width: m.width, height: m.height });
+        const text = el.containerId ? o.label : wrapText(o.label);
+        const m = measureText(text, el.fontSize ?? 20);
+        this.mutate(el, {
+          text,
+          originalText: text,
+          width: m.width,
+          height: m.height,
+        });
+        if (el.frameId) this.fitFrame(this.els.get(el.frameId)!);
       } else this.setLabel(el, o.label, author);
     }
     if (o.color !== undefined) this.mutate(el, { backgroundColor: COLORS[o.color] ?? o.color });
@@ -652,7 +836,17 @@ export class Scene {
       }
       if (f) this.fitFrame(f);
     }
-    if (o.move || o.width || o.height) {
+    if (el.type === "frame" && (o.move || o.width || o.height)) {
+      const w = o.width ?? el.width;
+      const h = o.height ?? el.height;
+      const box = o.move
+        ? this.place(o.move, w, h, null, new Set([el.id]))
+        : { x: el.x, y: el.y, w, h };
+      this.moveFrameBy(el, box.x - el.x, box.y - el.y);
+      if (w !== el.width || h !== el.height) this.mutate(el, { width: w, height: h });
+      this.fitFrame(el);
+      this.grownFrames.add(el.id);
+    } else if (o.move || o.width || o.height) {
       const w = o.width ?? el.width;
       const h = o.height ?? el.height;
       const box = o.move
@@ -688,7 +882,11 @@ export class Scene {
       box = this.place(o.place, o.width ?? 800, o.height ?? 500, null);
     }
     const frame = this.add(
-      this.base("frame", box, author, { name: o.name, strokeColor: "#bbb", roughness: 0 }),
+      this.base("frame", box, author, {
+        name: o.name,
+        strokeColor: "#bbb",
+        roughness: 0,
+      }),
     );
     for (const k of kids) {
       this.mutate(k, { frameId: frame.id });
@@ -700,17 +898,25 @@ export class Scene {
   }
 
   addNote(o: Extract<Op, { op: "add_note" }>, author: Author): El {
-    const frame = this.frameOf(o.frame);
+    let frame = this.impliedFrame(o.frame, o.place);
     const fontSize = { s: 16, m: 20, l: 28 }[o.size ?? "m"];
-    const m = measureText(o.text, fontSize);
+    const text = wrapText(o.text);
+    const m = measureText(text, fontSize);
     const box = this.place(o.place, m.width, m.height, frame);
-    const t = this.add(this.textEl(o.text, box, author, fontSize, { frameId: frame?.id ?? null }));
+    frame ??= this.frameAt(box);
+    const t = this.add(this.textEl(text, box, author, fontSize, { frameId: frame?.id ?? null }));
     if (frame) this.fitFrame(frame);
     this.setRef(o.ref, t.id);
     return t;
   }
 
   apply(ops: Op[], author: Author): OpResult[] {
+    const results = this.applyOps(ops, author);
+    this.enforceBindings();
+    return results;
+  }
+
+  private applyOps(ops: Op[], author: Author): OpResult[] {
     return ops.map((o, i) => {
       try {
         let el: El | undefined;
@@ -746,6 +952,186 @@ export class Scene {
     });
   }
 
+  // ---------- formatting ----------
+
+  /** Frames touched by this Scene's changes (for scoped auto-tidy). null frame = top level. */
+  touchedFrames(): Set<string | null> {
+    const out = new Set<string | null>();
+    for (const id of this.changed) {
+      const e = this.els.get(id);
+      if (!e || e.isDeleted) continue;
+      out.add(e.type === "frame" ? e.id : (e.frameId ?? null));
+    }
+    return out;
+  }
+
+  /**
+   * Non-destructive cleanup: never changes connections, labels, colours or relative order.
+   * scope: frames (null = top level) to tidy; undefined = everything.
+   */
+  tidy(scope?: Set<string | null>): TidyStats {
+    const stats: TidyStats = {
+      bound: 0,
+      adopted: 0,
+      wrapped: 0,
+      aligned: 0,
+      separated: 0,
+      framesMoved: 0,
+    };
+    const inScope = (fid: string | null | undefined) => !scope || scope.has(fid ?? null);
+    const isBlock = (e: El) => this.isNode(e) || (e.type === "text" && !e.containerId);
+
+    // 0. Bind loose arrow ends that touch a node, so links survive every later move.
+    const nodes0 = this.live().filter((e) => this.isNode(e));
+    const near = (p: { x: number; y: number }) =>
+      nodes0.find(
+        (n) =>
+          p.x >= n.x - 20 &&
+          p.x <= n.x + n.width + 20 &&
+          p.y >= n.y - 20 &&
+          p.y <= n.y + n.height + 20,
+      );
+    for (const a of this.live()) {
+      if (a.type !== "arrow" || !inScope(a.frameId)) continue;
+      const pts = a.points as [number, number][];
+      for (const [side, p] of [
+        ["startBinding", pts[0]],
+        ["endBinding", pts[pts.length - 1]],
+      ] as const) {
+        if (a[side]) continue;
+        const n = near({ x: a.x + p[0], y: a.y + p[1] });
+        const other = side === "startBinding" ? a.endBinding : a.startBinding;
+        if (!n || other?.elementId === n.id) continue;
+        this.mutate(a, { [side]: { elementId: n.id, focus: 0, gap: 8, fixedPoint: null } });
+        this.addBound(n, { id: a.id, type: "arrow" });
+        stats.bound++;
+      }
+    }
+
+    // 1. Attach loose nodes/notes to the frame they sit in.
+    for (const e of this.live()) {
+      if (!isBlock(e) || e.frameId) continue;
+      const f = this.frameAt(boxOf(e));
+      if (f && inScope(f.id)) {
+        this.setFrame(e, f);
+        stats.adopted++;
+      }
+    }
+
+    // 2. Wrap notes that are far too wide.
+    for (const e of this.live()) {
+      if (e.type !== "text" || e.containerId || !inScope(e.frameId)) continue;
+      const wrapped = wrapText(e.text ?? "");
+      if (wrapped !== e.text) {
+        const m = measureText(wrapped, e.fontSize ?? 20);
+        this.mutate(e, {
+          text: wrapped,
+          originalText: wrapped,
+          width: m.width,
+          height: m.height,
+        });
+        stats.wrapped++;
+      }
+    }
+
+    const groups = new Map<string | null, El[]>();
+    for (const e of this.live()) {
+      if (!isBlock(e) || !inScope(e.frameId)) continue;
+      const k = e.frameId ?? null;
+      groups.set(k, [...(groups.get(k) ?? []), e]);
+    }
+
+    // Steps 3-4 repeat until stable: a separation can unblock a snap that was refused before.
+    for (let outer = 0; outer < 4; outer++) {
+      const before = stats.aligned + stats.separated;
+      for (const items of groups.values()) {
+        // 3. Snap nodes whose centres are nearly in a row / column onto the cluster's largest box
+        //    (a fixed anchor, so repeated runs converge). Never snap into a collision.
+        const nodes = items.filter((e) => this.isNode(e));
+        for (let round = 0; round < 4; round++) {
+          let snapped = 0;
+          for (const axis of ["y", "x"] as const) {
+            const size = axis === "y" ? "height" : "width";
+            const mid = (e: El) => e[axis] + e[size] / 2;
+            const sorted = [...nodes].sort((a, b) => mid(a) - mid(b));
+            let cluster: El[] = [];
+            const flush = () => {
+              if (cluster.length > 1) {
+                const anchor = cluster.reduce((m, e) =>
+                  e.width * e.height > m.width * m.height ? e : m,
+                );
+                for (const e of cluster) {
+                  const d = mid(anchor) - mid(e);
+                  if (e === anchor || Math.abs(d) < 1) continue;
+                  const box = {
+                    ...boxOf(e),
+                    [axis]: Math.round(e[axis] + d),
+                  } as Box;
+                  if (items.some((o) => o !== e && overlaps(box, boxOf(o), 23))) continue;
+                  this.moveNode(e, box);
+                  snapped++;
+                }
+              }
+              cluster = [];
+            };
+            for (const e of sorted) {
+              if (cluster.length && mid(e) - mid(cluster[0]) > 16) flush();
+              cluster.push(e);
+            }
+            flush();
+          }
+          stats.aligned += snapped;
+          if (!snapped) break;
+        }
+
+        // 4. Separate overlapping blocks with the smallest push; the later one (reading order) moves.
+        const M = 24;
+        for (let pass = 0; pass < 40; pass++) {
+          let moved = false;
+          const order = [...items].sort((a, b) => a.y - b.y || a.x - b.x);
+          for (let i = 0; i < order.length; i++) {
+            for (let j = i + 1; j < order.length; j++) {
+              const a = order[i];
+              const b = order[j];
+              if (!overlaps(boxOf(a), boxOf(b), M - 1)) continue;
+              const px = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) + M;
+              const py = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y) + M;
+              const box = boxOf(b);
+              if (px < py) box.x += b.x + b.width / 2 >= a.x + a.width / 2 ? px : -px;
+              else box.y += py;
+              if (this.isNode(b))
+                this.moveNode(b, {
+                  ...box,
+                  x: Math.round(box.x),
+                  y: Math.round(box.y),
+                });
+              else this.mutate(b, { x: Math.round(box.x), y: Math.round(box.y) });
+              stats.separated++;
+              moved = true;
+            }
+          }
+          if (!moved) break;
+        }
+      }
+      if (stats.aligned + stats.separated === before) break;
+    }
+
+    // Repair: every bound arrow in scope is re-derived from its shapes (no-op when already right).
+    for (const a of this.live()) {
+      if (a.type === "arrow" && (a.startBinding || a.endBinding) && inScope(a.frameId))
+        this.routeArrow(a);
+    }
+
+    // 5. Fit frames around their contents, then 6. pull overlapping frames apart.
+    const frames = this.live().filter((f) => f.type === "frame" && inScope(f.id));
+    for (const f of frames) this.fitFrame(f);
+    stats.framesMoved = this.separateFrames(
+      scope ? [...this.grownFrames, ...frames.map((f) => f.id)] : frames.map((f) => f.id),
+    );
+    this.enforceBindings();
+    return stats;
+  }
+
   // ---------- bulk ----------
 
   /** Auto-layout nodes with dagre. Scope: a frame (its children) or all top-level nodes. */
@@ -758,7 +1144,13 @@ export class Scene {
     const ids = new Set(nodes.map((n) => n.id));
     const before = unionBox(nodes.map(boxOf))!;
     const g = new dagre.graphlib.Graph();
-    g.setGraph({ rankdir: direction, nodesep: 60, ranksep: 120, marginx: 0, marginy: 0 });
+    g.setGraph({
+      rankdir: direction,
+      nodesep: 60,
+      ranksep: 120,
+      marginx: 0,
+      marginy: 0,
+    });
     g.setDefaultEdgeLabel(() => ({}));
     for (const n of nodes) g.setNode(n.id, { width: n.width, height: n.height });
     for (const e of this.graph()._edgesRaw)
@@ -879,7 +1271,10 @@ export class Scene {
         inferred ||= !!from;
       }
       if (!to) {
-        to = hit({ x: e.x + pts[pts.length - 1][0], y: e.y + pts[pts.length - 1][1] });
+        to = hit({
+          x: e.x + pts[pts.length - 1][0],
+          y: e.y + pts[pts.length - 1][1],
+        });
         inferred ||= !!to;
       }
       if (from && to && from.id !== to.id) {
@@ -943,6 +1338,7 @@ export class Scene {
         ...(n.backgroundColor && n.backgroundColor !== "transparent"
           ? { color: COLOR_NAMES[n.backgroundColor] ?? n.backgroundColor }
           : {}),
+        ...(n.customData?.kind ? { kind: n.customData.kind } : {}),
         ...(n.customData?.author === "agent" ? { by: "agent" } : {}),
         ...(sel?.has(n.id) ? { selected: true } : {}),
       })),

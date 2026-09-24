@@ -128,22 +128,47 @@ button.link {
   position: fixed;
   inset: 0;
 }
-.topbar {
+/* Chrome lives in Excalidraw's own slots: Share (top-right), name + Tidy +
+   Versions (footer), everything else in the hamburger menu. */
+.share-trigger,
+.footbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--lg-button-size, 2.25rem);
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--border-radius-lg, 8px);
+  background: var(--island-bg-color);
+  box-shadow: var(--shadow-island);
+  color: var(--text-primary-color);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.share-trigger:hover,
+.footbar button:hover,
+.share-trigger.active,
+.footbar button.active {
+  background: var(--button-hover-bg, var(--color-surface-high));
+}
+.share-trigger .peers {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.footbar {
   display: flex;
   gap: 6px;
   align-items: center;
   font-size: 13px;
 }
-.topbar button {
-  padding: 5px 9px;
-  font-size: 13px;
-}
-.topbar .title {
+.footbar .title {
   font-weight: 600;
-  max-width: 180px;
+  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 0 4px;
 }
 .dot {
   width: 8px;

@@ -196,12 +196,18 @@ export class DiagramRoom extends DurableObject<Env> {
     return best;
   }
 
-  private callTab<T>(method: TabRpcMethod, params: unknown): Promise<T> {
-    const tab = this.primaryTab();
+  private async callTab<T>(method: TabRpcMethod, params: unknown): Promise<T> {
+    // Tabs auto-reconnect after a blip (~1.5s); give them a moment before giving up.
+    let tab = this.primaryTab();
+    for (let i = 0; !tab && i < 12; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      tab = this.primaryTab();
+    }
     if (!tab)
-      return Promise.reject(
-        new Error("No canvas tab is open for this diagram. Ask the user to open the share link."),
+      throw new Error(
+        "No canvas tab is open for this diagram. Ask the user to open the share link.",
       );
+    const open = tab;
     const reqId = crypto.randomUUID();
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -212,7 +218,7 @@ export class DiagramRoom extends DurableObject<Env> {
         resolve: (v) => (clearTimeout(timer), resolve(v as T)),
         reject: (e) => (clearTimeout(timer), reject(e)),
       });
-      tab.ws.send(JSON.stringify({ type: "rpc", reqId, method, params } satisfies ServerMessage));
+      open.ws.send(JSON.stringify({ type: "rpc", reqId, method, params } satisfies ServerMessage));
     });
   }
 
@@ -260,8 +266,19 @@ export class DiagramRoom extends DurableObject<Env> {
     const snap = author === "agent" ? await this.snapshot("before agent patch", "auto") : undefined;
     const scene = new Scene(this.els.values());
     const results = scene.apply(ops, author);
+    const tidied = scene.tidy(scene.touchedFrames());
     const changed = this.commit(scene, author === "agent" ? "agent" : "system");
-    return { snapshotId: snap?.id, changed, results };
+    return { snapshotId: snap?.id, changed, results, tidied };
+  }
+
+  /** Non-destructive cleanup of the whole diagram, or one frame. */
+  async tidy(frame?: string, origin: "agent" | "system" = "agent") {
+    const snap = await this.snapshot("before tidy", "auto");
+    const scene = new Scene(this.els.values());
+    const scope = frame ? new Set<string | null>([scene.resolve(frame).id]) : undefined;
+    const stats = scene.tidy(scope);
+    const changed = this.commit(scene, origin);
+    return { snapshotId: snap.id, changed, ...stats };
   }
 
   async layout(direction: "LR" | "TB", frame?: string) {

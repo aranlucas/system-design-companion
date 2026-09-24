@@ -3,6 +3,8 @@ import {
   convertToExcalidrawElements,
   Excalidraw,
   exportToBlob,
+  Footer,
+  MainMenu,
   reconcileElements,
   restoreElements,
 } from "@excalidraw/excalidraw";
@@ -17,6 +19,7 @@ import type {
   ServerMessage,
 } from "../shared/protocol.ts";
 import { CopyRow } from "./CopyRow.tsx";
+import { componentLibrary } from "./library.ts";
 import { linkFor, remember, setupCommands } from "./local.ts";
 
 interface Snapshot {
@@ -228,6 +231,20 @@ export function Canvas({ id, k }: { id: string; k: string }) {
 
   // ---------- chrome ----------
 
+  const tidy = async () => {
+    const r = await fetch(`/api/d/${id}/tidy?k=${encodeURIComponent(k)}`, { method: "POST" });
+    const d = (await r.json()) as { changed?: number; error?: string };
+    flash(
+      r.ok
+        ? d.changed
+          ? `Tidied (${d.changed} changes; undo in Versions)`
+          : "Already tidy"
+        : `Tidy failed: ${d.error}`,
+    );
+  };
+
+  const toggle = (p: "share" | "versions") => setPanel(panel === p ? null : p);
+
   const shareLink = linkFor(id, k);
   const copy = (text: string, what: string) => {
     void navigator.clipboard.writeText(text);
@@ -238,6 +255,7 @@ export function Canvas({ id, k }: { id: string; k: string }) {
     <div className="canvas-wrap">
       <Excalidraw
         excalidrawAPI={setApi}
+        initialData={{ libraryItems: componentLibrary() }}
         isCollaborating={peers > 1}
         onChange={() => {
           scheduleSend();
@@ -245,21 +263,52 @@ export function Canvas({ id, k }: { id: string; k: string }) {
         }}
         onPointerDown={() => sendPresence()}
         renderTopRightUI={() => (
-          <div className="topbar">
+          <button
+            className={`share-trigger ${panel === "share" ? "active" : ""}`}
+            onClick={() => toggle("share")}
+            title={`${name} · ${status} · ${peers} here`}
+          >
+            <span className={`dot ${status}`} />
+            <span className="peers">{peers}</span>
+            Share
+          </button>
+        )}
+      >
+        <MainMenu>
+          <MainMenu.Group title={name}>
+            <MainMenu.Item onSelect={tidy}>Tidy layout</MainMenu.Item>
+            <MainMenu.Item onSelect={() => setPanel("versions")}>Versions</MainMenu.Item>
+            <MainMenu.Item onSelect={() => setPanel("share")}>
+              Share &amp; connect agent
+            </MainMenu.Item>
+            <MainMenu.ItemLink href="/">All diagrams</MainMenu.ItemLink>
+          </MainMenu.Group>
+          <MainMenu.Separator />
+          <MainMenu.DefaultItems.SaveAsImage />
+          <MainMenu.DefaultItems.Export />
+          <MainMenu.DefaultItems.SearchMenu />
+          <MainMenu.DefaultItems.Help />
+          <MainMenu.Separator />
+          <MainMenu.DefaultItems.ToggleTheme />
+          <MainMenu.DefaultItems.ChangeCanvasBackground />
+        </MainMenu>
+        <Footer>
+          <div className="footbar">
             <span className="title" title={name}>
               {name}
             </span>
-            <span className={`dot ${status}`} title={status} />
-            <span className="muted">{peers} here</span>
-            <button onClick={() => setPanel(panel === "versions" ? null : "versions")}>
+            <button onClick={tidy} title="Fix overlaps, alignment and frames (undo via Versions)">
+              Tidy
+            </button>
+            <button
+              className={panel === "versions" ? "active" : ""}
+              onClick={() => toggle("versions")}
+            >
               Versions
             </button>
-            <button onClick={() => setPanel(panel === "share" ? null : "share")}>
-              Share / Agent
-            </button>
           </div>
-        )}
-      />
+        </Footer>
+      </Excalidraw>
       {panel === "versions" && (
         <VersionsPanel id={id} k={k} onClose={() => setPanel(null)} flash={flash} />
       )}

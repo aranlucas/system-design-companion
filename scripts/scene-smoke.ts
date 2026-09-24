@@ -36,7 +36,7 @@ const r = s.apply(
 );
 console.log(r.filter((x) => !x.ok));
 console.log(JSON.stringify(graphView(s), null, 1));
-console.log("layout", s.layout("LR"));
+console.log("layout", s.layout("LR", "hld"));
 s.apply([{ op: "remove", target: "Postgres" }], "agent");
 const g = graphView(s) as any;
 console.log(
