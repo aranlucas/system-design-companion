@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CopyRow } from "./CopyRow.tsx";
 import { linkFor, remember, setupCommands } from "./local.ts";
 
@@ -7,6 +7,11 @@ interface Diagram {
   key: string;
   name: string;
   createdAt: number;
+}
+
+interface DiagramPage {
+  items: Diagram[];
+  nextCursor: string | null;
 }
 
 interface Template {
@@ -18,6 +23,11 @@ interface Template {
 export function Home() {
   const [items, setItems] = useState<Diagram[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pageCount, setPageCount] = useState(1);
+  const [revision, setRevision] = useState(0);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const deletedIds = useRef(new Set<string>());
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [templates, setTemplates] = useState<Template[]>([]);
   const [name, setName] = useState("");
@@ -31,14 +41,27 @@ export function Home() {
       if (pending || document.hidden) return;
       pending = true;
       try {
-        const response = await fetch("/api/diagrams", {
-          cache: "no-store",
-          signal: controller.signal,
-        });
-        if (!response.ok) throw new Error("Could not load diagrams. Retrying automatically.");
-        const diagrams = (await response.json()) as Diagram[];
+        const diagrams: Diagram[] = [];
+        let cursor: string | null = null;
+        for (let page = 0; page < pageCount; page++) {
+          const params = new URLSearchParams({ limit: "50" });
+          if (cursor) params.set("cursor", cursor);
+          // Each page depends on the previous response's cursor.
+          // oxlint-disable-next-line no-await-in-loop
+          const response = await fetch(`/api/diagrams?${params}`, {
+            cache: "no-store",
+            signal: controller.signal,
+          });
+          if (!response.ok) throw new Error("Could not load diagrams. Retrying automatically.");
+          // oxlint-disable-next-line no-await-in-loop
+          const result = (await response.json()) as DiagramPage;
+          diagrams.push(...result.items);
+          cursor = result.nextCursor;
+          if (!cursor) break;
+        }
         if (!controller.signal.aborted) {
-          setItems(diagrams);
+          setItems(diagrams.filter((d) => !deletedIds.current.has(d.id)));
+          setNextCursor(cursor);
           setError("");
         }
       } catch (err) {
@@ -58,7 +81,7 @@ export function Home() {
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, []);
+  }, [pageCount, revision]);
 
   useEffect(() => {
     fetch("/api/templates")
@@ -66,6 +89,30 @@ export function Home() {
       .then(setTemplates)
       .catch(() => {});
   }, []);
+
+  async function removeDiagram(diagram: Diagram) {
+    if (
+      !window.confirm(
+        `Delete “${diagram.name}”? This removes it for everyone and disables its share links.`,
+      )
+    )
+      return;
+    setDeleting(diagram.id);
+    try {
+      const response = await fetch(`/api/d/${diagram.id}?k=${encodeURIComponent(diagram.key)}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error("Could not delete diagram. Please try again.");
+      deletedIds.current.add(diagram.id);
+      setItems((current) => current.filter((d) => d.id !== diagram.id));
+      setError("");
+      setRevision((current) => current + 1);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setDeleting(null);
+    }
+  }
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -139,9 +186,28 @@ export function Home() {
             <li key={d.id}>
               <a href={linkFor(d.id, d.key)}>{d.name}</a>
               <span className="muted">{new Date(d.createdAt).toLocaleString()}</span>
+              <button
+                className="link"
+                disabled={deleting !== null}
+                aria-label={`Delete ${d.name}`}
+                onClick={() => void removeDiagram(d)}
+              >
+                {deleting === d.id ? "Deleting…" : "Delete"}
+              </button>
             </li>
           ))}
         </ul>
+        {nextCursor && (
+          <button
+            disabled={loading}
+            onClick={() => {
+              setLoading(true);
+              setPageCount((count) => count + 1);
+            }}
+          >
+            {loading ? "Loading…" : "Load more diagrams"}
+          </button>
+        )}
       </section>
     </main>
   );

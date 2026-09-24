@@ -63,3 +63,14 @@ its diagrams, including editing them. Protect the deployment with access control
 it should be private. The library uses additional server-managed links rather than
 recovering or replacing the original capability keys. Clearing browser storage does
 not remove boards from the library.
+
+The diagrams API is paginated: `GET /api/diagrams?limit=50&cursor=...` returns
+`{ items, nextCursor }`. The default page size is 50, with a maximum of 100.
+Pass the returned cursor unchanged; a null cursor means the final page. Ordering
+uses creation time and ID, so newer inserts do not shift subsequent pages.
+The homepage offers **Load more diagrams** when needed and refreshes loaded pages.
+
+**Delete** asks for confirmation, then removes a diagram for everyone and disables
+its original and library links, including active canvas connections. The authorized
+API is `DELETE /api/d/:id?k=<key>`. Deletion is logical: saved data and snapshots
+remain for administrative recovery; there is no restore action in the UI.

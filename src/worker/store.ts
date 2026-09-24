@@ -14,6 +14,12 @@ export function ensureSchema(env: Env) {
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     ),
     env.DB.prepare(
+      "CREATE INDEX IF NOT EXISTS diagrams_library_order ON diagrams (is_template, created_at DESC, id DESC)",
+    ),
+    env.DB.prepare(
+      "CREATE TABLE IF NOT EXISTS deleted_diagrams (diagram_id TEXT PRIMARY KEY, deleted_at INTEGER NOT NULL)",
+    ),
+    env.DB.prepare(
       `CREATE TABLE IF NOT EXISTS diagram_library (
         diagram_id TEXT PRIMARY KEY, access_key TEXT NOT NULL)`,
     ),
@@ -56,7 +62,8 @@ export async function verifyKey(
   if (!key) return null;
   await ensureSchema(env);
   const row = await env.DB.prepare(
-    "SELECT id, name, is_template, description, key_hash FROM diagrams WHERE id = ?",
+    `SELECT id, name, is_template, description, key_hash FROM diagrams WHERE id = ?
+     AND NOT EXISTS (SELECT 1 FROM deleted_diagrams WHERE diagram_id = diagrams.id)`,
   )
     .bind(id)
     .first<DiagramRow & { key_hash: string }>();
@@ -93,21 +100,78 @@ export async function listTemplates(env: Env) {
 /** Deployment-wide shared library, including boards created before this feature.
  * Library links are additional capabilities; original share links remain valid.
  */
-export async function listDiagrams(env: Env) {
+export interface DiagramCursor {
+  createdAt: number;
+  id: string;
+}
+
+export function parseDiagramCursor(value: string): DiagramCursor | null {
+  if (value.length > 256) return null;
+  try {
+    const cursor = JSON.parse(atob(value)) as DiagramCursor;
+    if (
+      !cursor ||
+      !Number.isSafeInteger(cursor.createdAt) ||
+      cursor.createdAt < 0 ||
+      typeof cursor.id !== "string" ||
+      !/^[A-Za-z0-9_-]{8,64}$/.test(cursor.id)
+    )
+      return null;
+    return { createdAt: cursor.createdAt, id: cursor.id };
+  } catch {
+    return null;
+  }
+}
+
+export async function listDiagrams(env: Env, limit = 50, cursor?: DiagramCursor) {
   await ensureSchema(env);
-  // A single idempotent statement backfills old boards and handles concurrent readers.
-  await env.DB.prepare(
-    `INSERT OR IGNORE INTO diagram_library (diagram_id, access_key)
-     SELECT id, lower(hex(randomblob(32))) FROM diagrams
-     WHERE is_template = 0 AND NOT EXISTS
-       (SELECT 1 FROM diagram_library WHERE diagram_id = diagrams.id)`,
-  ).run();
+  const boundary = cursor ? "AND (d.created_at, d.id) < (?, ?)" : "";
+  const params = cursor ? [cursor.createdAt, cursor.id, limit + 1] : [limit + 1];
   const { results } = await env.DB.prepare(
     `SELECT d.id, d.name, l.access_key AS key, d.created_at AS createdAt
-     FROM diagrams d JOIN diagram_library l ON l.diagram_id = d.id
-     WHERE d.is_template = 0 ORDER BY d.created_at DESC, d.id ASC`,
-  ).all<{ id: string; name: string; key: string; createdAt: number }>();
-  return results;
+     FROM diagrams d LEFT JOIN diagram_library l ON l.diagram_id = d.id
+     WHERE d.is_template = 0
+       AND NOT EXISTS (SELECT 1 FROM deleted_diagrams WHERE diagram_id = d.id) ${boundary}
+     ORDER BY d.created_at DESC, d.id DESC LIMIT ?`,
+  )
+    .bind(...params)
+    .all<{ id: string; name: string; key: string | null; createdAt: number }>();
+  const items = await Promise.all(
+    results.slice(0, limit).map(async (item) => {
+      if (item.key) return item as typeof item & { key: string };
+      // Backfill only this page, preserving old share links and concurrent-reader safety.
+      await env.DB.prepare(
+        "INSERT OR IGNORE INTO diagram_library (diagram_id, access_key) VALUES (?, ?)",
+      )
+        .bind(item.id, newId() + newId())
+        .run();
+      const entry = await env.DB.prepare(
+        "SELECT access_key FROM diagram_library WHERE diagram_id = ?",
+      )
+        .bind(item.id)
+        .first<{ access_key: string }>();
+      if (!entry) throw new Error("Could not create diagram library link");
+      return { ...item, key: entry.access_key };
+    }),
+  );
+  const last = items.at(-1);
+  const nextCursor =
+    results.length > limit && last
+      ? btoa(JSON.stringify({ createdAt: last.createdAt, id: last.id }))
+      : null;
+  return { items, nextCursor };
+}
+
+/** Logical deletion keeps snapshots available for administrative recovery. */
+export async function deleteDiagram(env: Env, id: string) {
+  await ensureSchema(env);
+  // Disable active sockets first; retrying the delete safely completes the tombstone.
+  await room(env, id).deactivate();
+  await env.DB.prepare(
+    "INSERT OR IGNORE INTO deleted_diagrams (diagram_id, deleted_at) VALUES (?, ?)",
+  )
+    .bind(id, Date.now())
+    .run();
 }
 
 export async function createDiagram(env: Env, name: string, template?: string) {

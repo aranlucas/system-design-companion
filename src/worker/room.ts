@@ -37,6 +37,7 @@ export class DiagramRoom extends DurableObject<Env> {
     { resolve: (v: unknown) => void; reject: (e: Error) => void }
   >();
   private lastFocusAt = 0;
+  private deleted = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -49,6 +50,7 @@ export class DiagramRoom extends DurableObject<Env> {
         this.els.set(el.id, el);
       }
       for (const row of sql.exec<{ k: string; v: string }>("SELECT k, v FROM meta")) {
+        if (row.k === "deleted") this.deleted = row.v === "true";
         if (row.k === "id") this.diagramId = row.v;
         if (row.k === "name") this.name = row.v;
         if (row.k === "focusAt") this.lastFocusAt = Number(row.v);
@@ -105,6 +107,20 @@ export class DiagramRoom extends DurableObject<Env> {
     this.setMeta("name", name);
   }
 
+  async deactivate() {
+    this.setMeta("deleted", "true");
+    this.deleted = true;
+    for (const ws of this.ctx.getWebSockets()) {
+      try {
+        ws.close(1008, "Diagram deleted");
+      } catch {
+        /* already closed */
+      }
+    }
+    for (const pending of this.pending.values()) pending.reject(new Error("Diagram deleted"));
+    this.pending.clear();
+  }
+
   async rename(name: string) {
     this.name = name;
     this.setMeta("name", name);
@@ -121,6 +137,7 @@ export class DiagramRoom extends DurableObject<Env> {
   // ---------- WebSocket (tabs) ----------
 
   async fetch(request: Request): Promise<Response> {
+    if (this.deleted) return new Response("Diagram deleted", { status: 410 });
     if (request.headers.get("Upgrade") !== "websocket")
       return new Response("expected websocket", { status: 426 });
     const pair = new WebSocketPair();
@@ -139,6 +156,7 @@ export class DiagramRoom extends DurableObject<Env> {
   }
 
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
+    if (this.deleted) return;
     const msg = JSON.parse(
       typeof raw === "string" ? raw : new TextDecoder().decode(raw),
     ) as ClientMessage;

@@ -217,9 +217,9 @@ export function Canvas({ id, k }: { id: string; k: string }) {
         setStatus("live");
         sendPresence(true);
       };
-      sock.onclose = () => {
+      sock.onclose = (event) => {
         setStatus("offline");
-        if (!closed) retry = window.setTimeout(connect, 1500);
+        if (!closed && event.code !== 1008) retry = window.setTimeout(connect, 1500);
       };
       sock.onmessage = (ev) => {
         const msg = JSON.parse(ev.data) as ServerMessage;

@@ -2,7 +2,9 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 import { buildServer } from "./mcp.ts";
 import {
   createDiagram,
+  deleteDiagram,
   listDiagrams,
+  parseDiagramCursor,
   listTemplates,
   room,
   saveAsTemplate,
@@ -28,10 +30,17 @@ export default {
       if (path === "/api/templates" && request.method === "GET")
         return json(await listTemplates(env));
 
-      if (path === "/api/diagrams" && request.method === "GET")
-        return Response.json(await listDiagrams(env), {
+      if (path === "/api/diagrams" && request.method === "GET") {
+        const rawLimit = url.searchParams.get("limit") ?? "50";
+        if (!/^[1-9][0-9]{0,2}$/.test(rawLimit) || Number(rawLimit) > 100)
+          return json({ error: "limit must be an integer between 1 and 100" }, 400);
+        const rawCursor = url.searchParams.get("cursor");
+        const cursor = rawCursor === null ? undefined : parseDiagramCursor(rawCursor);
+        if (cursor === null) return json({ error: "invalid cursor" }, 400);
+        return Response.json(await listDiagrams(env, Number(rawLimit), cursor), {
           headers: { "Cache-Control": "no-store" },
         });
+      }
 
       if (path === "/api/diagrams" && request.method === "POST") {
         const body = (await request.json()) as { name?: string; template?: string };
@@ -50,6 +59,11 @@ export default {
         const row = await verifyKey(env, id, url.searchParams.get("k"));
         if (!row) return json({ error: "invalid link" }, 403);
         const stub = room(env, id);
+        if (sub === "" && request.method === "DELETE") {
+          if (row.is_template) return json({ error: "Templates cannot be deleted here" }, 400);
+          await deleteDiagram(env, id);
+          return new Response(null, { status: 204 });
+        }
 
         if (path.startsWith("/ws/")) return stub.fetch(request);
         if (sub === "" && request.method === "GET") return json({ id: row.id, name: row.name });

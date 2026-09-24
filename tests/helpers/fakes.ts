@@ -26,6 +26,7 @@ export class FakeD1 {
   diagrams = new Map<string, DiagramRow>();
   snapshots: SnapshotRow[] = [];
   library = new Map<string, string>();
+  deleted = new Set<string>();
 
   async batch(_stmts: unknown[]): Promise<unknown[]> {
     return []; // ensureSchema() DDL: no-op
@@ -66,11 +67,13 @@ export class FakeD1 {
   }
 
   private run(sql: string, p: unknown[]): void {
+    if (sql.includes("INSERT OR IGNORE INTO deleted_diagrams")) {
+      this.deleted.add(p[0] as string);
+      return;
+    }
     if (sql.includes("INSERT OR IGNORE INTO diagram_library")) {
-      for (const row of this.diagrams.values()) {
-        if (!row.is_template && !this.library.has(row.id))
-          this.library.set(row.id, crypto.randomUUID().replaceAll("-", ""));
-      }
+      const [id, key] = p as [string, string];
+      if (!this.library.has(id)) this.library.set(id, key);
       return;
     }
     if (sql.includes("INSERT INTO diagrams")) {
@@ -142,19 +145,24 @@ export class FakeD1 {
       return access_key ? { access_key } : null;
     }
     if (sql.includes("FROM diagrams WHERE id = ?"))
-      return this.diagrams.get(p[0] as string) ?? null;
+      return this.deleted.has(p[0] as string) ? null : (this.diagrams.get(p[0] as string) ?? null);
     throw new Error(`FakeD1.first: unsupported SQL: ${sql}`);
   }
 
   private all(sql: string, p: unknown[]): unknown[] {
-    if (sql.includes("FROM diagrams d JOIN diagram_library")) {
+    if (sql.includes("FROM diagrams d LEFT JOIN diagram_library")) {
+      const hasCursor = sql.includes("(d.created_at, d.id) <");
+      const [time, id] = p as [number, string];
+      const limit = p.at(-1) as number;
       return [...this.diagrams.values()]
-        .filter((d) => !d.is_template && this.library.has(d.id))
-        .sort((a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id))
+        .filter((d) => !d.is_template && !this.deleted.has(d.id))
+        .filter((d) => !hasCursor || d.created_at < time || (d.created_at === time && d.id < id))
+        .sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+        .slice(0, limit)
         .map((d) => ({
           id: d.id,
           name: d.name,
-          key: this.library.get(d.id),
+          key: this.library.get(d.id) ?? null,
           createdAt: d.created_at,
         }));
     }

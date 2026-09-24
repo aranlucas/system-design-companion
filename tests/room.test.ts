@@ -16,6 +16,24 @@ function graphOf(room: { getGraph: () => Promise<unknown> }) {
 }
 
 describe("DiagramRoom ops layer", () => {
+  it("deactivation closes active tabs, rejects reconnects and ignores late edits", async () => {
+    const { env } = makeEnv();
+    const ctx = makeRoomCtx();
+    const room = new DiagramRoom(ctx.ctx as unknown as DurableObjectState, env);
+    await room.init("deleted-room", "Deleted");
+    const ws = { ...makeWs(), close: vi.fn() };
+    ctx.addWs(ws);
+    await room.deactivate();
+    expect(ws.close).toHaveBeenCalledWith(1008, "Diagram deleted");
+    expect(ctx.sql.meta.get("deleted")).toBe("true");
+    expect((await room.fetch(new Request("http://localhost"))).status).toBe(410);
+    await room.webSocketMessage(
+      ws as unknown as WebSocket,
+      JSON.stringify({ type: "update", elements: [] }),
+    );
+    expect(ws.sent).toEqual([]);
+  });
+
   it("inits with a name and reports info", async () => {
     const { env } = makeEnv();
     const room = await makeRoom(env, "d1", "HLD");

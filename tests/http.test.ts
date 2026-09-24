@@ -43,7 +43,11 @@ describe("diagrams API", () => {
     const response = await worker.fetch(req("/api/diagrams"), env.env);
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    const listed = (await response.json()) as Array<{ id: string; key: string; name: string }>;
+    const page = (await response.json()) as {
+      items: Array<{ id: string; key: string; name: string }>;
+      nextCursor: string | null;
+    };
+    const listed = page.items;
     expect(listed.map((d) => d.id)).toEqual([agent.id, old.id]);
     const opened = await Promise.all(
       listed.map((d) => worker.fetch(req(`/api/d/${d.id}?k=${d.key}`), env.env)),
@@ -54,17 +58,113 @@ describe("diagrams API", () => {
       403,
     );
     const again = await worker.fetch(req("/api/diagrams"), env.env);
-    expect(await again.json()).toEqual(listed);
+    expect(await again.json()).toEqual(page);
     await post(env, `/api/d/${agent.id}/rename?k=${listed[0].key}`, { name: "Renamed" });
     const updated = await worker.fetch(req("/api/diagrams"), env.env);
     expect(await updated.json()).toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: "Renamed" })]),
+      expect.objectContaining({
+        items: expect.arrayContaining([expect.objectContaining({ name: "Renamed" })]),
+      }),
     );
   });
 
   it("returns an empty server library before any boards exist", async () => {
     const env = makeEnv();
-    expect(await (await worker.fetch(req("/api/diagrams"), env.env)).json()).toEqual([]);
+    expect(await (await worker.fetch(req("/api/diagrams"), env.env)).json()).toEqual({
+      items: [],
+      nextCursor: null,
+    });
+  });
+
+  it("paginates tied timestamps without duplicates, even after insertion and cursor-row deletion", async () => {
+    const env = makeEnv();
+    const created = await Promise.all(
+      Array.from({ length: 5 }, (_, i) => create(env, `Board ${i}`)),
+    );
+    for (const d of created) env.db.diagrams.get(d.id)!.created_at = 100;
+    const expected = created
+      .map((d) => d.id)
+      .sort()
+      .toReversed();
+    const first = (await (await worker.fetch(req("/api/diagrams?limit=2"), env.env)).json()) as {
+      items: Array<{ id: string; key: string }>;
+      nextCursor: string;
+    };
+    expect(first.items.map((d) => d.id)).toEqual(expected.slice(0, 2));
+    expect(env.db.library.size).toBe(2); // Backfill is bounded to the requested page.
+    await create(env, "Newer during pagination");
+    const last = first.items[1];
+    const removed = await worker.fetch(
+      req(`/api/d/${last.id}?k=${last.key}`, { method: "DELETE" }),
+      env.env,
+    );
+    expect(removed.status).toBe(204);
+    const second = (await (
+      await worker.fetch(
+        req(`/api/diagrams?limit=2&cursor=${encodeURIComponent(first.nextCursor)}`),
+        env.env,
+      )
+    ).json()) as typeof first;
+    expect(second.items.map((d) => d.id)).toEqual(expected.slice(2, 4));
+    const third = (await (
+      await worker.fetch(
+        req(`/api/diagrams?limit=2&cursor=${encodeURIComponent(second.nextCursor)}`),
+        env.env,
+      )
+    ).json()) as typeof first;
+    expect(third.items.map((d) => d.id)).toEqual(expected.slice(4));
+    expect(third.nextCursor).toBeNull();
+  });
+
+  it("rejects invalid pagination parameters", async () => {
+    const env = makeEnv();
+    const params = [
+      "limit=0",
+      "limit=101",
+      "limit=-1",
+      "limit=1.5",
+      "limit=all",
+      "limit=",
+      "cursor=bad",
+      "cursor=",
+      `cursor=${btoa(JSON.stringify({ createdAt: -1, id: "abcdefgh" }))}`,
+    ];
+    const results = await Promise.all(
+      params.map((param) => worker.fetch(req(`/api/diagrams?${param}`), env.env)),
+    );
+    expect(results.every((res) => res.status === 400)).toBe(true);
+  });
+
+  it("deletes only an authorized board and disables old and library links", async () => {
+    const env = makeEnv();
+    const [target, keep] = await Promise.all([create(env, "Prod smoke"), create(env, "Keep")]);
+    const page = (await (await worker.fetch(req("/api/diagrams"), env.env)).json()) as {
+      items: Array<{ id: string; key: string }>;
+    };
+    const libraryKey = page.items.find((d) => d.id === target.id)!.key;
+    expect(
+      (await worker.fetch(req(`/api/d/${target.id}?k=wrong`, { method: "DELETE" }), env.env))
+        .status,
+    ).toBe(403);
+    expect(
+      (
+        await worker.fetch(
+          req(`/api/d/${target.id}?k=${libraryKey}`, { method: "DELETE" }),
+          env.env,
+        )
+      ).status,
+    ).toBe(204);
+    const result = (await (
+      await worker.fetch(req("/api/diagrams"), env.env)
+    ).json()) as typeof page;
+    expect(result.items.map((d) => d.id)).toEqual([keep.id]);
+    const blocked = await Promise.all(
+      [target.key, libraryKey].map((key) =>
+        worker.fetch(req(`/api/d/${target.id}?k=${key}`), env.env),
+      ),
+    );
+    expect(blocked.map((res) => res.status)).toEqual([403, 403]);
+    expect((await worker.fetch(req(`/api/d/${keep.id}?k=${keep.key}`), env.env)).status).toBe(200);
   });
 
   it("creates a diagram and serves its capability link", async () => {
