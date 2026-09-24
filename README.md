@@ -1,4 +1,4 @@
-# System Design Companion
+# System Design
 
 A live Excalidraw canvas that you, your interviewer, and Claude Code edit together. See [docs/design.md](docs/design.md).
 
@@ -11,9 +11,11 @@ pnpm dev          # http://localhost:5173
 
 1. Open http://localhost:5173, create a diagram (optionally from a template).
 2. Add the MCP server once (use the deployed URL + `/mcp` in production):
-   - Claude Code: `claude mcp add --transport http canvas http://localhost:5173/mcp`
-   - Codex: `codex mcp add canvas --url http://localhost:5173/mcp`
+   - Claude Code: `claude mcp add --transport http system-design http://localhost:5173/mcp`
+   - Codex: `codex mcp add system-design --url http://localhost:5173/mcp`
 3. Tell the agent "join <share link>", then draw together. Select things on the canvas and say "what about this?".
+
+If you previously registered this server as `canvas`, remove that entry in your MCP client and add it again as `system-design` using the command above. Existing diagram links still work.
 
 ## Deploy (Cloudflare)
 
@@ -23,12 +25,13 @@ npx wrangler r2 bucket create system-design-companion
 pnpm deploy
 ```
 
-Then `claude mcp add --transport http canvas https://<your-worker>.workers.dev/mcp` (or `codex mcp add canvas --url …/mcp`).
+Then `claude mcp add --transport http system-design https://<your-worker>.workers.dev/mcp` (or `codex mcp add system-design --url …/mcp`).
 
 ## Using it in the interview
 
 - **Share / Agent**: copies the edit link for the interviewer, plus the Claude setup command and join prompt.
-- **Versions**: every Claude edit is snapshotted first, so one click undoes it. You can also save named checkpoints and save a diagram as a template.
+- **Shape library**: includes editable, grouped database cylinders, users, desktop devices, and phones, alongside the standard service and infrastructure blocks.
+- **Versions**: every Claude edit is snapshotted first with a name based on the requested change (or the edited components), so one click undoes it. You can also save named checkpoints and save a diagram as a template.
 - Claude's elements are violet, and a toast says when Claude changed something.
 - MCP prompts: `review_design`, `suggest_next_step`, `estimate_capacity`. Resource: `rubric://system-design`.
 - In clients that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps) (Claude Desktop/web, ChatGPT, VS Code), `get_scene` also shows a hand-drawn picture of the canvas inline, with refresh, full screen (live-updating) and open-canvas buttons. Terminal clients get the usual text. The view lives in `src/view/`; `pnpm build:view` bundles it into `public/mcp-view.html`, which the worker reads via the `ASSETS` binding.

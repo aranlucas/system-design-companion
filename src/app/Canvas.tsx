@@ -157,7 +157,7 @@ export function Canvas({ id, k }: { id: string; k: string }) {
         const msg = JSON.parse(ev.data) as ServerMessage;
         if (msg.type === "init") {
           setName(msg.name);
-          document.title = `${msg.name} · System Design Canvas`;
+          document.title = `${msg.name} · System Design`;
           remember({ id, key: k, name: msg.name });
           const remote = restoreElements(msg.elements as any, null);
           const local = api.getSceneElementsIncludingDeleted();

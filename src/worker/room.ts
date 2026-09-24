@@ -9,6 +9,7 @@ import type {
   Viewport,
 } from "../shared/protocol.ts";
 import { Scene, graphView, type Author, type Op } from "./scene.ts";
+import { patchSnapshotName } from "./patch-name.ts";
 
 interface TabState {
   selection: string[];
@@ -267,8 +268,11 @@ export class DiagramRoom extends DurableObject<Env> {
     };
   }
 
-  async applyPatch(ops: Op[], author: Author = "agent") {
-    const snap = author === "agent" ? await this.snapshot("before agent patch", "auto") : undefined;
+  async applyPatch(ops: Op[], author: Author = "agent", summary?: string) {
+    const snap =
+      author === "agent"
+        ? await this.snapshot(patchSnapshotName(ops, new Scene(this.els.values()), summary), "auto")
+        : undefined;
     const scene = new Scene(this.els.values());
     const results = scene.apply(ops, author);
     const tidied = scene.tidy(scene.touchedFrames());

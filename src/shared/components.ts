@@ -8,6 +8,7 @@ export interface Component {
   label: string;
   shape: ComponentShape;
   fill: string;
+  icon?: "database" | "user" | "device" | "phone";
   group: "Clients" | "Edge" | "Compute" | "Data" | "Messaging" | "External";
 }
 
@@ -22,9 +23,47 @@ const FILL = {
 };
 
 export const COMPONENTS: Component[] = [
+  {
+    kind: "user",
+    label: "User",
+    shape: "ellipse",
+    icon: "user",
+    fill: FILL.client,
+    group: "Clients",
+  },
+  {
+    kind: "device",
+    label: "Device",
+    shape: "rectangle",
+    icon: "device",
+    fill: FILL.client,
+    group: "Clients",
+  },
+  {
+    kind: "database",
+    label: "Database",
+    shape: "ellipse",
+    icon: "database",
+    fill: FILL.data,
+    group: "Data",
+  },
   { kind: "client", label: "Client", shape: "ellipse", fill: FILL.client, group: "Clients" },
-  { kind: "mobile", label: "Mobile App", shape: "ellipse", fill: FILL.client, group: "Clients" },
-  { kind: "web", label: "Web App", shape: "ellipse", fill: FILL.client, group: "Clients" },
+  {
+    kind: "mobile",
+    icon: "phone",
+    label: "Mobile App",
+    shape: "ellipse",
+    fill: FILL.client,
+    group: "Clients",
+  },
+  {
+    kind: "web",
+    icon: "device",
+    label: "Web App",
+    shape: "ellipse",
+    fill: FILL.client,
+    group: "Clients",
+  },
   { kind: "dns", label: "DNS", shape: "rectangle", fill: FILL.edge, group: "Edge" },
   { kind: "cdn", label: "CDN", shape: "rectangle", fill: FILL.edge, group: "Edge" },
   {
@@ -59,8 +98,22 @@ export const COMPONENTS: Component[] = [
     fill: FILL.compute,
     group: "Compute",
   },
-  { kind: "sql_db", label: "SQL DB", shape: "ellipse", fill: FILL.data, group: "Data" },
-  { kind: "nosql_db", label: "NoSQL DB", shape: "ellipse", fill: FILL.data, group: "Data" },
+  {
+    kind: "sql_db",
+    icon: "database",
+    label: "SQL DB",
+    shape: "ellipse",
+    fill: FILL.data,
+    group: "Data",
+  },
+  {
+    kind: "nosql_db",
+    icon: "database",
+    label: "NoSQL DB",
+    shape: "ellipse",
+    fill: FILL.data,
+    group: "Data",
+  },
   {
     kind: "object_store",
     label: "Object Storage",
@@ -69,8 +122,22 @@ export const COMPONENTS: Component[] = [
     group: "Data",
   },
   { kind: "search", label: "Search Index", shape: "ellipse", fill: FILL.data, group: "Data" },
-  { kind: "timeseries", label: "Time-series DB", shape: "ellipse", fill: FILL.data, group: "Data" },
-  { kind: "warehouse", label: "Data Warehouse", shape: "ellipse", fill: FILL.data, group: "Data" },
+  {
+    kind: "timeseries",
+    icon: "database",
+    label: "Time-series DB",
+    shape: "ellipse",
+    fill: FILL.data,
+    group: "Data",
+  },
+  {
+    kind: "warehouse",
+    icon: "database",
+    label: "Data Warehouse",
+    shape: "ellipse",
+    fill: FILL.data,
+    group: "Data",
+  },
   { kind: "cache", label: "Cache", shape: "rectangle", fill: FILL.cache, group: "Data" },
   { kind: "queue", label: "Queue", shape: "rectangle", fill: FILL.messaging, group: "Messaging" },
   {

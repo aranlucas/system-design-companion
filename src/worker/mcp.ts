@@ -24,7 +24,7 @@ const INSTRUCTIONS = `Collaborative Excalidraw canvas for system design. A human
 Workflow:
 1. Every diagram tool takes \`diagram\`: the canvas share link (…/d/<id>?k=<key>). If you don't have one, ask the user for it, or call create_diagram. Call join_session once to validate it and get an overview, then keep passing the same link.
 2. Read before you write: get_scene (semantic graph) and get_selection ("this"/"these" means the user's selection). Use get_screenshot when layout, freehand sketches, or visual clarity matter.
-3. Edit with apply_patch: batch related ops in one call. Address nodes by id, unique label, or a ref defined earlier in the same batch. Use placement hints instead of coordinates. Prefer add_node with a standard \`kind\` (sql_db, cache, queue, load_balancer, …) so colours stay consistent. Every batch is auto-snapshotted and tinted violet, so the user can undo with restore.
+3. Edit with apply_patch: batch related ops in one call. Address nodes by id, unique label, or a ref defined earlier in the same batch. Use placement hints instead of coordinates. Prefer add_node with a standard \`kind\` (sql_db, cache, queue, load_balancer, …) so colours stay consistent. Include a short summary of the user’s requested change in apply_patch so version names reflect their feedback. Every batch is auto-snapshotted and tinted violet, so the user can undo with restore.
 4. Structure: put content inside frames (pass \`frame\`, or place relative to something already in the frame). Keep labels short; notes are word-wrapped automatically. Use tidy when things look cluttered; use layout only when asked to re-arrange.
 5. When asked for feedback, reply in chat. Only annotate the canvas (add_note) when asked. Keep labels short; put detail in notes.`;
 
@@ -125,7 +125,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
   const origin = url.origin;
 
   const server = new McpServer(
-    { name: "system-design-canvas", version: "0.2.0" },
+    { name: "system-design", title: "System Design", version: "0.2.0" },
     { instructions: INSTRUCTIONS, capabilities: { tools: {}, prompts: {}, resources: {} } },
   );
 
@@ -297,10 +297,22 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
     {
       description:
         "Apply a batch of semantic edits. Ops run in order; later ops can use refs from earlier ones. A snapshot is taken first (undo with restore). Returns per-op results; failed ops don't abort the batch.",
-      inputSchema: z.object({ diagram: diagramArg, ops: z.array(opSchema).min(1) }),
+      inputSchema: z.object({
+        diagram: diagramArg,
+        ops: z.array(opSchema).min(1),
+        summary: z
+          .string()
+          .trim()
+          .min(1)
+          .max(120)
+          .optional()
+          .describe(
+            "Short description of the user's requested change, e.g. 'Separate device ingestion from analytics'. Use the user's feedback and intent, not tool names. Used to name the pre-edit version; omit the 'Before:' prefix.",
+          ),
+      }),
     },
-    guard(async ({ diagram, ops }: { diagram: string; ops: Op[] }) =>
-      room(env, (await pick(diagram)).id).applyPatch(ops, "agent"),
+    guard(async ({ diagram, ops, summary }: { diagram: string; ops: Op[]; summary?: string }) =>
+      room(env, (await pick(diagram)).id).applyPatch(ops, "agent", summary),
     ),
   );
 

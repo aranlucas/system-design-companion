@@ -58,6 +58,33 @@ describe("DiagramRoom ops layer", () => {
     expect(await room.listSnapshots()).toHaveLength(0);
   });
 
+  it("names the pre-edit version from user feedback and restores the previous state", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    const out = await room.applyPatch(
+      [{ op: "add_node", kind: "device" }],
+      "agent",
+      "  Model devices separately from users  ",
+    );
+    expect((await room.listSnapshots())[0].name).toBe(
+      "Before: Model devices separately from users",
+    );
+    expect((await graphOf(room)).nodes).toHaveLength(1);
+    await room.restore(out.snapshotId!);
+    expect((await graphOf(room)).nodes ?? []).toHaveLength(0);
+  });
+
+  it("falls back to component and existing node labels for version names", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    await room.applyPatch([{ op: "add_node", kind: "database" }]);
+    expect((await room.listSnapshots())[0].name).toBe("Before: Add Database");
+    const node = (await graphOf(room)).nodes![0];
+    const out = await room.applyPatch([{ op: "update", target: node.id, label: "Events DB" }]);
+    const snap = (await room.listSnapshots()).find((s) => s.id === out.snapshotId);
+    expect(snap?.name).toBe("Before: Rename Database to Events DB");
+  });
+
   it("tidy and layout wrap edits in snapshots", async () => {
     const { env } = makeEnv();
     const room = await makeRoom(env);

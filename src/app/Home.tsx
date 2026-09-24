@@ -43,7 +43,7 @@ export function Home() {
 
   return (
     <main className="home">
-      <h1>System Design Canvas</h1>
+      <h1>System Design</h1>
       <p className="muted">
         A shared Excalidraw canvas that you, your interviewer, and Claude edit together.
       </p>
