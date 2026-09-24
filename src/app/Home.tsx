@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { CopyRow } from "./CopyRow.tsx";
-import { forget, library, linkFor, remember, setupCommands, type LibraryEntry } from "./local.ts";
+import { linkFor, remember, setupCommands } from "./local.ts";
+
+interface Diagram {
+  id: string;
+  key: string;
+  name: string;
+  createdAt: number;
+}
 
 interface Template {
   id: string;
@@ -9,16 +16,48 @@ interface Template {
 }
 
 export function Home() {
-  const [items, setItems] = useState<LibraryEntry[]>(library());
+  const [items, setItems] = useState<Diagram[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [templates, setTemplates] = useState<Template[]>([]);
   const [name, setName] = useState("");
   const [template, setTemplate] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    const refresh = () => setItems(library());
-    window.addEventListener("storage", refresh);
-    return () => window.removeEventListener("storage", refresh);
+    const controller = new AbortController();
+    let pending = false;
+    async function refresh() {
+      if (pending || document.hidden) return;
+      pending = true;
+      try {
+        const response = await fetch("/api/diagrams", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("Could not load diagrams. Retrying automatically.");
+        const diagrams = (await response.json()) as Diagram[];
+        if (!controller.signal.aborted) {
+          setItems(diagrams);
+          setError("");
+        }
+      } catch (err) {
+        if (!controller.signal.aborted) setError((err as Error).message);
+      } finally {
+        pending = false;
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }
+    void refresh();
+    const timer = window.setInterval(refresh, 10000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   }, []);
 
   useEffect(() => {
@@ -89,24 +128,17 @@ export function Home() {
       </section>
 
       <section className="card">
-        <h2>Your diagrams</h2>
-        {items.length === 0 && (
-          <p className="muted">Nothing yet. Diagrams you create or open appear here.</p>
+        <h2>All diagrams</h2>
+        {loading && <p className="muted">Loading diagrams…</p>}
+        {error && <p role="alert">{error}</p>}
+        {!loading && !error && items.length === 0 && (
+          <p className="muted">No diagrams yet. Create one here or through your agent.</p>
         )}
         <ul className="list">
           {items.map((d) => (
             <li key={d.id}>
               <a href={linkFor(d.id, d.key)}>{d.name}</a>
-              <span className="muted">{new Date(d.openedAt).toLocaleString()}</span>
-              <button
-                className="link"
-                onClick={() => {
-                  forget(d.id);
-                  setItems(library());
-                }}
-              >
-                Forget
-              </button>
+              <span className="muted">{new Date(d.createdAt).toLocaleString()}</span>
             </li>
           ))}
         </ul>

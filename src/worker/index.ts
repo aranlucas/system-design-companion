@@ -2,6 +2,7 @@ import { createMcpHandler } from "@modelcontextprotocol/server";
 import { buildServer } from "./mcp.ts";
 import {
   createDiagram,
+  listDiagrams,
   listTemplates,
   room,
   saveAsTemplate,
@@ -26,6 +27,11 @@ export default {
 
       if (path === "/api/templates" && request.method === "GET")
         return json(await listTemplates(env));
+
+      if (path === "/api/diagrams" && request.method === "GET")
+        return Response.json(await listDiagrams(env), {
+          headers: { "Cache-Control": "no-store" },
+        });
 
       if (path === "/api/diagrams" && request.method === "POST") {
         const body = (await request.json()) as { name?: string; template?: string };

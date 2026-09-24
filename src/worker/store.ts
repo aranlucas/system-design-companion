@@ -14,6 +14,10 @@ export function ensureSchema(env: Env) {
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     ),
     env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS diagram_library (
+        diagram_id TEXT PRIMARY KEY, access_key TEXT NOT NULL)`,
+    ),
+    env.DB.prepare(
       `CREATE TABLE IF NOT EXISTS snapshots (
         id TEXT PRIMARY KEY, diagram_id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL,
         created_at INTEGER NOT NULL, element_count INTEGER NOT NULL)`,
@@ -56,8 +60,13 @@ export async function verifyKey(
   )
     .bind(id)
     .first<DiagramRow & { key_hash: string }>();
-  if (!row || row.key_hash !== (await sha256(key))) return null;
-  return row;
+  if (!row) return null;
+  if (row.key_hash === (await sha256(key))) return row;
+  if (row.is_template) return null;
+  const entry = await env.DB.prepare("SELECT access_key FROM diagram_library WHERE diagram_id = ?")
+    .bind(id)
+    .first<{ access_key: string }>();
+  return entry?.access_key === key ? row : null;
 }
 
 /** Parse a share link (full URL, path, or "id?k=key"). */
@@ -79,6 +88,26 @@ export async function listTemplates(env: Env) {
       description: r.description ?? "saved template",
     })),
   ];
+}
+
+/** Deployment-wide shared library, including boards created before this feature.
+ * Library links are additional capabilities; original share links remain valid.
+ */
+export async function listDiagrams(env: Env) {
+  await ensureSchema(env);
+  // A single idempotent statement backfills old boards and handles concurrent readers.
+  await env.DB.prepare(
+    `INSERT OR IGNORE INTO diagram_library (diagram_id, access_key)
+     SELECT id, lower(hex(randomblob(32))) FROM diagrams
+     WHERE is_template = 0 AND NOT EXISTS
+       (SELECT 1 FROM diagram_library WHERE diagram_id = diagrams.id)`,
+  ).run();
+  const { results } = await env.DB.prepare(
+    `SELECT d.id, d.name, l.access_key AS key, d.created_at AS createdAt
+     FROM diagrams d JOIN diagram_library l ON l.diagram_id = d.id
+     WHERE d.is_template = 0 ORDER BY d.created_at DESC, d.id ASC`,
+  ).all<{ id: string; name: string; key: string; createdAt: number }>();
+  return results;
 }
 
 export async function createDiagram(env: Env, name: string, template?: string) {

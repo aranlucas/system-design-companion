@@ -25,6 +25,7 @@ export interface SnapshotRow {
 export class FakeD1 {
   diagrams = new Map<string, DiagramRow>();
   snapshots: SnapshotRow[] = [];
+  library = new Map<string, string>();
 
   async batch(_stmts: unknown[]): Promise<unknown[]> {
     return []; // ensureSchema() DDL: no-op
@@ -65,6 +66,13 @@ export class FakeD1 {
   }
 
   private run(sql: string, p: unknown[]): void {
+    if (sql.includes("INSERT OR IGNORE INTO diagram_library")) {
+      for (const row of this.diagrams.values()) {
+        if (!row.is_template && !this.library.has(row.id))
+          this.library.set(row.id, crypto.randomUUID().replaceAll("-", ""));
+      }
+      return;
+    }
     if (sql.includes("INSERT INTO diagrams")) {
       if (sql.includes("description")) {
         const [id, name, key_hash, description, created_at, updated_at] = p as [
@@ -129,12 +137,27 @@ export class FakeD1 {
   }
 
   private first(sql: string, p: unknown[]): unknown {
+    if (sql.includes("FROM diagram_library WHERE diagram_id = ?")) {
+      const access_key = this.library.get(p[0] as string);
+      return access_key ? { access_key } : null;
+    }
     if (sql.includes("FROM diagrams WHERE id = ?"))
       return this.diagrams.get(p[0] as string) ?? null;
     throw new Error(`FakeD1.first: unsupported SQL: ${sql}`);
   }
 
   private all(sql: string, p: unknown[]): unknown[] {
+    if (sql.includes("FROM diagrams d JOIN diagram_library")) {
+      return [...this.diagrams.values()]
+        .filter((d) => !d.is_template && this.library.has(d.id))
+        .sort((a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id))
+        .map((d) => ({
+          id: d.id,
+          name: d.name,
+          key: this.library.get(d.id),
+          createdAt: d.created_at,
+        }));
+    }
     if (sql.includes("WHERE is_template = 1")) {
       return [...this.diagrams.values()]
         .filter((r) => r.is_template === 1)

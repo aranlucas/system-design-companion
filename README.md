@@ -50,3 +50,16 @@ node scripts/scene-smoke.ts      # scene engine smoke test
 
 See [docs/improvements.md](docs/improvements.md) for test coverage, findings, and
 related-project research.
+
+## Shared diagram library
+
+All diagrams lists every saved non-template board in this deployment, including boards
+created through MCP and boards that predate the library. No browser history or manual
+link registration is needed. The list refreshes every ten seconds while visible and
+when the window regains focus. Original share links remain valid.
+
+This deployment is a shared workspace: anyone who can reach the app can list and open
+its diagrams, including editing them. Protect the deployment with access controls if
+it should be private. The library uses additional server-managed links rather than
+recovering or replacing the original capability keys. Clearing browser storage does
+not remove boards from the library.

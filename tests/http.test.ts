@@ -1,7 +1,7 @@
 // Worker HTTP routes with real DiagramRooms on fake D1/R2.
 import { describe, expect, it } from "vitest";
 import worker from "../src/worker/index.ts";
-import { parseLink } from "../src/worker/store.ts";
+import { createDiagram, parseLink } from "../src/worker/store.ts";
 import type { Author } from "../src/worker/scene.ts";
 import { makeEnv, type TestEnv } from "./helpers/fakes.ts";
 
@@ -33,6 +33,40 @@ async function create(env: TestEnv, name: string, template?: string) {
 }
 
 describe("diagrams API", () => {
+  it("lists existing and agent-created diagrams without browser history, preserving old links", async () => {
+    const env = makeEnv();
+    const old = await create(env, "Existing board");
+    env.db.diagrams.get(old.id)!.created_at = 1;
+    // MCP uses the same createDiagram function, without any browser registration.
+    const agent = await createDiagram(env.env, "Agent board");
+    await post(env, `/api/d/${old.id}/template?k=${old.key}`, { name: "Template" });
+    const response = await worker.fetch(req("/api/diagrams"), env.env);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    const listed = (await response.json()) as Array<{ id: string; key: string; name: string }>;
+    expect(listed.map((d) => d.id)).toEqual([agent.id, old.id]);
+    const opened = await Promise.all(
+      listed.map((d) => worker.fetch(req(`/api/d/${d.id}?k=${d.key}`), env.env)),
+    );
+    expect(opened.map((result) => result.status)).toEqual([200, 200]);
+    expect((await worker.fetch(req(`/api/d/${old.id}?k=${old.key}`), env.env)).status).toBe(200);
+    expect((await worker.fetch(req(`/api/d/${old.id}?k=${listed[0].key}`), env.env)).status).toBe(
+      403,
+    );
+    const again = await worker.fetch(req("/api/diagrams"), env.env);
+    expect(await again.json()).toEqual(listed);
+    await post(env, `/api/d/${agent.id}/rename?k=${listed[0].key}`, { name: "Renamed" });
+    const updated = await worker.fetch(req("/api/diagrams"), env.env);
+    expect(await updated.json()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "Renamed" })]),
+    );
+  });
+
+  it("returns an empty server library before any boards exist", async () => {
+    const env = makeEnv();
+    expect(await (await worker.fetch(req("/api/diagrams"), env.env)).json()).toEqual([]);
+  });
+
   it("creates a diagram and serves its capability link", async () => {
     const env = makeEnv();
     const d = await create(env, "HLD");
