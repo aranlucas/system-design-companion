@@ -62,14 +62,17 @@ export class DiagramRoom extends DurableObject<Env> {
   }
 
   private persist(changed: El[]) {
-    for (const el of changed) {
-      this.els.set(el.id, el);
-      this.ctx.storage.sql.exec(
-        "INSERT OR REPLACE INTO elements (id, json) VALUES (?, ?)",
-        el.id,
-        JSON.stringify(el),
-      );
-    }
+    this.ctx.storage.transactionSync(() => {
+      for (const el of changed) {
+        this.ctx.storage.sql.exec(
+          "INSERT OR REPLACE INTO elements (id, json) VALUES (?, ?)",
+          el.id,
+          JSON.stringify(el),
+        );
+      }
+    });
+    // Publish in memory only after every write succeeds.
+    for (const el of changed) this.els.set(el.id, el);
   }
 
   private broadcast(msg: ServerMessage, except?: WebSocket) {

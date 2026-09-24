@@ -18,5 +18,6 @@ jobs:
           require-lockfile: true
           cache: true
       - run: pnpm check
+      - run: pnpm test
       - run: node scripts/scene-smoke.ts > /dev/null
       - run: pnpm build > /dev/null

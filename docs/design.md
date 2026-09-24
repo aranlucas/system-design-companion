@@ -28,6 +28,7 @@ Tabs report `focus`, `selection` and `viewport` to their room. `get_selection` a
 
 ## Agent edits
 
+- Scene edits are prepared on isolated element copies. Element writes roll back together on failure; the room updates memory and broadcasts only after the transaction succeeds.
 - Every `apply_patch` / `import_mermaid` / `layout` batch takes an automatic snapshot first, and `restore` undoes it.
 - Agent-created elements are tinted violet and tagged `customData.author = "agent"`.
 - The agent may modify or delete anything, with snapshots as the safety net.

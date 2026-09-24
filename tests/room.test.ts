@@ -1,5 +1,5 @@
 // DiagramRoom on fake storage: ops layer, snapshots, merge rule, presence.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AGENT_STROKE, type El } from "../src/shared/protocol.ts";
 import { DiagramRoom } from "../src/worker/room.ts";
 import type { Author, Op } from "../src/worker/scene.ts";
@@ -124,6 +124,69 @@ describe("DiagramRoom ops layer", () => {
     expect((await room.getRaw()).every((e) => !e.isDeleted)).toBe(true);
     expect(((await graphOf(room)).nodes ?? []).map((n) => n.label)).toEqual(["B"]);
   });
+});
+
+describe("failed batch persistence", () => {
+  it.each(["agent", "human"] as const)(
+    "%s edits leave storage, memory and peers unchanged on failure, then can retry",
+    async (author) => {
+      const { env } = makeEnv();
+      const { ctx, sql, addWs } = makeRoomCtx();
+      const room = new DiagramRoom(ctx as unknown as DurableObjectState, env);
+      await room.init("d", "D");
+      await room.applyPatch(
+        [
+          { op: "add_node", ref: "a", label: "API" },
+          { op: "add_node", ref: "b", label: "DB" },
+          { op: "connect", from: "a", to: "b" },
+        ],
+        "template",
+      );
+      const before = structuredClone(await room.getRaw());
+      const storedBefore = new Map(sql.elements);
+      const ws = makeWs();
+      addWs(ws);
+      const edit = () =>
+        author === "agent"
+          ? room.applyPatch([
+              { op: "update", target: "API", label: "Gateway" },
+              { op: "remove", target: "DB" },
+            ])
+          : room.webSocketMessage(
+              ws as unknown as WebSocket,
+              JSON.stringify({
+                type: "update",
+                elements: before.map((el) => ({ ...el, x: el.x + 100, version: el.version + 1 })),
+              }),
+            );
+      const exec = sql.exec.bind(sql);
+      let writes = 0;
+      const spy = vi.spyOn(sql, "exec").mockImplementation((query, ...params) => {
+        if (query.startsWith("INSERT OR REPLACE INTO elements") && ++writes === 2)
+          throw new Error("injected write failure");
+        return exec(query, ...params);
+      });
+      try {
+        await expect(edit()).rejects.toThrow("injected write failure");
+        expect(writes).toBe(2);
+        expect(sql.elements).toEqual(storedBefore);
+        expect(await room.getRaw()).toEqual(before);
+        expect(ws.sent).toEqual([]);
+        const reloaded = new DiagramRoom(ctx as unknown as DurableObjectState, env);
+        expect(await reloaded.getRaw()).toEqual(before);
+      } finally {
+        spy.mockRestore();
+      }
+      const peer = makeWs();
+      addWs(peer);
+      await edit();
+      expect(await room.getRaw()).not.toEqual(before);
+      expect(peer.sent).toHaveLength(1);
+      expect(JSON.parse(peer.sent[0])).toMatchObject({ type: "update", origin: author });
+      const reloaded = new DiagramRoom(ctx as unknown as DurableObjectState, env);
+      expect(await reloaded.getRaw()).toEqual(await room.getRaw());
+    },
+  );
 });
 
 describe("concurrent-edit merge rule", () => {

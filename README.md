@@ -37,7 +37,7 @@ Then `claude mcp add --transport http canvas https://<your-worker>.workers.dev/m
 
 ```sh
 pnpm check                    # typecheck, Oxlint, Oxfmt
-pnpm test                     # vitest: scene engine, rooms, HTTP routes (97 tests)
+pnpm test                     # vitest: scene engine, rooms, HTTP routes (99 tests)
 pnpm format                   # apply Oxfmt
 node scripts/scene-smoke.ts      # scene engine smoke test
 ```

@@ -246,7 +246,8 @@ export class Scene {
   private grownFrames = new Set<string>();
 
   constructor(elements: Iterable<El>) {
-    this.els = new Map([...elements].map((e) => [e.id, e]));
+    // Edits stay local until the caller commits them, including nested bindings.
+    this.els = new Map(structuredClone([...elements]).map((e) => [e.id, e]));
   }
 
   // ---------- basics ----------

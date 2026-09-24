@@ -203,7 +203,20 @@ export function makeRoomCtx() {
   return {
     sql,
     ctx: {
-      storage: { sql },
+      storage: {
+        sql,
+        transactionSync: <T>(fn: () => T): T => {
+          const elements = new Map(sql.elements);
+          const meta = new Map(sql.meta);
+          try {
+            return fn();
+          } catch (error) {
+            sql.elements = elements;
+            sql.meta = meta;
+            throw error;
+          }
+        },
+      },
       getWebSockets: () => [...sockets],
       acceptWebSocket: (ws: unknown) => {
         sockets.add(ws);

@@ -1,7 +1,7 @@
 # Improvements & research
 
 Companion to [design.md](design.md). Sources: the new `tests/` suite (`pnpm test`,
-97 tests), a review of `src/worker/*.ts`, and a survey of comparable projects (Sep 2026).
+99 tests), a review of `src/worker/*.ts`, and a survey of comparable projects (Sep 2026).
 
 ## 1. What the test suite covers
 
@@ -17,7 +17,7 @@ Companion to [design.md](design.md). Sources: the new `tests/` suite (`pnpm test
 | `tests/http.test.ts`            | Worker routes with real rooms: create/get/rename, 403s, builtin + saved templates, snapshots/restore/tidy over HTTP, 404s, `/mcp` reachability                                                                                               |
 | `tests/helpers/fakes.ts`        | In-memory D1 / R2 / DO-SQL / sockets; `cloudflare:workers` stubbed via `vitest.config.ts` alias                                                                                                                                              |
 
-Run: `pnpm test`. The suite is part of `pnpm check` (typechecked, linted, formatted).
+Run: `pnpm test`. The suite is typechecked, linted, and formatted by `pnpm check`; CI runs it with `pnpm test`.
 
 ## 2. Findings from writing the tests (all verified in code)
 
@@ -30,8 +30,14 @@ High impact:
 - **No snapshot retention or pagination.** `listSnapshots()` caps at 30 with no offset
   (`src/worker/room.ts:330`); R2/D1 grow forever. Cap auto-snapshots per diagram and add
   `DELETE /snapshots/:id`.
-- **`persist()` has no transaction** (`src/worker/room.ts:64`): one `sql.exec` per element.
-  A crash mid-`commit` diverges memory/broadcast from storage. Batch the writes.
+- **Fixed: failed batches could change live memory before persistence succeeded.**
+  `Scene` now clones its input elements, and `persist()` wraps writes in
+  `transactionSync` before updating the room's map and broadcasting. Injected second-write
+  failures cover agent patches and human WebSocket updates, rollback, reload, and retry.
+  Correction to the original finding: Cloudflare already coalesces synchronous writes
+  into an atomic implicit transaction; the explicit transaction guarantees rollback when
+  its callback throws. See [Cloudflare storage semantics](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#transactionsync).
+  Tests use fake storage; workerd crash/output-gate behavior remains outside this suite.
 - **Tombstones are never collected.** `restoreTo()` only adds `isDeleted`
   (`src/worker/scene.ts:1371`); elements table and `init` payloads grow unboundedly.
 - **`seed()` has no empty-check and `init()` is re-callable** (`src/worker/room.ts:351`,
@@ -131,3 +137,27 @@ judgement. Each writes back through the existing `applyPatch` path (free snapsho
    retrieval.
 
 Suggested build order: §2 high-impact fixes → 1+2 → 3 → 4+5 → 6+7 → 8 → 9.
+
+## 6. Architecture review (Sep 24, 2026)
+
+Keep the original scope: a live canvas shared by the candidate, interviewer, and agent.
+The stateless MCP adapter → per-diagram room → pure scene engine split supports that
+well. Keep mutations and undo in the room so HTTP, MCP, and future in-room agents share
+one implementation.
+
+Priorities after the persistence fix:
+
+- Protect undo: validate snapshot payloads before restore, add retention/pagination, and
+  recover from partial R2/D1 failures. Reordering those writes alone cannot make two
+  independent services atomic.
+- Add an actual MCP initialize → tools/call test, including invalid capability links
+  and a patch → read → restore round trip. HTTP reachability does not prove the agent
+  can collaborate.
+- Bound model-facing scene responses with frame filtering and pagination; keep the
+  app's complete rendering path separate so truncation does not hide canvas elements.
+- Preserve focused-tab semantics when improving RPC reliability: broadcasting a selected
+  screenshot request to every tab can return a different person's view. Add bounded
+  pending requests and deliberate fallback behavior.
+- Then implement `compute_capacity` as pure arithmetic with explicit assumptions and
+  opt-in writeback through `applyPatch`. This directly supports interview discussion;
+  deterministic grading needs more evidence than component presence alone.
