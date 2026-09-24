@@ -6,3 +6,10 @@ minimumReleaseAgeExclude:
   - miniflare@5.20260921.1-alpha
   - vite@8.3.1
   - wrangler@4.138.0
+  - '@oxlint-tsgolint/darwin-arm64@7.0.2003'
+  - '@oxlint-tsgolint/darwin-x64@7.0.2003'
+  - '@oxlint-tsgolint/linux-arm64@7.0.2003'
+  - '@oxlint-tsgolint/linux-x64@7.0.2003'
+  - '@oxlint-tsgolint/win32-arm64@7.0.2003'
+  - '@oxlint-tsgolint/win32-x64@7.0.2003'
+  - oxlint-tsgolint@7.0.2003
