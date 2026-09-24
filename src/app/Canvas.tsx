@@ -6,6 +6,7 @@ import {
   Footer,
   getCommonBounds,
   MainMenu,
+  Sidebar,
   reconcileElements,
   restoreElements,
 } from "@excalidraw/excalidraw";
@@ -46,8 +47,6 @@ export function Canvas({ id, k }: { id: string; k: string }) {
   const [name, setName] = useState("…");
   const [peers, setPeers] = useState(1);
   const [status, setStatus] = useState<"connecting" | "live" | "offline">("connecting");
-  const [panel, setPanel] = useState<null | "versions" | "share" | "rename">(null);
-  const [toast, setToast] = useState<string | null>(null);
   const [pointer, setPointer] = useState<{
     x: number;
     y: number;
@@ -70,10 +69,9 @@ export function Canvas({ id, k }: { id: string; k: string }) {
   apiRef.current = api;
   (window as any).excalidrawAPI = api; // handy for debugging from the console
 
-  const flash = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 2500);
-  };
+  const flash = (message: string) => apiRef.current?.setToast({ message, duration: 2500 });
+  const open = (sidebar: "share" | "versions" | "rename") =>
+    apiRef.current?.toggleSidebar({ name: sidebar, force: true });
 
   const send = (m: ClientMessage) => {
     if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify(m));
@@ -346,8 +344,6 @@ export function Canvas({ id, k }: { id: string; k: string }) {
     );
   };
 
-  const toggle = (p: "share" | "versions") => setPanel(panel === p ? null : p);
-
   const shareLink = linkFor(id, k);
   const copy = (text: string, what: string) => {
     void navigator.clipboard.writeText(text);
@@ -385,25 +381,21 @@ export function Canvas({ id, k }: { id: string; k: string }) {
         }}
         onPointerDown={() => sendPresence()}
         renderTopRightUI={() => (
-          <button
-            className={`share-trigger ${panel === "share" ? "active" : ""}`}
-            onClick={() => toggle("share")}
+          <Sidebar.Trigger
+            name="share"
             title={`${name} · ${status} · ${peers} here`}
+            icon={<span className={`dot ${status}`} />}
           >
-            <span className={`dot ${status}`} />
-            <span className="peers">{peers}</span>
-            Share
-          </button>
+            {peers} · Share
+          </Sidebar.Trigger>
         )}
       >
         <MainMenu>
           <MainMenu.Group title={name}>
-            <MainMenu.Item onSelect={() => setPanel("rename")}>Rename diagram</MainMenu.Item>
+            <MainMenu.Item onSelect={() => open("rename")}>Rename diagram</MainMenu.Item>
             <MainMenu.Item onSelect={tidy}>Tidy layout</MainMenu.Item>
-            <MainMenu.Item onSelect={() => setPanel("versions")}>Versions</MainMenu.Item>
-            <MainMenu.Item onSelect={() => setPanel("share")}>
-              Share &amp; connect agent
-            </MainMenu.Item>
+            <MainMenu.Item onSelect={() => open("versions")}>Versions</MainMenu.Item>
+            <MainMenu.Item onSelect={() => open("share")}>Share &amp; connect agent</MainMenu.Item>
             <MainMenu.ItemLink href="/">All diagrams</MainMenu.ItemLink>
           </MainMenu.Group>
           <MainMenu.Separator />
@@ -415,76 +407,70 @@ export function Canvas({ id, k }: { id: string; k: string }) {
           <MainMenu.DefaultItems.ToggleTheme />
           <MainMenu.DefaultItems.ChangeCanvasBackground />
         </MainMenu>
+        {/* Excalidraw only renders <Footer> on desktop; the menu above covers mobile. */}
         <Footer>
           <div className="footbar">
+            <Sidebar.Trigger name="rename" title="Rename diagram" className="title">
+              {name} ✎
+            </Sidebar.Trigger>
             <button
-              className="title"
-              title="Rename diagram"
-              aria-label={`Rename diagram: ${name}`}
-              onClick={() => setPanel("rename")}
+              className="sidebar-trigger"
+              onClick={tidy}
+              title="Fix overlaps, alignment and frames (undo via Versions)"
             >
-              {name} <span aria-hidden="true">✎</span>
-            </button>
-            <button onClick={tidy} title="Fix overlaps, alignment and frames (undo via Versions)">
               Tidy
             </button>
-            <button
-              className={panel === "versions" ? "active" : ""}
-              onClick={() => toggle("versions")}
-            >
+            <Sidebar.Trigger name="versions" title="Versions">
               Versions
-            </button>
+            </Sidebar.Trigger>
           </div>
         </Footer>
+        <Sidebar name="rename">
+          <Sidebar.Header>Rename diagram</Sidebar.Header>
+          <RenamePanel
+            name={name}
+            id={id}
+            diagramKey={k}
+            onRenamed={(newName) => {
+              setName(newName);
+              document.title = `${newName} · System Design`;
+              remember({ id, key: k, name: newName });
+              api?.toggleSidebar({ name: "rename", force: false });
+              flash("Diagram renamed");
+            }}
+          />
+        </Sidebar>
+        <Sidebar name="versions">
+          <Sidebar.Header>Versions</Sidebar.Header>
+          <VersionsPanel id={id} k={k} flash={flash} />
+        </Sidebar>
+        <Sidebar name="share">
+          <Sidebar.Header>Share &amp; connect</Sidebar.Header>
+          <div className="sd-panel">
+            <p className="muted">
+              Edit link: anyone with it can edit (give it to your interviewer).
+            </p>
+            <div className="row">
+              <code className="cmd">{shareLink}</code>
+              <button onClick={() => copy(shareLink, "Link")}>Copy</button>
+            </div>
+            <p className="muted">Agent, one-time setup:</p>
+            {setupCommands().map(({ client, cmd }) => (
+              <CopyRow key={client} label={client} text={cmd} />
+            ))}
+            <p className="muted">Then tell the agent:</p>
+            <div className="row">
+              <code className="cmd">join {shareLink}</code>
+              <button onClick={() => copy(`Join my system design canvas: ${shareLink}`, "Prompt")}>
+                Copy
+              </button>
+            </div>
+            <p className="muted">
+              <a href="/">All diagrams →</a>
+            </p>
+          </div>
+        </Sidebar>
       </Excalidraw>
-      {panel === "rename" && (
-        <RenamePanel
-          name={name}
-          id={id}
-          diagramKey={k}
-          onClose={() => setPanel(null)}
-          onRenamed={(newName) => {
-            setName(newName);
-            document.title = `${newName} · System Design`;
-            remember({ id, key: k, name: newName });
-            setPanel(null);
-            flash("Diagram renamed");
-          }}
-        />
-      )}
-      {panel === "versions" && (
-        <VersionsPanel id={id} k={k} onClose={() => setPanel(null)} flash={flash} />
-      )}
-      {panel === "share" && (
-        <div className="panel">
-          <header>
-            <b>Share &amp; connect</b>
-            <button className="link" onClick={() => setPanel(null)}>
-              ✕
-            </button>
-          </header>
-          <p className="muted">Edit link: anyone with it can edit (give it to your interviewer).</p>
-          <div className="row">
-            <code className="cmd">{shareLink}</code>
-            <button onClick={() => copy(shareLink, "Link")}>Copy</button>
-          </div>
-          <p className="muted">Agent, one-time setup:</p>
-          {setupCommands().map(({ client, cmd }) => (
-            <CopyRow key={client} label={client} text={cmd} />
-          ))}
-          <p className="muted">Then tell the agent:</p>
-          <div className="row">
-            <code className="cmd">join {shareLink}</code>
-            <button onClick={() => copy(`Join my system design canvas: ${shareLink}`, "Prompt")}>
-              Copy
-            </button>
-          </div>
-          <p className="muted">
-            <a href="/">All diagrams →</a>
-          </p>
-        </div>
-      )}
-      {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }
@@ -493,13 +479,11 @@ function RenamePanel({
   name,
   id,
   diagramKey,
-  onClose,
   onRenamed,
 }: {
   name: string;
   id: string;
   diagramKey: string;
-  onClose: () => void;
   onRenamed: (name: string) => void;
 }) {
   const [draft, setDraft] = useState(name);
@@ -512,7 +496,7 @@ function RenamePanel({
   }, []);
   return (
     <form
-      className="panel"
+      className="sd-panel"
       aria-label="Rename diagram"
       onSubmit={async (event) => {
         event.preventDefault();
@@ -534,12 +518,6 @@ function RenamePanel({
         }
       }}
     >
-      <header>
-        <b>Rename diagram</b>
-        <button type="button" className="link" disabled={busy} onClick={onClose}>
-          Cancel
-        </button>
-      </header>
       <label htmlFor="diagram-name">Diagram name</label>
       <input
         ref={input}
@@ -558,17 +536,7 @@ function RenamePanel({
   );
 }
 
-function VersionsPanel({
-  id,
-  k,
-  onClose,
-  flash,
-}: {
-  id: string;
-  k: string;
-  onClose: () => void;
-  flash: (m: string) => void;
-}) {
+function VersionsPanel({ id, k, flash }: { id: string; k: string; flash: (m: string) => void }) {
   const [snaps, setSnaps] = useState<Snapshot[] | null>(null);
   const [label, setLabel] = useState("");
   const q = `?k=${encodeURIComponent(k)}`;
@@ -589,13 +557,7 @@ function VersionsPanel({
     }).then((r) => r.json());
 
   return (
-    <div className="panel">
-      <header>
-        <b>Versions</b>
-        <button className="link" onClick={onClose}>
-          ✕
-        </button>
-      </header>
+    <div className="sd-panel">
       <form
         className="row"
         onSubmit={async (e) => {

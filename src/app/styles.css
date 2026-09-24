@@ -69,9 +69,9 @@ body,
   flex: 1;
   min-width: 140px;
 }
-input,
-select,
-button {
+/* Form styling for our own pages/panels only; unscoped it leaked onto
+   Excalidraw's inputs and buttons. */
+:is(.home, .sd-panel) :is(input, select, button) {
   font: inherit;
   font-size: 14px;
   padding: 7px 10px;
@@ -80,13 +80,13 @@ button {
   background: var(--card);
   color: var(--fg);
 }
-button {
+:is(.home, .sd-panel) button {
   cursor: pointer;
 }
-button:hover {
+:is(.home, .sd-panel) button:hover {
   border-color: var(--accent);
 }
-button.link {
+:is(.home, .sd-panel) button.link {
   border: none;
   background: none;
   color: var(--muted);
@@ -146,47 +146,56 @@ button.link {
   transform: translate(-50%, -50%);
   pointer-events: none;
 }
-/* Chrome lives in Excalidraw's own slots: Share (top-right), name + Tidy +
-   Versions (footer), everything else in the hamburger menu. */
-.share-trigger,
-.footbar button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: var(--lg-button-size, 2.25rem);
-  padding: 0 12px;
-  border: none;
-  border-radius: var(--border-radius-lg, 8px);
-  background: var(--island-bg-color);
-  box-shadow: var(--shadow-island);
-  color: var(--text-primary-color);
-  font-size: 13px;
-  white-space: nowrap;
-  cursor: pointer;
+/* Canvas chrome is Excalidraw's own: Sidebar.Trigger buttons (top-right Share,
+   footer Rename/Versions) open native <Sidebar>s, toasts use api.setToast.
+   Inside .excalidraw, the page tokens below resolve to Excalidraw's, so the
+   shared classes (.row, .cmd, .list, .tag, .muted) follow its light/dark theme. */
+.canvas-wrap .excalidraw {
+  --bg: var(--color-surface-low);
+  --card: var(--input-bg-color);
+  --fg: var(--text-primary-color);
+  --muted: var(--color-gray-50);
+  --border: var(--input-border-color);
+  --accent: var(--color-primary);
 }
-.share-trigger:hover,
-.footbar button:hover,
-.share-trigger.active,
-.footbar button.active {
-  background: var(--button-hover-bg, var(--color-surface-high));
-}
-.share-trigger .peers {
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
+/* FooterCenter has no leading margin; match .undo-redo-buttons' 0.6em. */
 .footbar {
   display: flex;
-  gap: 6px;
-  align-items: center;
-  font-size: 13px;
+  gap: 0.6em;
+  min-width: 0;
+  margin-inline-start: 0.6em;
 }
-.footbar .title {
-  font-weight: 600;
-  max-width: 220px;
+.footbar .title .sidebar-trigger__label {
+  max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0 4px;
+  line-height: normal;
+  font-weight: 600;
+}
+.sd-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  padding: 0 0.75rem 1rem;
+  overflow: auto;
+  color: var(--text-primary-color);
+  font-size: 0.875rem;
+}
+.sd-panel p {
+  margin: 4px 0 0;
+}
+.sd-panel button {
+  border: none;
+  background: var(--color-surface-low);
+  box-shadow: 0 0 0 1px var(--color-surface-lowest);
+}
+.sd-panel button:hover {
+  background: var(--button-hover-bg);
+}
+.sd-panel a {
+  color: var(--link-color);
 }
 .dot {
   width: 8px;
@@ -199,33 +208,6 @@ button.link {
 }
 .dot.offline {
   background: #e03131;
-}
-.panel {
-  position: absolute;
-  top: 64px;
-  right: 16px;
-  width: min(380px, calc(100vw - 32px));
-  max-height: calc(100vh - 100px);
-  overflow: auto;
-  z-index: 10;
-  background: var(--card);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 14px;
-}
-.panel header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.panel p {
-  margin: 4px 0 0;
 }
 .snaps li {
   font-size: 13px;
@@ -240,19 +222,6 @@ button.link {
 .tag.named {
   border-color: var(--accent);
   color: var(--accent);
-}
-.toast {
-  position: absolute;
-  bottom: 70px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10;
-  background: var(--accent);
-  color: #fff;
-  padding: 8px 14px;
-  border-radius: 8px;
-  font-size: 14px;
-  pointer-events: none;
 }
 .copy-label {
   width: 92px;
