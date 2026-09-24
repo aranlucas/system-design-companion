@@ -36,5 +36,8 @@ export function forget(id: string) {
 }
 
 export const mcpUrl = () => `${location.origin}/mcp`;
-export const mcpAddCommand = () => `claude mcp add --transport http canvas "${mcpUrl()}"`;
+export const setupCommands = () => [
+  { client: "Claude Code", cmd: `claude mcp add --transport http canvas ${mcpUrl()}` },
+  { client: "Codex", cmd: `codex mcp add canvas --url ${mcpUrl()}` },
+];
 export const linkFor = (id: string, key: string) => `${location.origin}/d/${id}?k=${key}`;

@@ -10,8 +10,10 @@ npm run dev          # http://localhost:5173
 ```
 
 1. Open http://localhost:5173, create a diagram (optionally from a template).
-2. Run once: `claude mcp add --transport http canvas http://localhost:5173/mcp` (or the deployed URL + `/mcp`).
-3. In Claude Code: "join <share link>", then draw together. Select things on the canvas and say "what about this?".
+2. Add the MCP server once (use the deployed URL + `/mcp` in production):
+   - Claude Code: `claude mcp add --transport http canvas http://localhost:5173/mcp`
+   - Codex: `codex mcp add canvas --url http://localhost:5173/mcp`
+3. Tell the agent "join <share link>", then draw together. Select things on the canvas and say "what about this?".
 
 ## Deploy (Cloudflare)
 
@@ -21,7 +23,7 @@ npx wrangler r2 bucket create system-design-companion
 npm run deploy
 ```
 
-Then `claude mcp add --transport http canvas https://<your-worker>.workers.dev/mcp`.
+Then `claude mcp add --transport http canvas https://<your-worker>.workers.dev/mcp` (or `codex mcp add canvas --url …/mcp`).
 
 ## Using it in the interview
 

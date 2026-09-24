@@ -10,7 +10,8 @@ import "@excalidraw/excalidraw/index.css";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ClientMessage, El, MermaidParams, ScreenshotParams, ServerMessage } from "../shared/protocol.ts";
-import { linkFor, mcpAddCommand, remember } from "./local.ts";
+import { CopyRow } from "./CopyRow.tsx";
+import { linkFor, remember, setupCommands } from "./local.ts";
 
 interface Snapshot {
   id: string;
@@ -237,12 +238,11 @@ export function Canvas({ id, k }: { id: string; k: string }) {
             <code className="cmd">{shareLink}</code>
             <button onClick={() => copy(shareLink, "Link")}>Copy</button>
           </div>
-          <p className="muted">Claude Code, one-time setup:</p>
-          <div className="row">
-            <code className="cmd">{mcpAddCommand()}</code>
-            <button onClick={() => copy(mcpAddCommand(), "Command")}>Copy</button>
-          </div>
-          <p className="muted">Then tell Claude:</p>
+          <p className="muted">Agent, one-time setup:</p>
+          {setupCommands().map(({ client, cmd }) => (
+            <CopyRow key={client} label={client} text={cmd} />
+          ))}
+          <p className="muted">Then tell the agent:</p>
           <div className="row">
             <code className="cmd">join {shareLink}</code>
             <button onClick={() => copy(`Join my system design canvas: ${shareLink}`, "Prompt")}>Copy</button>

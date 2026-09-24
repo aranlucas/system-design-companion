@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { forget, library, linkFor, mcpAddCommand, remember, type LibraryEntry } from "./local.ts";
+import { CopyRow } from "./CopyRow.tsx";
+import { forget, library, linkFor, remember, setupCommands, type LibraryEntry } from "./local.ts";
 
 interface Template {
   id: string;
@@ -13,7 +14,6 @@ export function Home() {
   const [name, setName] = useState("");
   const [template, setTemplate] = useState("");
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     fetch("/api/templates")
@@ -63,20 +63,11 @@ export function Home() {
       </section>
 
       <section className="card">
-        <h2>Connect Claude Code</h2>
-        <p className="muted">Run once in your terminal. Then say "join &lt;share link&gt;" to Claude.</p>
-        <div className="row">
-          <code className="cmd">{mcpAddCommand()}</code>
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText(mcpAddCommand());
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            }}
-          >
-            {copied ? "Copied" : "Copy"}
-          </button>
-        </div>
+        <h2>Connect your agent</h2>
+        <p className="muted">Run once in your terminal. Then paste a diagram's share link to the agent ("join &lt;link&gt;").</p>
+        {setupCommands().map(({ client, cmd }) => (
+          <CopyRow key={client} label={client} text={cmd} />
+        ))}
       </section>
 
       <section className="card">
