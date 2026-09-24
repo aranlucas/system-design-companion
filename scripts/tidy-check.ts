@@ -48,9 +48,27 @@ const report = (s: Scene) => {
     ];
     if (ends.some(([n, p]) => n && dist(p, n) > 20)) brokenArrows++;
   }
+  // Arrows passing through a node that is not one of their ends (checked per segment).
+  const hit = (p: any, q: any, b: any) => {
+    for (let i = 1; i < 20; i++) {
+      const x = p[0] + ((q[0] - p[0]) * i) / 20;
+      const y = p[1] + ((q[1] - p[1]) * i) / 20;
+      if (x > b.x && x < b.x + b.width && y > b.y && y < b.y + b.height) return true;
+    }
+    return false;
+  };
+  let crossings = 0;
+  for (const a of live.filter((e) => e.type === "arrow")) {
+    const ends = new Set([a.startBinding?.elementId, a.endBinding?.elementId]);
+    const pts = a.points.map((p: number[]) => [a.x + p[0], a.y + p[1]]);
+    const nodes = live.filter((n) => s.isNode(n) && !ends.has(n.id));
+    if (pts.some((p: any, i: number) => i > 0 && nodes.some((n) => hit(pts[i - 1], p, n))))
+      crossings++;
+  }
   const widest = Math.max(...blocks.filter((e) => e.type === "text").map((e) => e.width));
   return {
     brokenArrows,
+    crossings,
     blockOverlaps,
     frameOverlaps,
     loose,

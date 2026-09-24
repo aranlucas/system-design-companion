@@ -142,6 +142,7 @@ export function wrapText(text: string, max = NOTE_WRAP): string {
 
 export interface TidyStats {
   bound: number;
+  rerouted: number;
   adopted: number;
   wrapped: number;
   aligned: number;
@@ -172,15 +173,69 @@ const unionBox = (bs: Box[]): Box | null => {
 };
 
 /** Point on the border of `b` in the direction of `toward`, pushed out by `gap`. */
-function borderPoint(b: Box, toward: { x: number; y: number }, gap: number) {
+/** Point on the outline of a shape (rect, ellipse or diamond) toward `toward`, pushed out by `gap`. */
+function borderPoint(b: Box, toward: { x: number; y: number }, gap: number, shape = "rectangle") {
   const c = center(b);
   const dx = toward.x - c.x;
   const dy = toward.y - c.y;
   if (dx === 0 && dy === 0) return c;
-  const tx = dx !== 0 ? (b.w / 2 + gap) / Math.abs(dx) : Infinity;
-  const ty = dy !== 0 ? (b.h / 2 + gap) / Math.abs(dy) : Infinity;
-  const t = Math.min(tx, ty);
+  const a = b.w / 2 + gap;
+  const bb = b.h / 2 + gap;
+  let t: number;
+  if (shape === "ellipse") t = 1 / Math.hypot(dx / a, dy / bb);
+  else if (shape === "diamond") t = 1 / (Math.abs(dx) / a + Math.abs(dy) / bb);
+  else
+    t = Math.min(dx !== 0 ? a / Math.abs(dx) : Infinity, dy !== 0 ? bb / Math.abs(dy) : Infinity);
   return { x: c.x + dx * t, y: c.y + dy * t };
+}
+
+type Pt = { x: number; y: number };
+
+function distToSegment(p: Pt, a: Pt, b: Pt): number {
+  const l2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+  const t = l2
+    ? Math.max(0, Math.min(1, ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2))
+    : 0;
+  return Math.hypot(p.x - (a.x + t * (b.x - a.x)), p.y - (a.y + t * (b.y - a.y)));
+}
+
+function distToBox(p: Pt, b: Box): number {
+  return Math.hypot(
+    Math.max(b.x - p.x, 0, p.x - (b.x + b.w)),
+    Math.max(b.y - p.y, 0, p.y - (b.y + b.h)),
+  );
+}
+
+/** Proper intersection of segments ab and cd (touching endpoints don't count). */
+function segmentsCross(a: Pt, b: Pt, c: Pt, d: Pt): boolean {
+  const o = (p: Pt, q: Pt, r: Pt) =>
+    Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x));
+  return o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0;
+}
+
+/** Does segment p→q pass through box `b` (inflated by m)? Liang–Barsky clip. */
+function segmentHitsBox(p: Pt, q: Pt, b: Box, m: number): boolean {
+  const [x0, y0, x1, y1] = [b.x - m, b.y - m, b.x + b.w + m, b.y + b.h + m];
+  const dx = q.x - p.x;
+  const dy = q.y - p.y;
+  let t0 = 0;
+  let t1 = 1;
+  for (const [pp, qq] of [
+    [-dx, p.x - x0],
+    [dx, x1 - p.x],
+    [-dy, p.y - y0],
+    [dy, y1 - p.y],
+  ]) {
+    if (pp === 0) {
+      if (qq < 0) return false;
+    } else {
+      const r = qq / pp;
+      if (pp < 0) t0 = Math.max(t0, r);
+      else t1 = Math.min(t1, r);
+      if (t0 > t1) return false;
+    }
+  }
+  return true;
 }
 
 export class Scene {
@@ -500,7 +555,7 @@ export class Scene {
           c.y >= f.y &&
           c.y <= f.y + f.height,
       )
-      .sort((a, b) => a.width * a.height - b.width * b.height);
+      .sort((f1, f2) => f1.width * f1.height - f2.width * f2.height);
     return hits[0] ?? null;
   }
 
@@ -571,8 +626,9 @@ export class Scene {
     if (!t) return;
     if (container.type === "arrow") {
       const pts = container.points as [number, number][];
-      const a = pts[0];
-      const b = pts[pts.length - 1];
+      const mid = (pts.length - 1) / 2;
+      const a = pts[Math.floor(mid)];
+      const b = pts[Math.ceil(mid)];
       const mx = container.x + (a[0] + b[0]) / 2;
       const my = container.y + (a[1] + b[1]) / 2;
       this.mutate(t, {
@@ -597,8 +653,108 @@ export class Scene {
     );
   }
 
+  /**
+   * If a bound arrow passes through a box that isn't one of its ends, give it a single bend on the
+   * side needing the smallest detour. Only touches straight arrows and bends we added (autoBend);
+   * straightens our bend again once the straight path is clear. Returns true if it changed.
+   */
+  private detour(arrow: El): boolean {
+    const pts = arrow.points as [number, number][];
+    const ours = arrow.customData?.autoBend === true;
+    if (pts.length > 2 && !ours) return false; // a human-shaped curve: leave it alone
+    const ends = new Set([arrow.startBinding?.elementId, arrow.endBinding?.elementId]);
+    const obstacles = this.live()
+      .filter((n) => this.isNode(n) && !ends.has(n.id))
+      .map(boxOf);
+    const clear = (path: Pt[]) =>
+      path.every(
+        (p, i) => i === 0 || !obstacles.some((o) => segmentHitsBox(path[i - 1], p, o, 10)),
+      );
+    const abs = (a: El) =>
+      (a.points as [number, number][]).map(([px, py]) => ({ x: a.x + px, y: a.y + py }));
+    const setPath = (bend: Pt | null) => {
+      const cur = abs(arrow);
+      const s0 = cur[0];
+      const e0 = cur.at(-1)!;
+      const rel = (pt: Pt): [number, number] => [Math.round(pt.x - s0.x), Math.round(pt.y - s0.y)];
+      const points = bend ? [rel(s0), rel(bend), rel(e0)] : [rel(s0), rel(e0)];
+      this.mutate(arrow, { points, customData: { ...(arrow.customData ?? {}), autoBend: !!bend } });
+      this.routeArrow(arrow, false); // recompute the ends toward the bend, keeping the bend fixed
+    };
+
+    // Straight path (ends recomputed without any bend).
+    const current = abs(arrow);
+    const straight = (() => {
+      const s = arrow.startBinding && this.els.get(arrow.startBinding.elementId);
+      const t = arrow.endBinding && this.els.get(arrow.endBinding.elementId);
+      const sc = s ? center(boxOf(s)) : current[0];
+      const tc = t ? center(boxOf(t)) : current.at(-1)!;
+      return [
+        s ? borderPoint(boxOf(s), tc, 8, s.type) : sc,
+        t ? borderPoint(boxOf(t), sc, 8, t.type) : tc,
+      ];
+    })();
+
+    if (clear(straight)) {
+      if (pts.length > 2) {
+        setPath(null);
+        return true;
+      }
+      return false;
+    }
+    if (pts.length > 2 && clear(current)) return false; // our bend still works
+
+    // Search perpendicular offsets from the midpoint, nearest first. Ends are re-aimed at the
+    // bend (as routeArrow will draw them), so tightly packed neighbours can still be cleared.
+    const sEl = arrow.startBinding && this.els.get(arrow.startBinding.elementId);
+    const tEl = arrow.endBinding && this.els.get(arrow.endBinding.elementId);
+    const aimed = (bend: Pt): Pt[] => [
+      sEl ? borderPoint(boxOf(sEl), bend, 8, sEl.type) : straight[0],
+      bend,
+      tEl ? borderPoint(boxOf(tEl), bend, 8, tEl.type) : straight[1],
+    ];
+    const [p, q] = straight;
+    const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+    const nx = -(q.y - p.y) / len;
+    const ny = (q.x - p.x) / len;
+    const mid = { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 };
+    // Other arrows' segments: crossing them costs as much as a 150px longer detour.
+    const others: [Pt, Pt][] = [];
+    for (const o of this.live()) {
+      if (o.type !== "arrow" || o.id === arrow.id) continue;
+      const op = abs(o);
+      for (let i = 1; i < op.length; i++) others.push([op[i - 1], op[i]]);
+    }
+    const crossings = (path: Pt[]) => {
+      let n = 0;
+      for (let i = 1; i < path.length; i++)
+        for (const [a, b] of others) if (segmentsCross(path[i - 1], path[i], a, b)) n++;
+      return n;
+    };
+    let best: { bend: Pt; cost: number } | null = null;
+    for (let d = 40; d <= 800; d += 20) {
+      if (best && d >= best.cost) break; // no farther bend can beat it (cost ≥ d)
+      for (const sign of [1, -1]) {
+        const bend = { x: mid.x + nx * d * sign, y: mid.y + ny * d * sign };
+        const path = aimed(bend);
+        if (!clear(path)) continue;
+        // Tie-break away from clutter: a bend sitting on another arrow or hugging a box reads badly.
+        const cramped =
+          others.some(([a, b]) => distToSegment(bend, a, b) < 40) ||
+          obstacles.some((o) => distToBox(bend, o) < 40);
+        const cost = d + 150 * crossings(path) + (cramped ? 60 : 0);
+        if (!best || cost < best.cost) best = { bend, cost };
+      }
+    }
+    if (best) {
+      setPath(best.bend);
+      return true;
+    }
+    return false;
+  }
+
   /** Re-derive a bound arrow's geometry from the shapes it is bound to (bends are kept). */
-  private routeArrow(arrow: El) {
+  private routeArrow(arrow: El, shiftBends = true) {
     const pts = arrow.points as [number, number][];
     const absStart = { x: arrow.x + pts[0][0], y: arrow.y + pts[0][1] };
     const absEnd = { x: arrow.x + pts[pts.length - 1][0], y: arrow.y + pts[pts.length - 1][1] };
@@ -614,13 +770,15 @@ export class Scene {
         : null;
     const sc = sOk ? center(boxOf(sOk)) : absStart;
     const tc = tOk ? center(boxOf(tOk)) : absEnd;
-    const start = sOk ? borderPoint(boxOf(sOk), firstBend ?? tc, 8) : absStart;
-    const end = tOk ? borderPoint(boxOf(tOk), lastBend ?? sc, 8) : absEnd;
+    const start = sOk ? borderPoint(boxOf(sOk), firstBend ?? tc, 8, sOk.type) : absStart;
+    const end = tOk ? borderPoint(boxOf(tOk), lastBend ?? sc, 8, tOk.type) : absEnd;
     // Bends follow the average movement of the two ends.
-    const shift = {
-      x: (start.x - absStart.x + end.x - absEnd.x) / 2,
-      y: (start.y - absStart.y + end.y - absEnd.y) / 2,
-    };
+    const shift = !shiftBends
+      ? { x: 0, y: 0 }
+      : {
+          x: (start.x - absStart.x + end.x - absEnd.x) / 2,
+          y: (start.y - absStart.y + end.y - absEnd.y) / 2,
+        };
     const abs = [
       start,
       ...pts
@@ -972,6 +1130,7 @@ export class Scene {
   tidy(scope?: Set<string | null>): TidyStats {
     const stats: TidyStats = {
       bound: 0,
+      rerouted: 0,
       adopted: 0,
       wrapped: 0,
       aligned: 0,
@@ -1120,6 +1279,17 @@ export class Scene {
     for (const a of this.live()) {
       if (a.type === "arrow" && (a.startBinding || a.endBinding) && inScope(a.frameId))
         this.routeArrow(a);
+    }
+
+    // Detour: bend straight arrows (or our own earlier bends) around boxes they pass through.
+    for (const a of this.live()) {
+      if (
+        a.type === "arrow" &&
+        (a.startBinding || a.endBinding) &&
+        inScope(a.frameId) &&
+        this.detour(a)
+      )
+        stats.rerouted++;
     }
 
     // 5. Fit frames around their contents, then 6. pull overlapping frames apart.

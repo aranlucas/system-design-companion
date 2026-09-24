@@ -200,6 +200,8 @@ export class DiagramRoom extends DurableObject<Env> {
     // Tabs auto-reconnect after a blip (~1.5s); give them a moment before giving up.
     let tab = this.primaryTab();
     for (let i = 0; !tab && i < 12; i++) {
+      // Sequential by design: poll until a tab reconnects.
+      // oxlint-disable-next-line no-await-in-loop
       await new Promise((r) => setTimeout(r, 250));
       tab = this.primaryTab();
     }
