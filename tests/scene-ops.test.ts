@@ -1,6 +1,7 @@
 // Semantic ops: every MCP apply_patch variant, target resolution, authorship.
 import { describe, expect, it } from "vitest";
 import { AGENT_STROKE } from "../src/shared/protocol.ts";
+import { COMPONENTS } from "../src/shared/components.ts";
 import { Scene, type Author, type Op } from "../src/worker/scene.ts";
 
 function fresh(): Scene {
@@ -38,7 +39,8 @@ describe("add_node", () => {
     applyOk(s, [{ op: "add_node", kind: "sql_db" }]);
     const g = graph(s);
     expect(g.nodes[0].label).toBe("SQL DB");
-    expect(g.nodes[0].shape).toBe("ellipse");
+    expect(g.nodes[0].shape).toBe("rectangle");
+    expect(g.nodes[0].icon).toBe("database");
     expect(g.nodes[0].color).toBe("green");
   });
 
@@ -50,6 +52,51 @@ describe("add_node", () => {
     expect(res[1].ok).toBe(false);
     expect(res[1].error).toMatch("needs a label");
     expect(graph(s).nodes ?? []).toHaveLength(0);
+  });
+
+  it("treats every built-in icon as one semantic node", () => {
+    for (const component of COMPONENTS.filter((c) => c.icon)) {
+      const s = fresh();
+      applyOk(s, [{ op: "add_node", kind: component.kind }]);
+      expect(graph(s).nodes).toHaveLength(1);
+      expect(graph(s).edges).toHaveLength(0);
+      expect(graph(s).notes).toHaveLength(0);
+      expect(s.live().some((e) => e.customData?.componentPart)).toBe(true);
+    }
+  });
+
+  it("moves, resizes, connects, tidies and removes an icon together with its artwork", () => {
+    const s = fresh();
+    applyOk(s, [
+      { op: "add_frame", name: "Design", ref: "f" },
+      { op: "add_node", kind: "database", ref: "db", frame: "f" },
+      { op: "add_node", kind: "server", ref: "api", frame: "f", place: { right_of: "db" } },
+      { op: "connect", from: "api", to: "db" },
+    ]);
+    const root = s.resolve("db");
+    const parts = s
+      .live()
+      .filter((e) => e.customData?.componentPart && e.groupIds.includes(root.groupIds[0]));
+    const previous = { x: root.x, y: root.y, w: root.width, h: root.height };
+    const positions = parts.map((p) => ({ x: p.x, y: p.y }));
+    applyOk(s, [
+      { op: "update", target: "db", width: 300, height: 200, move: { at: { x: 700, y: 500 } } },
+    ]);
+    parts.forEach((part, i) => {
+      expect(part.x).toBeCloseTo(
+        root.x + ((positions[i].x - previous.x) * root.width) / previous.w,
+      );
+      expect(part.y).toBeCloseTo(
+        root.y + ((positions[i].y - previous.y) * root.height) / previous.h,
+      );
+    });
+    s.tidy();
+    expect(graph(s).nodes).toHaveLength(2);
+    expect(graph(s).edges).toHaveLength(1);
+    applyOk(s, [{ op: "update", target: "db", label: "Route history", color: "blue" }]);
+    expect(graph(s).nodes.find((n) => n.id === root.id)?.color).toBe("blue");
+    applyOk(s, [{ op: "remove", target: "Route history" }]);
+    expect(parts.every((part) => part.isDeleted)).toBe(true);
   });
 
   it("tags agent elements violet, human elements neutral", () => {

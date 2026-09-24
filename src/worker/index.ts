@@ -48,12 +48,15 @@ export default {
         if (path.startsWith("/ws/")) return stub.fetch(request);
         if (sub === "" && request.method === "GET") return json({ id: row.id, name: row.name });
         if (sub === "/rename" && request.method === "POST") {
-          const { name } = (await request.json()) as { name: string };
+          const body = (await request.json()) as { name?: unknown };
+          const name = typeof body.name === "string" ? body.name.trim() : "";
+          if (!name || name.length > 120)
+            return json({ error: "Use a name between 1 and 120 characters." }, 400);
           await env.DB.prepare("UPDATE diagrams SET name = ?, updated_at = ? WHERE id = ?")
             .bind(name, Date.now(), id)
             .run();
           await stub.rename(name);
-          return json({ ok: true });
+          return json({ ok: true, name });
         }
         if (sub === "/snapshots" && request.method === "GET")
           return json(await stub.listSnapshots());

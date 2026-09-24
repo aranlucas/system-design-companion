@@ -1,6 +1,7 @@
 // Scene engine: semantic ops ⇄ Excalidraw elements. Pure logic, no Workers APIs.
 import dagre from "@dagrejs/dagre";
 import { generateKeyBetween } from "fractional-indexing";
+import { iconElements } from "../shared/icons.ts";
 import { componentByKind } from "../shared/components.ts";
 import { AGENT_STROKE, type El } from "../shared/protocol.ts";
 
@@ -159,7 +160,19 @@ export function measureText(text: string, fontSize: number) {
   };
 }
 
-const boxOf = (e: El): Box => ({ x: e.x, y: e.y, w: e.width, h: e.height });
+const boxOf = (e: El): Box => {
+  if ((e.type === "arrow" || e.type === "line") && e.points?.length) {
+    const xs = e.points.map((p: number[]) => p[0]);
+    const ys = e.points.map((p: number[]) => p[1]);
+    return {
+      x: e.x + Math.min(...xs),
+      y: e.y + Math.min(...ys),
+      w: Math.max(...xs) - Math.min(...xs),
+      h: Math.max(...ys) - Math.min(...ys),
+    };
+  }
+  return { x: e.x, y: e.y, w: e.width, h: e.height };
+};
 const center = (b: Box) => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
 const overlaps = (a: Box, b: Box, m = 20) =>
   a.x < b.x + b.w + m && b.x < a.x + a.w + m && a.y < b.y + b.h + m && b.y < a.y + a.h + m;
@@ -393,7 +406,7 @@ export class Scene {
   }
 
   isNode(e: El) {
-    return !e.isDeleted && SHAPE_TYPES.has(e.type);
+    return !e.isDeleted && !e.customData?.componentPart && SHAPE_TYPES.has(e.type);
   }
 
   // ---------- target resolution ----------
@@ -573,6 +586,7 @@ export class Scene {
   private setFrame(el: El, frame: El | null) {
     if ((el.frameId ?? null) === (frame?.id ?? null)) return;
     this.mutate(el, { frameId: frame?.id ?? null });
+    for (const part of this.iconParts(el)) this.mutate(part, { frameId: frame?.id ?? null });
     const t = this.boundText(el);
     if (t) this.mutate(t, { frameId: frame?.id ?? null });
   }
@@ -640,7 +654,11 @@ export class Scene {
       const c = center(boxOf(container));
       this.mutate(t, {
         x: Math.round(c.x - t.width / 2),
-        y: Math.round(c.y - t.height / 2),
+        y: container.customData?.icon
+          ? container.y + container.height - t.height - 5
+          : Math.round(c.y - t.height / 2),
+        verticalAlign: container.customData?.icon ? "bottom" : "middle",
+        groupIds: container.groupIds ?? [],
         frameId: container.frameId ?? null,
       });
     }
@@ -662,12 +680,40 @@ export class Scene {
   private detour(arrow: El): boolean {
     const pts = arrow.points as [number, number][];
     const ours = arrow.customData?.autoBend === true;
-    if (pts.length > 2 && !ours) return false; // a human-shaped curve: leave it alone
+    const source = this.els.get(arrow.startBinding?.elementId);
+    const target = this.els.get(arrow.endBinding?.elementId);
+    const frame =
+      source?.frameId && source.frameId === target?.frameId
+        ? this.els.get(source.frameId)
+        : undefined;
+    const text = this.boundText(arrow);
+    const inside = (path: Pt[]) => {
+      if (!frame) return true;
+      const contains = (p: Pt, mx = 8, my = 8) =>
+        p.x >= frame.x + mx &&
+        p.x <= frame.x + frame.width - mx &&
+        p.y >= frame.y + my &&
+        p.y <= frame.y + frame.height - my;
+      const mid = (path.length - 1) / 2;
+      const a = path[Math.floor(mid)],
+        b = path[Math.ceil(mid)];
+      return (
+        path.every((p) => contains(p)) &&
+        contains(
+          { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+          (text?.width ?? 0) / 2 + 8,
+          (text?.height ?? 0) / 2 + 8,
+        )
+      );
+    };
+    const existing = pts.map(([x, y]) => ({ x: arrow.x + x, y: arrow.y + y }));
+    if (pts.length > 2 && !ours && inside(existing)) return false; // preserve valid human curves
     const ends = new Set([arrow.startBinding?.elementId, arrow.endBinding?.elementId]);
     const obstacles = this.live()
       .filter((n) => this.isNode(n) && !ends.has(n.id))
       .map(boxOf);
     const clear = (path: Pt[]) =>
+      inside(path) &&
       path.every(
         (p, i) => i === 0 || !obstacles.some((o) => segmentHitsBox(path[i - 1], p, o, 10)),
       );
@@ -751,6 +797,12 @@ export class Scene {
       setPath(best.bend);
       return true;
     }
+    // If no obstacle-free detour fits, containment wins over avoiding crossings.
+    // A crowded frame should not send its connections into another design section.
+    if (!inside(current) && inside(straight)) {
+      setPath(null);
+      return true;
+    }
     return false;
   }
 
@@ -812,7 +864,19 @@ export class Scene {
   /** Move a node (and its label) and re-route attached arrows. */
   private moveNode(el: El, box: Box) {
     if (el.x === box.x && el.y === box.y && el.width === box.w && el.height === box.h) return;
+    const previous = boxOf(el);
     this.mutate(el, { x: box.x, y: box.y, width: box.w, height: box.h });
+    for (const part of this.iconParts(el)) {
+      const sx = box.w / previous.w,
+        sy = box.h / previous.h;
+      this.mutate(part, {
+        x: box.x + (part.x - previous.x) * sx,
+        y: box.y + (part.y - previous.y) * sy,
+        width: part.width * sx,
+        height: part.height * sy,
+        ...(part.points ? { points: part.points.map(([x, y]: number[]) => [x * sx, y * sy]) } : {}),
+      });
+    }
     this.centerLabel(el);
     for (const a of this.arrowsBoundTo(el.id)) this.routeArrow(a);
   }
@@ -864,8 +928,17 @@ export class Scene {
     this.centerLabel(container);
   }
 
+  private iconParts(el: El): El[] {
+    if (!el.customData?.icon) return [];
+    const group = el.groupIds?.at(-1);
+    return this.live().filter(
+      (part) => part.customData?.componentPart && group && part.groupIds?.includes(group),
+    );
+  }
+
   private deleteEl(el: El) {
     if (el.isDeleted) return;
+    for (const part of this.iconParts(el)) this.mutate(part, { isDeleted: true });
     this.mutate(el, { isDeleted: true });
     const t = this.boundText(el);
     if (t) this.mutate(t, { isDeleted: true });
@@ -895,19 +968,55 @@ export class Scene {
     let frame = this.impliedFrame(o.frame, o.place);
     const m = measureText(label, 20);
     const w = Math.max(o.width ?? NODE_MIN_W, m.width + PAD);
-    const h = Math.max(o.height ?? NODE_MIN_H, m.height + PAD);
+    const icon = o.shape ? undefined : comp?.icon;
+    const h = Math.max(o.height ?? (icon ? 120 : NODE_MIN_H), m.height + (icon ? 95 : PAD));
     const box = this.place(o.place, w, h, frame);
-    const shape = o.shape ?? comp?.shape ?? "rectangle";
+    const shape = icon ? "rectangle" : (o.shape ?? comp?.shape ?? "rectangle");
     const fill = o.color ? (COLORS[o.color] ?? o.color) : (comp?.fill ?? "transparent");
     const node = this.add(
       this.base(shape, box, author, {
-        backgroundColor: fill,
+        backgroundColor: icon ? "transparent" : fill,
+        ...(icon ? { strokeColor: "transparent", groupIds: [newId()] } : {}),
         roundness: shape === "rectangle" ? { type: 3 } : shape === "diamond" ? { type: 2 } : null,
         frameId: frame?.id ?? null,
-        customData: { author, ...(comp ? { kind: comp.kind } : {}) },
+        customData: {
+          author,
+          ...(comp ? { kind: comp.kind } : {}),
+          ...(icon ? { icon, iconFill: fill } : {}),
+        },
       }),
     );
     if (!frame && (frame = this.frameAt(box))) this.setFrame(node, frame);
+    if (icon && comp) {
+      for (const part of iconElements(comp, w)) {
+        const { type, x, y, width = 0, height = 0, ...style } = part;
+        this.add(
+          this.base(type, { x: box.x + x, y: box.y + y, w: width, h: height }, author, {
+            backgroundColor:
+              type === "line" &&
+              !(
+                style.points?.length &&
+                JSON.stringify(style.points[0]) === JSON.stringify(style.points.at(-1))
+              )
+                ? "transparent"
+                : fill,
+            ...style,
+            groupIds: node.groupIds,
+            frameId: node.frameId,
+            customData: { componentPart: true, author },
+            ...(type === "line"
+              ? {
+                  lastCommittedPoint: null,
+                  startBinding: null,
+                  endBinding: null,
+                  startArrowhead: null,
+                  endArrowhead: null,
+                }
+              : {}),
+          }),
+        );
+      }
+    }
     this.setLabel(node, label, author);
     if (frame) this.fitFrame(frame);
     this.lastPlaced = node.id;
@@ -970,20 +1079,38 @@ export class Scene {
         if (el.frameId) this.fitFrame(this.els.get(el.frameId)!);
       } else this.setLabel(el, o.label, author);
     }
-    if (o.color !== undefined) this.mutate(el, { backgroundColor: COLORS[o.color] ?? o.color });
-    if (o.dashed !== undefined) this.mutate(el, { strokeStyle: o.dashed ? "dashed" : "solid" });
+    if (o.color !== undefined) {
+      const color = COLORS[o.color] ?? o.color;
+      if (el.customData?.icon) {
+        this.mutate(el, { customData: { ...el.customData, iconFill: color } });
+        for (const part of this.iconParts(el))
+          if (part.backgroundColor !== "transparent") this.mutate(part, { backgroundColor: color });
+      } else this.mutate(el, { backgroundColor: color });
+    }
+    if (o.dashed !== undefined) {
+      for (const part of [el, ...this.iconParts(el)])
+        this.mutate(part, { strokeStyle: o.dashed ? "dashed" : "solid" });
+    }
     if (o.shape && SHAPE_TYPES.has(el.type)) {
+      for (const part of this.iconParts(el)) this.mutate(part, { isDeleted: true });
+      const { icon: _icon, iconFill, ...data } = el.customData ?? {};
       this.mutate(el, {
+        customData: data,
+        ...(iconFill
+          ? {
+              backgroundColor: iconFill,
+              strokeColor: author === "agent" ? AGENT_STROKE : "#1e1e1e",
+            }
+          : {}),
         type: o.shape,
         roundness:
           o.shape === "rectangle" ? { type: 3 } : o.shape === "diamond" ? { type: 2 } : null,
       });
+      this.centerLabel(el);
     }
     if (o.frame !== undefined) {
       const f = o.frame === null ? null : this.frameOf(o.frame);
-      this.mutate(el, { frameId: f?.id ?? null });
-      const t = this.boundText(el);
-      if (t) this.mutate(t, { frameId: f?.id ?? null });
+      this.setFrame(el, f);
       if (f && !o.move) {
         const inside =
           el.x >= f.x &&
@@ -1048,9 +1175,7 @@ export class Scene {
       }),
     );
     for (const k of kids) {
-      this.mutate(k, { frameId: frame.id });
-      const t = this.boundText(k);
-      if (t) this.mutate(t, { frameId: frame.id });
+      this.setFrame(k, frame);
     }
     this.setRef(o.ref, frame.id);
     return frame;
@@ -1178,9 +1303,21 @@ export class Scene {
       }
     }
 
+    // Connections between siblings belong to that frame, even when their bends are outside it.
+    for (const arrow of this.live()) {
+      if (arrow.type !== "arrow") continue;
+      const source = this.els.get(arrow.startBinding?.elementId);
+      const target = this.els.get(arrow.endBinding?.elementId);
+      const frame =
+        source?.frameId && source.frameId === target?.frameId
+          ? this.els.get(source.frameId)
+          : undefined;
+      if (frame && inScope(frame.id) && arrow.frameId !== frame.id) this.setFrame(arrow, frame);
+    }
+
     // 2. Wrap notes that are far too wide.
     for (const e of this.live()) {
-      if (e.type !== "text" || e.containerId || !inScope(e.frameId)) continue;
+      if (e.type !== "text" || e.containerId || e.groupIds?.length || !inScope(e.frameId)) continue;
       const wrapped = wrapText(e.text ?? "");
       if (wrapped !== e.text) {
         const m = measureText(wrapped, e.fontSize ?? 20);
@@ -1196,7 +1333,8 @@ export class Scene {
 
     const groups = new Map<string | null, El[]>();
     for (const e of this.live()) {
-      if (!isBlock(e) || !inScope(e.frameId)) continue;
+      if (!isBlock(e) || (e.groupIds?.length && !e.customData?.icon) || !inScope(e.frameId))
+        continue;
       const k = e.frameId ?? null;
       groups.set(k, [...(groups.get(k) ?? []), e]);
     }
@@ -1362,7 +1500,8 @@ export class Scene {
         updated: Date.now(),
         customData: { ...(e.customData ?? {}), author },
       };
-      if (author === "agent" && el.type !== "text") el.strokeColor = AGENT_STROKE;
+      if (author === "agent" && el.type !== "text" && el.strokeColor !== "transparent")
+        el.strokeColor = AGENT_STROKE;
       this.add(el);
     }
     return live.length;
@@ -1386,7 +1525,7 @@ export class Scene {
   // ---------- read model ----------
 
   graph(selection?: Set<string>) {
-    const live = this.live();
+    const live = this.live().filter((e) => !e.customData?.componentPart);
     const nodes = live.filter((e) => this.isNode(e));
     const frames = live.filter((e) => e.type === "frame");
     const frameName = (id: string | null | undefined) =>
@@ -1506,9 +1645,16 @@ export class Scene {
         w: Math.round(n.width),
         h: Math.round(n.height),
         ...(n.frameId ? { frame: frameName(n.frameId) } : {}),
-        ...(n.backgroundColor && n.backgroundColor !== "transparent"
-          ? { color: COLOR_NAMES[n.backgroundColor] ?? n.backgroundColor }
+        ...((n.customData?.iconFill ?? n.backgroundColor) &&
+        (n.customData?.iconFill ?? n.backgroundColor) !== "transparent"
+          ? {
+              color:
+                COLOR_NAMES[n.customData?.iconFill ?? n.backgroundColor] ??
+                n.customData?.iconFill ??
+                n.backgroundColor,
+            }
           : {}),
+        ...(n.customData?.icon ? { icon: n.customData.icon } : {}),
         ...(n.customData?.kind ? { kind: n.customData.kind } : {}),
         ...(n.customData?.author === "agent" ? { by: "agent" } : {}),
         ...(sel?.has(n.id) ? { selected: true } : {}),

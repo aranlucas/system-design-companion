@@ -55,11 +55,24 @@ describe("diagrams API", () => {
   it("renames through D1 and the room together", async () => {
     const env = makeEnv();
     const d = await create(env, "Old");
-    const res = await post(env, `/api/d/${d.id}/rename?k=${d.key}`, { name: "New" });
+    const res = await post(env, `/api/d/${d.id}/rename?k=${d.key}`, { name: "  New  " });
     expect(res.status).toBe(200);
     const got = await worker.fetch(req(`/api/d/${d.id}?k=${d.key}`), env.env);
     expect(await body(got)).toMatchObject({ name: "New" });
     expect((await env.rooms.get(d.id)!.info()).name).toBe("New");
+  });
+
+  it("rejects invalid room names without changing the saved name", async () => {
+    const env = makeEnv();
+    const d = await create(env, "Original");
+    const responses = await Promise.all(
+      ["  ", 42, "x".repeat(121)].map((name) =>
+        post(env, `/api/d/${d.id}/rename?k=${d.key}`, { name }),
+      ),
+    );
+    for (const response of responses) expect(response.status).toBe(400);
+    const response = await worker.fetch(req(`/api/d/${d.id}?k=${d.key}`), env.env);
+    expect(await body(response)).toMatchObject({ name: "Original" });
   });
 
   it("creates from a builtin template into the live room", async () => {

@@ -4,6 +4,7 @@ import {
   Excalidraw,
   exportToBlob,
   Footer,
+  getCommonBounds,
   MainMenu,
   reconcileElements,
   restoreElements,
@@ -14,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ClientMessage,
   El,
+  FocusViewParams,
   MermaidParams,
   ScreenshotParams,
   ServerMessage,
@@ -43,8 +45,16 @@ export function Canvas({ id, k }: { id: string; k: string }) {
   const [name, setName] = useState("…");
   const [peers, setPeers] = useState(1);
   const [status, setStatus] = useState<"connecting" | "live" | "offline">("connecting");
-  const [panel, setPanel] = useState<null | "versions" | "share">(null);
+  const [panel, setPanel] = useState<null | "versions" | "share" | "rename">(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null);
+  const pointerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (pointerTimer.current) clearTimeout(pointerTimer.current);
+    },
+    [],
+  );
 
   const ws = useRef<WebSocket | null>(null);
   const synced = useRef(new Map<string, number>()); // element id → last version exchanged with the room
@@ -122,6 +132,37 @@ export function Canvas({ id, k }: { id: string; k: string }) {
           ok: true,
           data: { base64: await blobToBase64(blob), mimeType: "image/png" },
         });
+      } else if (msg.method === "focus_view") {
+        const { elementIds, mode } = msg.params as FocusViewParams;
+        const ids = new Set(elementIds);
+        const elements = a.getSceneElements().filter((e) => ids.has(e.id));
+        if (!elements.length) throw new Error("Target no longer exists in this tab");
+        if (mode === "focus")
+          a.scrollToContent(elements, { fitToContent: true, animate: false, maxZoom: 1 });
+        // Wait for the viewport change to be applied before positioning the temporary pointer.
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        const state = a.getAppState();
+        const [left, top, right, bottom] = getCommonBounds(elements);
+        const x = (left + right) / 2;
+        const y = (top + bottom) / 2;
+        const screen = {
+          x: (x + state.scrollX) * state.zoom.value + state.offsetLeft,
+          y: (y + state.scrollY) * state.zoom.value + state.offsetTop,
+        };
+        const visible =
+          screen.x >= state.offsetLeft &&
+          screen.x <= state.offsetLeft + state.width &&
+          screen.y >= state.offsetTop &&
+          screen.y <= state.offsetTop + state.height;
+        if (pointerTimer.current) clearTimeout(pointerTimer.current);
+        setPointer(visible ? screen : null);
+        if (visible) pointerTimer.current = setTimeout(() => setPointer(null), 2400);
+        send({
+          type: "rpc_result",
+          reqId: msg.reqId,
+          ok: true,
+          data: { mode, visible, elementIds: elements.map((e) => e.id) },
+        });
       } else if (msg.method === "mermaid") {
         const { source } = msg.params as MermaidParams;
         const { parseMermaidToExcalidraw } = await import("@excalidraw/mermaid-to-excalidraw");
@@ -170,6 +211,10 @@ export function Canvas({ id, k }: { id: string; k: string }) {
             api.scrollToContent(undefined, { fitToViewport: true, viewportZoomFactor: 0.8 });
           // Push anything drawn while offline.
           scheduleSend();
+        } else if (msg.type === "rename") {
+          setName(msg.name);
+          document.title = `${msg.name} · System Design`;
+          remember({ id, key: k, name: msg.name });
         } else if (msg.type === "update") {
           const merged = reconcileElements(
             api.getSceneElementsIncludingDeleted(),
@@ -253,6 +298,13 @@ export function Canvas({ id, k }: { id: string; k: string }) {
 
   return (
     <div className="canvas-wrap">
+      {pointer && (
+        <output
+          className="agent-pointer"
+          aria-label="Agent is pointing here"
+          style={{ left: pointer.x, top: pointer.y }}
+        />
+      )}
       <Excalidraw
         excalidrawAPI={setApi}
         initialData={{ libraryItems: componentLibrary() }}
@@ -276,6 +328,7 @@ export function Canvas({ id, k }: { id: string; k: string }) {
       >
         <MainMenu>
           <MainMenu.Group title={name}>
+            <MainMenu.Item onSelect={() => setPanel("rename")}>Rename diagram</MainMenu.Item>
             <MainMenu.Item onSelect={tidy}>Tidy layout</MainMenu.Item>
             <MainMenu.Item onSelect={() => setPanel("versions")}>Versions</MainMenu.Item>
             <MainMenu.Item onSelect={() => setPanel("share")}>
@@ -294,9 +347,14 @@ export function Canvas({ id, k }: { id: string; k: string }) {
         </MainMenu>
         <Footer>
           <div className="footbar">
-            <span className="title" title={name}>
-              {name}
-            </span>
+            <button
+              className="title"
+              title="Rename diagram"
+              aria-label={`Rename diagram: ${name}`}
+              onClick={() => setPanel("rename")}
+            >
+              {name} <span aria-hidden="true">✎</span>
+            </button>
             <button onClick={tidy} title="Fix overlaps, alignment and frames (undo via Versions)">
               Tidy
             </button>
@@ -309,6 +367,21 @@ export function Canvas({ id, k }: { id: string; k: string }) {
           </div>
         </Footer>
       </Excalidraw>
+      {panel === "rename" && (
+        <RenamePanel
+          name={name}
+          id={id}
+          diagramKey={k}
+          onClose={() => setPanel(null)}
+          onRenamed={(newName) => {
+            setName(newName);
+            document.title = `${newName} · System Design`;
+            remember({ id, key: k, name: newName });
+            setPanel(null);
+            flash("Diagram renamed");
+          }}
+        />
+      )}
       {panel === "versions" && (
         <VersionsPanel id={id} k={k} onClose={() => setPanel(null)} flash={flash} />
       )}
@@ -343,6 +416,75 @@ export function Canvas({ id, k }: { id: string; k: string }) {
       )}
       {toast && <div className="toast">{toast}</div>}
     </div>
+  );
+}
+
+function RenamePanel({
+  name,
+  id,
+  diagramKey,
+  onClose,
+  onRenamed,
+}: {
+  name: string;
+  id: string;
+  diagramKey: string;
+  onClose: () => void;
+  onRenamed: (name: string) => void;
+}) {
+  const [draft, setDraft] = useState(name);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const input = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    input.current?.focus();
+    input.current?.select();
+  }, []);
+  return (
+    <form
+      className="panel"
+      aria-label="Rename diagram"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (!draft.trim() || busy) return;
+        setBusy(true);
+        setError("");
+        try {
+          const response = await fetch(`/api/d/${id}/rename?k=${encodeURIComponent(diagramKey)}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name: draft.trim() }),
+          });
+          const result = (await response.json()) as { name: string; error?: string };
+          if (!response.ok) throw new Error(result.error || "Could not rename the diagram.");
+          onRenamed(result.name);
+        } catch (err) {
+          setError((err as Error).message);
+          setBusy(false);
+        }
+      }}
+    >
+      <header>
+        <b>Rename diagram</b>
+        <button type="button" className="link" disabled={busy} onClick={onClose}>
+          Cancel
+        </button>
+      </header>
+      <label htmlFor="diagram-name">Diagram name</label>
+      <input
+        ref={input}
+        id="diagram-name"
+        value={draft}
+        maxLength={120}
+        required
+        disabled={busy}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+      {error && <p aria-live="polite">{error}</p>}
+      <button type="submit" disabled={busy || !draft.trim()}>
+        {busy ? "Saving…" : "Save name"}
+      </button>
+    </form>
   );
 }
 

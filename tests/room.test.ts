@@ -270,6 +270,50 @@ describe("concurrent-edit merge rule", () => {
 });
 
 describe("presence and tab RPC", () => {
+  it("broadcasts room name changes to connected tabs", async () => {
+    const { env } = makeEnv();
+    const { ctx, addWs } = makeRoomCtx();
+    const room = new DiagramRoom(ctx as unknown as DurableObjectState, env);
+    await room.init("rename-test", "Before");
+    const a = makeWs(),
+      b = makeWs();
+    addWs(a);
+    addWs(b);
+    await room.rename("Route history design");
+    expect(JSON.parse(a.sent[0])).toEqual({ type: "rename", name: "Route history design" });
+    expect(b.sent).toEqual(a.sent);
+  });
+  it("focuses only the active subscriber without editing or snapshotting the diagram", async () => {
+    const { env } = makeEnv();
+    const { ctx, addWs } = makeRoomCtx();
+    const room = new DiagramRoom(ctx as unknown as DurableObjectState, env);
+    await room.init("focus-test", "Focus test");
+    await room.applyPatch([{ op: "add_node", kind: "database" }], "human");
+    const before = await room.getRaw();
+    const passive = makeWs();
+    const active = makeWs();
+    passive.serializeAttachment({ selection: [], focusedAt: 1 });
+    active.serializeAttachment({ selection: [], focusedAt: 2 });
+    addWs(passive);
+    addWs(active);
+    const result = room.focusView(["Database"], "point");
+    const message = JSON.parse(active.sent[0]);
+    expect(message).toMatchObject({ method: "focus_view", params: { mode: "point" } });
+    expect(passive.sent).toHaveLength(0);
+    await room.webSocketMessage(
+      active as unknown as WebSocket,
+      JSON.stringify({
+        type: "rpc_result",
+        reqId: message.reqId,
+        ok: true,
+        data: { mode: "point", visible: true, elementIds: message.params.elementIds },
+      }),
+    );
+    expect(await result).toMatchObject({ mode: "point", visible: true });
+    expect(await room.getRaw()).toEqual(before);
+    expect(await room.listSnapshots()).toHaveLength(0);
+  });
+
   it("reports no open tab until a socket attaches", async () => {
     const { env } = makeEnv();
     const room = await makeRoom(env);

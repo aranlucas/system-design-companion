@@ -16,6 +16,12 @@ export function Home() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    const refresh = () => setItems(library());
+    window.addEventListener("storage", refresh);
+    return () => window.removeEventListener("storage", refresh);
+  }, []);
+
+  useEffect(() => {
     fetch("/api/templates")
       .then((r) => r.json())
       .then(setTemplates)

@@ -8,7 +8,22 @@ export interface Component {
   label: string;
   shape: ComponentShape;
   fill: string;
-  icon?: "database" | "user" | "device" | "phone";
+  icon?:
+    | "database"
+    | "user"
+    | "device"
+    | "phone"
+    | "server"
+    | "cache"
+    | "queue"
+    | "balance"
+    | "cloud"
+    | "storage"
+    | "search"
+    | "shield"
+    | "globe"
+    | "mail"
+    | "clock";
   group: "Clients" | "Edge" | "Compute" | "Data" | "Messaging" | "External";
 }
 
@@ -23,6 +38,22 @@ const FILL = {
 };
 
 export const COMPONENTS: Component[] = [
+  {
+    kind: "server",
+    label: "Server",
+    shape: "rectangle",
+    icon: "server",
+    fill: FILL.compute,
+    group: "Compute",
+  },
+  {
+    kind: "cloud",
+    label: "Cloud",
+    shape: "rectangle",
+    icon: "cloud",
+    fill: FILL.external,
+    group: "External",
+  },
   {
     kind: "user",
     label: "User",
@@ -47,7 +78,14 @@ export const COMPONENTS: Component[] = [
     fill: FILL.data,
     group: "Data",
   },
-  { kind: "client", label: "Client", shape: "ellipse", fill: FILL.client, group: "Clients" },
+  {
+    kind: "client",
+    icon: "device",
+    label: "Client",
+    shape: "ellipse",
+    fill: FILL.client,
+    group: "Clients",
+  },
   {
     kind: "mobile",
     icon: "phone",
@@ -64,28 +102,59 @@ export const COMPONENTS: Component[] = [
     fill: FILL.client,
     group: "Clients",
   },
-  { kind: "dns", label: "DNS", shape: "rectangle", fill: FILL.edge, group: "Edge" },
-  { kind: "cdn", label: "CDN", shape: "rectangle", fill: FILL.edge, group: "Edge" },
+  { kind: "dns", icon: "globe", label: "DNS", shape: "rectangle", fill: FILL.edge, group: "Edge" },
+  { kind: "cdn", icon: "globe", label: "CDN", shape: "rectangle", fill: FILL.edge, group: "Edge" },
   {
     kind: "load_balancer",
+    icon: "balance",
     label: "Load Balancer",
     shape: "rectangle",
     fill: FILL.edge,
     group: "Edge",
   },
-  { kind: "api_gateway", label: "API Gateway", shape: "rectangle", fill: FILL.edge, group: "Edge" },
+  {
+    kind: "api_gateway",
+    icon: "balance",
+    label: "API Gateway",
+    shape: "rectangle",
+    fill: FILL.edge,
+    group: "Edge",
+  },
   {
     kind: "rate_limiter",
+    icon: "shield",
     label: "Rate Limiter",
     shape: "rectangle",
     fill: FILL.edge,
     group: "Edge",
   },
-  { kind: "service", label: "Service", shape: "rectangle", fill: FILL.compute, group: "Compute" },
-  { kind: "worker", label: "Workers", shape: "rectangle", fill: FILL.compute, group: "Compute" },
-  { kind: "auth", label: "Auth Service", shape: "rectangle", fill: FILL.compute, group: "Compute" },
+  {
+    kind: "service",
+    icon: "server",
+    label: "Service",
+    shape: "rectangle",
+    fill: FILL.compute,
+    group: "Compute",
+  },
+  {
+    kind: "worker",
+    icon: "server",
+    label: "Workers",
+    shape: "rectangle",
+    fill: FILL.compute,
+    group: "Compute",
+  },
+  {
+    kind: "auth",
+    icon: "shield",
+    label: "Auth Service",
+    shape: "rectangle",
+    fill: FILL.compute,
+    group: "Compute",
+  },
   {
     kind: "scheduler",
+    icon: "clock",
     label: "Scheduler / Cron",
     shape: "rectangle",
     fill: FILL.compute,
@@ -93,6 +162,7 @@ export const COMPONENTS: Component[] = [
   },
   {
     kind: "websocket",
+    icon: "balance",
     label: "WebSocket Gateway",
     shape: "rectangle",
     fill: FILL.compute,
@@ -116,12 +186,20 @@ export const COMPONENTS: Component[] = [
   },
   {
     kind: "object_store",
+    icon: "storage",
     label: "Object Storage",
     shape: "ellipse",
     fill: FILL.data,
     group: "Data",
   },
-  { kind: "search", label: "Search Index", shape: "ellipse", fill: FILL.data, group: "Data" },
+  {
+    kind: "search",
+    icon: "search",
+    label: "Search Index",
+    shape: "ellipse",
+    fill: FILL.data,
+    group: "Data",
+  },
   {
     kind: "timeseries",
     icon: "database",
@@ -138,10 +216,25 @@ export const COMPONENTS: Component[] = [
     fill: FILL.data,
     group: "Data",
   },
-  { kind: "cache", label: "Cache", shape: "rectangle", fill: FILL.cache, group: "Data" },
-  { kind: "queue", label: "Queue", shape: "rectangle", fill: FILL.messaging, group: "Messaging" },
+  {
+    kind: "cache",
+    icon: "cache",
+    label: "Cache",
+    shape: "rectangle",
+    fill: FILL.cache,
+    group: "Data",
+  },
+  {
+    kind: "queue",
+    icon: "queue",
+    label: "Queue",
+    shape: "rectangle",
+    fill: FILL.messaging,
+    group: "Messaging",
+  },
   {
     kind: "pubsub",
+    icon: "balance",
     label: "Pub/Sub",
     shape: "rectangle",
     fill: FILL.messaging,
@@ -149,6 +242,7 @@ export const COMPONENTS: Component[] = [
   },
   {
     kind: "stream",
+    icon: "queue",
     label: "Event Stream (Kafka)",
     shape: "rectangle",
     fill: FILL.messaging,
@@ -156,6 +250,7 @@ export const COMPONENTS: Component[] = [
   },
   {
     kind: "third_party",
+    icon: "cloud",
     label: "3rd-party API",
     shape: "rectangle",
     fill: FILL.external,
@@ -163,6 +258,7 @@ export const COMPONENTS: Component[] = [
   },
   {
     kind: "notifications",
+    icon: "mail",
     label: "Push / Email / SMS",
     shape: "rectangle",
     fill: FILL.external,

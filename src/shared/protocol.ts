@@ -23,7 +23,12 @@ export interface Viewport {
   zoom: number;
 }
 
-export type TabRpcMethod = "screenshot" | "mermaid";
+export type TabRpcMethod = "screenshot" | "mermaid" | "focus_view";
+
+export interface FocusViewParams {
+  elementIds: string[];
+  mode: "focus" | "point";
+}
 
 export type ClientMessage =
   | { type: "update"; elements: El[] }
@@ -38,6 +43,7 @@ export type ClientMessage =
 
 export type ServerMessage =
   | { type: "init"; elements: El[]; name: string }
+  | { type: "rename"; name: string }
   | { type: "update"; elements: El[]; origin: "human" | "agent" | "system" }
   | { type: "rpc"; reqId: string; method: TabRpcMethod; params: any }
   | { type: "peers"; count: number };

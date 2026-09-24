@@ -24,9 +24,10 @@ const INSTRUCTIONS = `Collaborative Excalidraw canvas for system design. A human
 Workflow:
 1. Every diagram tool takes \`diagram\`: the canvas share link (…/d/<id>?k=<key>). If you don't have one, ask the user for it, or call create_diagram. Call join_session once to validate it and get an overview, then keep passing the same link.
 2. Read before you write: get_scene (semantic graph) and get_selection ("this"/"these" means the user's selection). Use get_screenshot when layout, freehand sketches, or visual clarity matter.
-3. Edit with apply_patch: batch related ops in one call. Address nodes by id, unique label, or a ref defined earlier in the same batch. Use placement hints instead of coordinates. Prefer add_node with a standard \`kind\` (sql_db, cache, queue, load_balancer, …) so colours stay consistent. Include a short summary of the user’s requested change in apply_patch so version names reflect their feedback. Every batch is auto-snapshotted and tinted violet, so the user can undo with restore.
+3. Edit with apply_patch: batch related ops in one call. Address nodes by id, unique label, or a ref defined earlier in the same batch. Use placement hints instead of coordinates. Prefer add_node with a standard \`kind\` (sql_db, cache, queue, load_balancer, …) so the agent uses the same icons as the human library. An explicit shape overrides the icon. Include a short summary of the user’s requested change in apply_patch so version names reflect their feedback. Every batch is auto-snapshotted and tinted violet, so the user can undo with restore.
 4. Structure: put content inside frames (pass \`frame\`, or place relative to something already in the frame). Keep labels short; notes are word-wrapped automatically. Use tidy when things look cluttered; use layout only when asked to re-arrange.
-5. When asked for feedback, reply in chat. Only annotate the canvas (add_note) when asked. Keep labels short; put detail in notes.`;
+5. Use focus_view to bring a frame or component into the current subscriber’s view, or mode=point for a temporary laser-style marker without panning. Neither changes the diagram.
+6. When asked for feedback, reply in chat. Only annotate the canvas (add_note) when asked. Keep labels short; put detail in notes.`;
 
 const target = z
   .string()
@@ -54,7 +55,7 @@ const opSchema = z.discriminatedUnion("op", [
       .enum(COMPONENT_KINDS)
       .optional()
       .describe(
-        "standard component: sets default label, shape and role colour (see components://catalog)",
+        "standard component: draws its editable system design icon with a label and role colour (see components://catalog)",
       ),
     label: z
       .string()
@@ -440,6 +441,30 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
     ),
   );
 
+  server.registerTool(
+    "focus_view",
+    {
+      description:
+        "Direct the most recently active subscriber's open diagram tab to components or a frame. mode=focus pans/zooms and briefly highlights the target; mode=point shows a temporary laser-style marker without moving the viewport. Returns visible=false if a point target is offscreen (use focus to bring it into view). Does not change the diagram, selection, or history. Requires an open tab.",
+      inputSchema: z.object({
+        diagram: diagramArg,
+        targets: z.array(target).min(1),
+        mode: z.enum(["focus", "point"]).default("focus"),
+      }),
+    },
+    guard(
+      async ({
+        diagram,
+        targets,
+        mode,
+      }: {
+        diagram: string;
+        targets: string[];
+        mode: "focus" | "point";
+      }) => room(env, (await pick(diagram)).id).focusView(targets, mode),
+    ),
+  );
+
   // ---------- review support ----------
 
   server.registerResource(
@@ -452,7 +477,13 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
           uri: uri.href,
           mimeType: "application/json",
           text: JSON.stringify(
-            COMPONENTS.map(({ kind, label, shape, group }) => ({ kind, label, shape, group })),
+            COMPONENTS.map(({ kind, label, shape, group, icon }) => ({
+              kind,
+              label,
+              shape,
+              group,
+              icon,
+            })),
           ),
         },
       ],

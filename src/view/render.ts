@@ -166,7 +166,9 @@ function drawText(e: El, byId: Map<string, El>, fits: (() => void)[]): SVGGEleme
         : [container.x + container.width / 2, container.y + container.height / 2];
     anchor = "middle";
     x = cx;
-    top = cy - (lines.length * lh) / 2;
+    top = container.customData?.icon
+      ? container.y + container.height - lines.length * lh - 5
+      : cy - (lines.length * lh) / 2;
     if (container.type === "arrow" || container.type === "line")
       g.append(
         node("rect", {

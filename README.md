@@ -30,7 +30,10 @@ Then `claude mcp add --transport http system-design https://<your-worker>.worker
 ## Using it in the interview
 
 - **Share / Agent**: copies the edit link for the interviewer, plus the Claude setup command and join prompt.
-- **Shape library**: includes editable, grouped database cylinders, users, desktop devices, and phones, alongside the standard service and infrastructure blocks.
+- **Rename**: click the diagram title in the bottom toolbar, or choose **Rename diagram** from the menu. The name updates in connected tabs and your recent diagrams.
+- **Shape library**: editable icons for people, devices, phones, databases, servers, caches, queues, load balancers, clouds, object storage, search, auth, DNS, notifications, and schedulers. The agent gets the same drawings through `apply_patch` → `add_node` with a `kind`; there is no separate library insertion tool. Icons remain single semantic components for connecting, moving, resizing, and deleting. An explicit `shape` uses a basic shape instead.
+- **Focus / point**: `focus_view` targets components or frames by label or ID in the most recently active open tab. `mode=focus` pans/zooms and highlights; `mode=point` shows a temporary laser-style marker without panning. It does not edit the diagram or selection, and creates no version.
+- **Tidy**: keeps connections and labels inside their endpoints’ shared frame, repairing bends that escape it. Grouped artwork stays intact.
 - **Versions**: every Claude edit is snapshotted first with a name based on the requested change (or the edited components), so one click undoes it. You can also save named checkpoints and save a diagram as a template.
 - Claude's elements are violet, and a toast says when Claude changed something.
 - MCP prompts: `review_design`, `suggest_next_step`, `estimate_capacity`. Resource: `rubric://system-design`.

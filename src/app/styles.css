@@ -128,6 +128,21 @@ button.link {
   position: fixed;
   inset: 0;
 }
+
+.agent-pointer {
+  position: fixed;
+  z-index: 1000;
+  width: 14px;
+  height: 14px;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: #e03131;
+  box-shadow:
+    0 0 0 12px #e0313133,
+    0 0 24px #e0313166;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
 /* Chrome lives in Excalidraw's own slots: Share (top-right), name + Tidy +
    Versions (footer), everything else in the hamburger menu. */
 .share-trigger,

@@ -108,6 +108,7 @@ export class DiagramRoom extends DurableObject<Env> {
   async rename(name: string) {
     this.name = name;
     this.setMeta("name", name);
+    this.broadcast({ type: "rename", name });
   }
 
   /** All elements (incl. tombstones) in z-order; Excalidraw re-indexes anything out of order. */
@@ -309,6 +310,15 @@ export class DiagramRoom extends DurableObject<Env> {
 
   async screenshot(elementIds?: string[]) {
     return this.callTab<ScreenshotResult>("screenshot", { elementIds });
+  }
+
+  async focusView(targets: string[], mode: "focus" | "point" = "focus") {
+    const scene = new Scene(this.els.values());
+    const elementIds = targets.map((target) => scene.resolve(target).id);
+    return this.callTab<{ mode: string; visible: boolean; elementIds: string[] }>("focus_view", {
+      elementIds,
+      mode,
+    });
   }
 
   // ---------- snapshots & templates ----------

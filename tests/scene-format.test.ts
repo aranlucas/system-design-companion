@@ -67,6 +67,54 @@ describe("tidy", () => {
     boundElements: [],
     backgroundColor: "transparent",
   });
+  it.each([true, false])(
+    "reroutes Route history inside its shared frame (autoBend=%s)",
+    (autoBend) => {
+      const frame = { ...base("f", "frame", 0, 0, 1000, 500), name: "High-level design" };
+      const left = { ...base("left", "rectangle", 80, 100, 160, 70), frameId: "f" };
+      const right = { ...base("right", "rectangle", 720, 100, 160, 70), frameId: "f" };
+      const obstacle = { ...base("middle", "rectangle", 400, 60, 160, 180), frameId: "f" };
+      const arrow = {
+        ...base("route", "arrow", 240, 135, 480, 300),
+        customData: { autoBend },
+        points: [
+          [0, 0],
+          [240, -300],
+          [480, 0],
+        ],
+        startBinding: { elementId: "left", gap: 8 },
+        endBinding: { elementId: "right", gap: 8 },
+        boundElements: [{ id: "route-label", type: "text" }],
+      };
+      const label = {
+        ...base("route-label", "text", 420, -175, 120, 25),
+        text: "Route history",
+        containerId: "route",
+        fontSize: 20,
+      };
+      const scene = new Scene([frame, left, right, obstacle, arrow, label]);
+      scene.tidy(new Set(["f"]));
+      const result = scene.resolve("route");
+      for (const [x, y] of result.points) {
+        expect(result.x + x).toBeGreaterThanOrEqual(0);
+        expect(result.x + x).toBeLessThanOrEqual(1000);
+        expect(result.y + y).toBeGreaterThanOrEqual(0);
+        expect(result.y + y).toBeLessThanOrEqual(500);
+      }
+      const text = scene.resolve("route-label");
+      expect(text.y).toBeGreaterThanOrEqual(0);
+      expect(text.y + text.height).toBeLessThanOrEqual(500);
+      expect(scene.resolve("f").y).toBe(0);
+      expect(scene.resolve("f").width).toBe(1000);
+      expect(result.frameId).toBe("f");
+      const geometry = JSON.stringify([result.x, result.y, result.points]);
+      scene.tidy(new Set(["f"]));
+      expect(JSON.stringify([result.x, result.y, result.points])).toBe(geometry);
+      expect(result.startBinding.elementId).toBe("left");
+      expect(result.endBinding.elementId).toBe("right");
+    },
+  );
+
   function cluttered(): Scene {
     const f = { ...base("f", "frame", 0, 0, 1600, 900), name: "F" };
     const mkNode = (id: string, x: number, y: number, label: string, frameId: string | null) => {
