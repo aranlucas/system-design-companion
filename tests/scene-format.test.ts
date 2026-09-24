@@ -49,6 +49,67 @@ describe("wrapText / measureText", () => {
 });
 
 describe("tidy", () => {
+  it("replaces a wide geofence detour with a compact route around its caption", () => {
+    const s = build([
+      {
+        op: "add_node",
+        kind: "worker",
+        label: "Geofence processor",
+        place: { at: { x: 4432, y: 3500 } },
+      },
+      { op: "add_node", kind: "database", label: "Geofences", place: { at: { x: 4840, y: 4450 } } },
+      { op: "add_node", kind: "sql_db", label: "Fence state", place: { at: { x: 4900, y: 3500 } } },
+      { op: "connect", from: "Geofence processor", to: "Fence state", label: "Atomic transition" },
+      {
+        op: "connect",
+        from: "Geofence processor",
+        to: "Geofences",
+        label: "Spatial candidates",
+        dashed: true,
+      },
+    ]);
+    const arrow = s.live().find((e) => e.type === "arrow" && e.strokeStyle === "dashed")!;
+    // Saved geometry from the old midpoint-only router.
+    s.mutate(arrow, {
+      x: 4520,
+      y: 3552,
+      points: [
+        [0, 0],
+        [691, 229],
+        [379, 890],
+      ],
+      customData: { ...arrow.customData, autoBend: true },
+    });
+    s.tidy();
+    s.changedElements();
+    const path = arrow.points.map(([x, y]: number[]) => [arrow.x + x, arrow.y + y]);
+    const target = s.resolve("Geofences");
+    expect(Math.max(...path.map(([x]: number[]) => x))).toBeLessThanOrEqual(
+      target.x + target.width + 40,
+    );
+    const source = s.resolve("Geofence processor");
+    // The local exit must not lie on the adjacent horizontal transition arrow.
+    expect(path[1][1]).toBeGreaterThan(source.y + source.height / 2 + 10);
+    const caption = s.boundText(source)!;
+    // Check every segment, not just the control points, clears the caption.
+    for (let i = 1; i < path.length; i++) {
+      for (let step = 0; step <= 100; step++) {
+        const t = step / 100;
+        const x = path[i - 1][0] * (1 - t) + path[i][0] * t;
+        const y = path[i - 1][1] * (1 - t) + path[i][1] * t;
+        expect(
+          x < caption.x - 10 ||
+            x > caption.x + caption.width + 10 ||
+            y < caption.y - 10 ||
+            y > caption.y + caption.height + 10,
+        ).toBe(true);
+      }
+    }
+    const again = new Scene(s.live());
+    again.tidy();
+    expect(again.changedElements()).toEqual([]);
+  });
+
   // Genuinely messy raw elements (as human freehand or imports produce),
   // bypassing the ops layer's own overlap-nudging and frame-attach.
   let seq = 100;

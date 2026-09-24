@@ -687,8 +687,8 @@ export class Scene {
   }
 
   /**
-   * If a bound arrow passes through a box that isn't one of its ends, give it a single bend on the
-   * side needing the smallest detour. Only touches straight arrows and bends we added (autoBend);
+   * If a bound arrow passes through a box that isn't one of its ends, route it around nearby
+   * obstacles using short endpoint exits or midpoint bends. Only touches straight arrows and bends we added (autoBend);
    * straightens our bend again once the straight path is clear. Returns true if it changed.
    */
   private detour(arrow: El): boolean {
@@ -733,13 +733,16 @@ export class Scene {
       );
     const abs = (a: El) =>
       (a.points as [number, number][]).map(([px, py]) => ({ x: a.x + px, y: a.y + py }));
-    const setPath = (bend: Pt | null) => {
+    const setPath = (bends: Pt[]) => {
       const cur = abs(arrow);
       const s0 = cur[0];
       const e0 = cur.at(-1)!;
       const rel = (pt: Pt): [number, number] => [Math.round(pt.x - s0.x), Math.round(pt.y - s0.y)];
-      const points = bend ? [rel(s0), rel(bend), rel(e0)] : [rel(s0), rel(e0)];
-      this.mutate(arrow, { points, customData: { ...(arrow.customData ?? {}), autoBend: !!bend } });
+      const points = [rel(s0), ...bends.map(rel), rel(e0)];
+      this.mutate(arrow, {
+        points,
+        customData: { ...(arrow.customData ?? {}), autoBend: bends.length > 0 },
+      });
       this.routeArrow(arrow, false); // recompute the ends toward the bend, keeping the bend fixed
     };
 
@@ -758,21 +761,20 @@ export class Scene {
 
     if (clear(straight)) {
       if (pts.length > 2) {
-        setPath(null);
+        setPath([]);
         return true;
       }
       return false;
     }
-    if (pts.length > 2 && clear(current)) return false; // our bend still works
 
-    // Search perpendicular offsets from the midpoint, nearest first. Ends are re-aimed at the
-    // bend (as routeArrow will draw them), so tightly packed neighbours can still be cleared.
+    // Re-aim endpoints at the proposed bends, using the same pixel rounding as routeArrow.
     const sEl = arrow.startBinding && this.els.get(arrow.startBinding.elementId);
     const tEl = arrow.endBinding && this.els.get(arrow.endBinding.elementId);
-    const aimed = (bend: Pt): Pt[] => [
-      sEl ? borderPoint(boxOf(sEl), bend, 8, sEl.type) : straight[0],
-      bend,
-      tEl ? borderPoint(boxOf(tEl), bend, 8, tEl.type) : straight[1],
+    const pixel = (point: Pt): Pt => ({ x: Math.round(point.x), y: Math.round(point.y) });
+    const aimed = (bends: Pt[]): Pt[] => [
+      pixel(sEl ? borderPoint(boxOf(sEl), bends[0], 8, sEl.type) : straight[0]),
+      ...bends,
+      pixel(tEl ? borderPoint(boxOf(tEl), bends.at(-1)!, 8, tEl.type) : straight[1]),
     ];
     const [p, q] = straight;
     const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
@@ -792,29 +794,72 @@ export class Scene {
         for (const [a, b] of others) if (segmentsCross(path[i - 1], path[i], a, b)) n++;
       return n;
     };
-    let best: { bend: Pt; cost: number } | null = null;
-    for (let d = 40; d <= 800; d += 20) {
-      if (best && d >= best.cost) break; // no farther bend can beat it (cost ≥ d)
-      for (const sign of [1, -1]) {
-        const bend = { x: mid.x + nx * d * sign, y: mid.y + ny * d * sign };
-        const path = aimed(bend);
-        if (!clear(path)) continue;
-        // Tie-break away from clutter: a bend sitting on another arrow or hugging a box reads badly.
-        const cramped =
+    // Score actual travel distance so a short exit beside a caption can beat a
+    // large midpoint loop. Penalise extra bends and crossings for readability.
+    const cost = (path: Pt[]) => {
+      const length = path
+        .slice(1)
+        .reduce((sum, point, i) => sum + Math.hypot(point.x - path[i].x, point.y - path[i].y), 0);
+      const bends = path.slice(1, -1);
+      const cramped = bends.some(
+        (bend) =>
           others.some(([a, b]) => distToSegment(bend, a, b) < 40) ||
-          obstacles.some((o) => distToBox(bend, o) < 40);
-        const cost = d + 150 * crossings(path) + (cramped ? 60 : 0);
-        if (!best || cost < best.cost) best = { bend, cost };
-      }
+          obstacles.some((o) => distToBox(bend, o) < 40),
+      );
+      return length + 20 * bends.length + 150 * crossings(path) + (cramped ? 60 : 0);
+    };
+    const candidates: Pt[][] = [];
+    const exits = (node: El | undefined): Pt[] => {
+      if (!node) return [];
+      const caption = node.customData?.icon ? this.boundText(node) : undefined;
+      const bounds = unionBox([boxOf(node), ...(caption ? [boxOf(caption)] : [])])!;
+      const c = center(boxOf(node));
+      return [
+        ...[node.y, c.y, node.y + node.height].flatMap((y) => [
+          { x: bounds.x - 40, y },
+          { x: bounds.x + bounds.w + 40, y },
+        ]),
+        { x: c.x, y: bounds.y - 40 },
+        { x: c.x, y: bounds.y + bounds.h + 40 },
+      ];
+    };
+    const sourceExits = exits(sEl),
+      targetExits = exits(tEl);
+    for (const exit of [...sourceExits, ...targetExits]) candidates.push([exit]);
+    for (const start of sourceExits) for (const end of targetExits) candidates.push([start, end]);
+    for (let d = 40; d <= 800; d += 20)
+      for (const sign of [1, -1])
+        candidates.push([{ x: mid.x + nx * d * sign, y: mid.y + ny * d * sign }]);
+
+    // Keep a valid existing route unless the replacement is materially shorter.
+    // This also prevents rounding or small neighbouring edits from causing jitter.
+    const currentCost = pts.length > 2 && clear(current) ? cost(current) : Infinity;
+    let best: { bends: Pt[]; cost: number } | undefined;
+    for (const candidate of candidates) {
+      const bends = candidate.map(pixel);
+      const path = aimed(bends);
+      if (!clear(path)) continue;
+      // Intermediate legs must not cut back through either endpoint's artwork.
+      if (
+        path.some(
+          (point, i) =>
+            i > 0 &&
+            ((i > 1 && sEl && segmentHitsBox(path[i - 1], point, boxOf(sEl), 4)) ||
+              (i < path.length - 1 && tEl && segmentHitsBox(path[i - 1], point, boxOf(tEl), 4))),
+        )
+      )
+        continue;
+      const candidateCost = cost(path);
+      if (!best || candidateCost < best.cost) best = { bends, cost: candidateCost };
     }
-    if (best) {
-      setPath(best.bend);
+    if (best && best.cost + 32 < currentCost) {
+      setPath(best.bends);
       return true;
     }
     // If no obstacle-free detour fits, containment wins over avoiding crossings.
     // A crowded frame should not send its connections into another design section.
     if (!inside(current) && inside(straight)) {
-      setPath(null);
+      setPath([]);
       return true;
     }
     return false;
