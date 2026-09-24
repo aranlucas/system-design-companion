@@ -44,6 +44,45 @@ describe("add_node", () => {
     expect(g.nodes[0].color).toBe("green");
   });
 
+  it("binds arrows to the visible icon, not a wide caption container", () => {
+    const s = fresh();
+    applyOk(s, [
+      {
+        op: "add_node",
+        kind: "service",
+        label: "Telemetry ingestion Validate dedupe write",
+        ref: "a",
+        place: { at: { x: 0, y: 0 } },
+      },
+      { op: "add_node", kind: "database", ref: "b", place: { at: { x: 1000, y: 0 } } },
+      { op: "connect", from: "a", to: "b" },
+    ]);
+    const root = s.resolve("a");
+    const art = s
+      .live()
+      .filter((e) => e.customData?.componentPart && e.groupIds.includes(root.groupIds[0]));
+    const right = Math.max(
+      ...art.map(
+        (e) =>
+          e.x + (e.type === "line" ? Math.max(...e.points.map((p: number[]) => p[0])) : e.width),
+      ),
+    );
+    const arrow = s.live().find((e) => e.type === "arrow")!;
+    expect(arrow.x).toBeLessThanOrEqual(right + 10);
+    expect(root.width).toBeLessThanOrEqual(84);
+    expect(s.boundText(root)?.containerId).toBeNull();
+    const width = root.width;
+    applyOk(s, [
+      {
+        op: "update",
+        target: "a",
+        label: "A much longer caption describing validation, deduplication, and durable writes",
+      },
+    ]);
+    expect(root.width).toBe(width);
+    expect(s.boundText(root)?.text).toContain("\n");
+  });
+
   it("rejects unknown kinds and missing labels", () => {
     const s = fresh();
     const res = s.apply([{ op: "add_node", kind: "nonsense" }, { op: "add_node" } as Op], "agent");

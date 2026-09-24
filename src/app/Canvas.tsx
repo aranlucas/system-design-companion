@@ -10,6 +10,7 @@ import {
   restoreElements,
 } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
+import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
@@ -47,7 +48,12 @@ export function Canvas({ id, k }: { id: string; k: string }) {
   const [status, setStatus] = useState<"connecting" | "live" | "offline">("connecting");
   const [panel, setPanel] = useState<null | "versions" | "share" | "rename">(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null);
+  const [pointer, setPointer] = useState<{
+    x: number;
+    y: number;
+    gesture: "dot" | "heart";
+    startedAt: number;
+  } | null>(null);
   const pointerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -94,6 +100,48 @@ export function Canvas({ id, k }: { id: string; k: string }) {
     send({ type: "presence", selection, viewport, focused });
   }, []);
 
+  const showFocus = useCallback(
+    async (
+      targets: readonly ExcalidrawElement[],
+      mode: "focus" | "point",
+      gesture: "dot" | "heart" = "dot",
+    ) => {
+      const a = apiRef.current;
+      if (!a || !targets.length) return false;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const groups = new Set(targets.flatMap((e) => e.groupIds));
+      const ids = new Set(targets.map((e) => e.id));
+      const elements = [
+        ...targets,
+        ...a
+          .getSceneElements()
+          .filter((e) => !ids.has(e.id) && e.groupIds.some((groupId) => groups.has(groupId))),
+      ];
+      if (mode === "focus")
+        a.scrollToContent(elements, { fitToContent: true, animate: false, maxZoom: 1 });
+      // Wait for the viewport change to be applied before positioning the temporary pointer.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const state = a.getAppState();
+      const [left, top, right, bottom] = getCommonBounds(elements);
+      const x = (left + right) / 2;
+      const y = (top + bottom) / 2;
+      const screen = {
+        x: (x + state.scrollX) * state.zoom.value + state.offsetLeft,
+        y: (y + state.scrollY) * state.zoom.value + state.offsetTop,
+      };
+      const visible =
+        screen.x >= state.offsetLeft &&
+        screen.x <= state.offsetLeft + state.width &&
+        screen.y >= state.offsetTop &&
+        screen.y <= state.offsetTop + state.height;
+      if (pointerTimer.current) clearTimeout(pointerTimer.current);
+      setPointer(visible ? { ...screen, gesture, startedAt: performance.now() } : null);
+      if (visible) pointerTimer.current = setTimeout(() => setPointer(null), 2400);
+      return visible;
+    },
+    [],
+  );
+
   // ---------- tab RPC (screenshot, mermaid) ----------
 
   const handleRpc = useCallback(async (msg: Extract<ServerMessage, { type: "rpc" }>) => {
@@ -133,30 +181,11 @@ export function Canvas({ id, k }: { id: string; k: string }) {
           data: { base64: await blobToBase64(blob), mimeType: "image/png" },
         });
       } else if (msg.method === "focus_view") {
-        const { elementIds, mode } = msg.params as FocusViewParams;
+        const { elementIds, mode, gesture } = msg.params as FocusViewParams;
         const ids = new Set(elementIds);
         const elements = a.getSceneElements().filter((e) => ids.has(e.id));
         if (!elements.length) throw new Error("Target no longer exists in this tab");
-        if (mode === "focus")
-          a.scrollToContent(elements, { fitToContent: true, animate: false, maxZoom: 1 });
-        // Wait for the viewport change to be applied before positioning the temporary pointer.
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        const state = a.getAppState();
-        const [left, top, right, bottom] = getCommonBounds(elements);
-        const x = (left + right) / 2;
-        const y = (top + bottom) / 2;
-        const screen = {
-          x: (x + state.scrollX) * state.zoom.value + state.offsetLeft,
-          y: (y + state.scrollY) * state.zoom.value + state.offsetTop,
-        };
-        const visible =
-          screen.x >= state.offsetLeft &&
-          screen.x <= state.offsetLeft + state.width &&
-          screen.y >= state.offsetTop &&
-          screen.y <= state.offsetTop + state.height;
-        if (pointerTimer.current) clearTimeout(pointerTimer.current);
-        setPointer(visible ? screen : null);
-        if (visible) pointerTimer.current = setTimeout(() => setPointer(null), 2400);
+        const visible = await showFocus(elements, mode, gesture);
         send({
           type: "rpc_result",
           reqId: msg.reqId,
@@ -224,10 +253,39 @@ export function Canvas({ id, k }: { id: string; k: string }) {
           for (const e of msg.elements)
             synced.current.set(e.id, Math.max(e.version, synced.current.get(e.id) ?? 0));
           api.updateScene({ elements: merged, captureUpdate: CaptureUpdateAction.NEVER });
-          if (msg.origin === "agent")
+          if (msg.origin === "agent") {
             flash(
-              `Claude updated ${msg.elements.length} element${msg.elements.length === 1 ? "" : "s"}`,
+              `Agent updated ${msg.elements.length} element${msg.elements.length === 1 ? "" : "s"}`,
             );
+            const changedIds = new Set(msg.elements.map((e) => e.id));
+            const changed = merged.filter(
+              (e) =>
+                changedIds.has(e.id) &&
+                !e.isDeleted &&
+                !e.customData?.componentPart &&
+                !e.customData?.componentLabel,
+            );
+            const components = changed.filter(
+              (e) =>
+                !["frame", "arrow", "line"].includes(e.type) &&
+                !(e.type === "text" && e.containerId),
+            );
+            // Prefer actual components over an enlarged frame or a rerouted long connection.
+            const targets = components.length ? components : changed;
+            const removed = msg.elements.filter(
+              (e) =>
+                e.isDeleted &&
+                !e.customData?.componentPart &&
+                !e.customData?.componentLabel &&
+                e.type !== "text",
+            );
+            void showFocus(
+              targets.length
+                ? targets
+                : (removed.map((e) => ({ ...e, isDeleted: false })) as ExcalidrawElement[]),
+              "focus",
+            );
+          }
         } else if (msg.type === "rpc") {
           void handleRpc(msg);
         } else if (msg.type === "peers") {
@@ -300,10 +358,22 @@ export function Canvas({ id, k }: { id: string; k: string }) {
     <div className="canvas-wrap">
       {pointer && (
         <output
-          className="agent-pointer"
-          aria-label="Agent is pointing here"
+          key={pointer.startedAt}
+          className={pointer.gesture === "heart" ? "agent-heart" : "agent-pointer"}
+          aria-label={
+            pointer.gesture === "heart" ? "Agent is drawing a heart" : "Agent is pointing here"
+          }
           style={{ left: pointer.x, top: pointer.y }}
-        />
+        >
+          {pointer.gesture === "heart" && (
+            <svg viewBox="0 0 120 120" aria-hidden="true">
+              <path
+                pathLength="1"
+                d="M60 98 C48 86 15 64 15 38 C15 10 47 8 60 32 C73 8 105 10 105 38 C105 64 72 86 60 98"
+              />
+            </svg>
+          )}
+        </output>
       )}
       <Excalidraw
         excalidrawAPI={setApi}

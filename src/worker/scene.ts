@@ -391,6 +391,13 @@ export class Scene {
   }
 
   boundText(container: El): El | undefined {
+    if (container.customData?.icon) {
+      const group = container.groupIds?.at(-1);
+      const caption = this.live().find(
+        (e) => e.customData?.componentLabel && group && e.groupIds?.includes(group),
+      );
+      if (caption) return caption;
+    }
     const ref = (container.boundElements ?? []).find((b: any) => b.type === "text");
     const t = ref ? this.els.get(ref.id) : undefined;
     if (t && !t.isDeleted) return t;
@@ -419,7 +426,9 @@ export class Scene {
     const want = target.trim().toLowerCase();
     const matches = this.live().filter(
       (e) =>
-        (this.isNode(e) || e.type === "frame" || (e.type === "text" && !e.containerId)) &&
+        (this.isNode(e) ||
+          e.type === "frame" ||
+          (e.type === "text" && !e.containerId && !e.customData?.componentLabel)) &&
         this.labelOf(e).trim().toLowerCase() === want,
     );
     if (matches.length === 1) return matches[0];
@@ -445,11 +454,16 @@ export class Scene {
       .filter(
         (e) =>
           !exclude.has(e.id) &&
+          !e.customData?.componentPart &&
+          !e.customData?.componentLabel &&
           e.type !== "frame" &&
           e.type !== "arrow" &&
           !(e.type === "text" && e.containerId),
       )
-      .map(boxOf);
+      .map((e) => {
+        const label = e.customData?.icon ? this.boundText(e) : undefined;
+        return label ? unionBox([boxOf(e), boxOf(label)])! : boxOf(e);
+      });
   }
 
   sceneBounds(): Box | null {
@@ -655,9 +669,9 @@ export class Scene {
       this.mutate(t, {
         x: Math.round(c.x - t.width / 2),
         y: container.customData?.icon
-          ? container.y + container.height - t.height - 5
+          ? container.y + container.height + 14
           : Math.round(c.y - t.height / 2),
-        verticalAlign: container.customData?.icon ? "bottom" : "middle",
+        verticalAlign: container.customData?.icon ? "top" : "middle",
         groupIds: container.groupIds ?? [],
         frameId: container.frameId ?? null,
       });
@@ -710,7 +724,7 @@ export class Scene {
     if (pts.length > 2 && !ours && inside(existing)) return false; // preserve valid human curves
     const ends = new Set([arrow.startBinding?.elementId, arrow.endBinding?.elementId]);
     const obstacles = this.live()
-      .filter((n) => this.isNode(n) && !ends.has(n.id))
+      .filter((n) => (this.isNode(n) && !ends.has(n.id)) || n.customData?.componentLabel)
       .map(boxOf);
     const clear = (path: Pt[]) =>
       inside(path) &&
@@ -896,10 +910,12 @@ export class Scene {
   private setLabel(container: El, label: string, author: Author) {
     const existing = this.boundText(container);
     const fontSize = existing?.fontSize ?? (container.type === "arrow" ? 16 : 20);
-    const m = measureText(label, fontSize);
+    const caption = !!container.customData?.icon;
+    const displayLabel = caption ? wrapText(label, 20) : label;
+    const m = measureText(displayLabel, fontSize);
     if (existing) {
       this.mutate(existing, {
-        text: label,
+        text: displayLabel,
         originalText: label,
         width: m.width,
         height: m.height,
@@ -907,25 +923,40 @@ export class Scene {
     } else {
       const t = this.add(
         this.textEl(
-          label,
+          displayLabel,
           { x: container.x, y: container.y, w: m.width, h: m.height },
           author,
           fontSize,
           {
-            containerId: container.id,
+            containerId: caption ? null : container.id,
+            ...(caption
+              ? {
+                  customData: { componentLabel: true, author },
+                  groupIds: container.groupIds,
+                  originalText: label,
+                  textAlign: "center",
+                  strokeColor: "#1e1e1e",
+                }
+              : {}),
             frameId: container.frameId ?? null,
           },
         ),
       );
-      this.addBound(container, { id: t.id, type: "text" });
+      if (!caption) this.addBound(container, { id: t.id, type: "text" });
     }
-    if (container.type !== "arrow") {
+    if (container.type !== "arrow" && !caption) {
       const w = Math.max(container.width, m.width + PAD);
       const h = Math.max(container.height, m.height + PAD);
       if (w !== container.width || h !== container.height)
         this.moveNode(container, { x: container.x, y: container.y, w, h });
     }
     this.centerLabel(container);
+  }
+
+  /** The invisible binding target covers only artwork, never its caption. */
+  private fitIconBounds(node: El) {
+    const bounds = unionBox(this.iconParts(node).map(boxOf));
+    if (bounds) this.mutate(node, { x: bounds.x, y: bounds.y, width: bounds.w, height: bounds.h });
   }
 
   private iconParts(el: El): El[] {
@@ -967,8 +998,11 @@ export class Scene {
     if (!label) throw new Error("add_node needs a label or a kind");
     let frame = this.impliedFrame(o.frame, o.place);
     const m = measureText(label, 20);
-    const w = Math.max(o.width ?? NODE_MIN_W, m.width + PAD);
     const icon = o.shape ? undefined : comp?.icon;
+    const w = Math.max(
+      o.width ?? NODE_MIN_W,
+      (icon ? measureText(wrapText(label, 20), 20).width : m.width) + PAD,
+    );
     const h = Math.max(o.height ?? (icon ? 120 : NODE_MIN_H), m.height + (icon ? 95 : PAD));
     const box = this.place(o.place, w, h, frame);
     const shape = icon ? "rectangle" : (o.shape ?? comp?.shape ?? "rectangle");
@@ -1017,6 +1051,7 @@ export class Scene {
         );
       }
     }
+    if (icon) this.fitIconBounds(node);
     this.setLabel(node, label, author);
     if (frame) this.fitFrame(frame);
     this.lastPlaced = node.id;
@@ -1092,6 +1127,12 @@ export class Scene {
         this.mutate(part, { strokeStyle: o.dashed ? "dashed" : "solid" });
     }
     if (o.shape && SHAPE_TYPES.has(el.type)) {
+      const caption = this.boundText(el);
+      if (caption?.customData?.componentLabel) {
+        const { componentLabel: _label, ...data } = caption.customData;
+        this.mutate(caption, { containerId: el.id, customData: data });
+        this.addBound(el, { id: caption.id, type: "text" });
+      }
       for (const part of this.iconParts(el)) this.mutate(part, { isDeleted: true });
       const { icon: _icon, iconFill, ...data } = el.customData ?? {};
       this.mutate(el, {
@@ -1664,7 +1705,7 @@ export class Scene {
         ...(sel?.has(rest.id) ? { selected: true } : {}),
       })),
       notes: live
-        .filter((e) => e.type === "text" && !e.containerId)
+        .filter((e) => e.type === "text" && !e.containerId && !e.customData?.componentLabel)
         .map((t) => ({
           id: t.id,
           text: t.text,

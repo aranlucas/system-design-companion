@@ -28,6 +28,7 @@ export type TabRpcMethod = "screenshot" | "mermaid" | "focus_view";
 export interface FocusViewParams {
   elementIds: string[];
   mode: "focus" | "point";
+  gesture?: "dot" | "heart";
 }
 
 export type ClientMessage =

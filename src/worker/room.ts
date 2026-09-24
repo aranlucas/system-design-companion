@@ -312,12 +312,17 @@ export class DiagramRoom extends DurableObject<Env> {
     return this.callTab<ScreenshotResult>("screenshot", { elementIds });
   }
 
-  async focusView(targets: string[], mode: "focus" | "point" = "focus") {
+  async focusView(
+    targets: string[],
+    mode: "focus" | "point" = "focus",
+    gesture: "dot" | "heart" = "dot",
+  ) {
     const scene = new Scene(this.els.values());
     const elementIds = targets.map((target) => scene.resolve(target).id);
     return this.callTab<{ mode: string; visible: boolean; elementIds: string[] }>("focus_view", {
       elementIds,
       mode,
+      gesture,
     });
   }
 

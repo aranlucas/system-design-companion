@@ -259,3 +259,45 @@ button.link {
 .card .row + .row {
   margin-top: 8px;
 }
+
+.agent-heart {
+  position: fixed;
+  z-index: 1000;
+  width: 120px;
+  height: 120px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.agent-heart svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.agent-heart path {
+  fill: none;
+  stroke: #e03131;
+  stroke-width: 4;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px #e0313188);
+  stroke-dasharray: 1;
+  animation: draw-heart 2.4s ease-out forwards;
+}
+@keyframes draw-heart {
+  0% {
+    stroke-dashoffset: 1;
+    opacity: 1;
+  }
+  65% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-heart path {
+    animation: none;
+  }
+}
