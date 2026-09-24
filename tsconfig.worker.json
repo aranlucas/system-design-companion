@@ -11,5 +11,5 @@
     "allowImportingTsExtensions": true,
     "isolatedModules": true
   },
-  "include": ["src/worker", "src/shared"]
+  "include": ["src/worker", "src/shared", "tests", "vitest.config.ts"]
 }

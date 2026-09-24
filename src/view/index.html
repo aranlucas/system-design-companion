@@ -1,0 +1,104 @@
+<!doctype html>
+<!-- MCP App view template: scripts/build-view.ts inlines the bundle and writes public/mcp-view.html. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="mcp-view" content="diagram" />
+    <style>
+      @font-face {
+        font-family: Excalifont;
+        src: url("__ORIGIN__/fonts/Excalifont-Latin.woff2") format("woff2");
+        font-display: swap;
+      }
+      :root {
+        color-scheme: light dark;
+        --fg: var(--color-text-primary, light-dark(#1e1e1e, #ececec));
+        --muted: var(--color-text-secondary, light-dark(#6b6b6b, #a3a3a3));
+        --line: var(--color-border-primary, light-dark(#e3e3e3, #3a3a3a));
+        --btn: var(--color-background-secondary, light-dark(#f4f4f4, #2c2c2c));
+        --font: var(--font-sans, system-ui, -apple-system, sans-serif);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        background: transparent;
+        color: var(--fg);
+        font: 13px/1.4 var(--font);
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+      }
+      #title {
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #status {
+        color: var(--muted);
+        flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      button {
+        font: inherit;
+        color: var(--fg);
+        background: var(--btn);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 3px 9px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      button[hidden] {
+        display: none;
+      }
+      #scene {
+        display: block;
+        width: 100%;
+        height: auto;
+        max-height: 560px;
+        border-radius: 0 0 8px 8px;
+      }
+      body[data-mode="fullscreen"] {
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      body[data-mode="fullscreen"] #scene {
+        flex: 1;
+        height: 100%;
+        max-height: none;
+      }
+      /* Same trick Excalidraw uses for its dark mode, so diagram colours stay recognisable. */
+      body[data-theme="dark"] #scene {
+        filter: invert(93%) hue-rotate(180deg);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span id="title">Diagram</span>
+      <span id="status">Loading…</span>
+      <button id="refresh" type="button">Refresh</button>
+      <button id="open" type="button" hidden>Open canvas</button>
+      <button id="full" type="button" hidden>Full screen</button>
+    </header>
+    <svg id="scene" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Diagram"></svg>
+    <script>
+      /* VIEW_SCRIPT */
+    </script>
+  </body>
+</html>

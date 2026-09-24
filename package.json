@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
-    "deploy": "vite build && wrangler deploy",
+    "dev": "pnpm build:view && vite dev",
+    "build": "pnpm build:view && vite build",
+    "build:view": "node scripts/build-view.ts",
+    "deploy": "pnpm build && wrangler deploy",
     "lint": "oxlint --max-warnings 0",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
@@ -17,10 +18,12 @@
     "@dagrejs/dagre": "^3.1.1",
     "@excalidraw/excalidraw": "^0.18.1",
     "@excalidraw/mermaid-to-excalidraw": "^2.2.2",
+    "@modelcontextprotocol/ext-apps": "^2.0.0",
     "@modelcontextprotocol/server": "^2.1.0",
     "fractional-indexing": "^4.0.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "roughjs": "^4.6.6",
     "zod": "^4.6.5"
   },
   "devDependencies": {
@@ -33,6 +36,7 @@
     "oxlint-tsgolint": "^7.0.2003",
     "typescript": "^7.0.2",
     "vite": "^8.3.1",
+    "vitest": "^5.0.1",
     "wrangler": "^4.138.0"
   },
   "packageManager": "pnpm@12.6.0"

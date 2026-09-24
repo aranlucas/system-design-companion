@@ -11,5 +11,5 @@
     "allowImportingTsExtensions": true,
     "isolatedModules": true
   },
-  "include": ["src/app", "src/shared"]
+  "include": ["src/app", "src/view", "src/shared"]
 }

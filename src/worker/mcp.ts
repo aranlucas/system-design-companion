@@ -1,6 +1,12 @@
+import {
+  RESOURCE_MIME_TYPE,
+  registerAppResource,
+  registerAppTool,
+} from "@modelcontextprotocol/ext-apps/server";
 import { McpServer, type McpRequestContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { COMPONENT_KINDS, COMPONENTS } from "../shared/components.ts";
+import type { El } from "../shared/protocol.ts";
 import { SHAPES, type Op } from "./scene.ts";
 import { RUBRIC } from "./rubric.ts";
 import {
@@ -12,6 +18,7 @@ import {
   shareLink,
   verifyKey,
 } from "./store.ts";
+import { VIEW_URI, viewHtml } from "./view.ts";
 
 const INSTRUCTIONS = `Collaborative Excalidraw canvas for system design. A human (and possibly an interviewer) edits the same canvas live in a browser tab.
 Workflow:
@@ -191,9 +198,13 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
 
   // ---------- perception ----------
 
-  server.registerTool(
+  // Hosts that support MCP Apps (Claude Desktop/web, ChatGPT, VS Code…) render VIEW_URI next to
+  // this tool's result; others just get the text. The view fetches pixels via render_scene.
+  registerAppTool(
+    server,
     "get_scene",
     {
+      _meta: { ui: { resourceUri: VIEW_URI } },
       description:
         "Read the canvas. format=graph (default): frames, nodes, edges (arrows resolved to node labels; inferred=true if the arrow only touches a node), standalone notes, and unstructured sketches. selected=true marks the user's current selection. format=raw: Excalidraw elements.",
       inputSchema: z.object({ diagram: diagramArg, format: z.enum(["graph", "raw"]).optional() }),
@@ -202,6 +213,45 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
     guard(async ({ diagram, format }: { diagram: string; format?: "graph" | "raw" }) => {
       const d = await pick(diagram);
       return format === "raw" ? room(env, d.id).getRaw() : room(env, d.id).getGraph();
+    }),
+  );
+
+  registerAppTool(
+    server,
+    "render_scene",
+    {
+      _meta: { ui: { resourceUri: VIEW_URI, visibility: ["app"] } },
+      description: "Elements to draw in the diagram view (called by the view, not the model).",
+      inputSchema: z.object({ diagram: diagramArg }),
+      annotations: { readOnlyHint: true },
+    },
+    guard(async ({ diagram }: { diagram: string }) => {
+      const d = await pick(diagram);
+      const raw = (await room(env, d.id).getRaw()) as unknown as El[];
+      const elements = raw.sort((a, b) =>
+        (a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0,
+      );
+      return {
+        content: [{ type: "text" as const, text: `${elements.length} elements` }],
+        structuredContent: { name: d.name, url: diagram, elements },
+      };
+    }),
+  );
+
+  registerAppResource(
+    server,
+    "Diagram view",
+    VIEW_URI,
+    { description: "Hand-drawn picture of the shared canvas" },
+    async () => ({
+      contents: [
+        {
+          uri: VIEW_URI,
+          mimeType: RESOURCE_MIME_TYPE,
+          text: await viewHtml(env, origin),
+          _meta: { ui: { prefersBorder: true, csp: { resourceDomains: [origin] } } },
+        },
+      ],
     }),
   );
 

@@ -1,5 +1,5 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": ["worker-configuration.d.ts", "pnpm-lock.yaml"],
+  "ignorePatterns": ["worker-configuration.d.ts", "public/mcp-view.html", "pnpm-lock.yaml"],
   "printWidth": 100
 }
