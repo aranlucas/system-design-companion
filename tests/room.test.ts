@@ -288,6 +288,37 @@ describe("concurrent-edit merge rule", () => {
 });
 
 describe("presence and tab RPC", () => {
+  it("relays cursors, selections and departures to the other tabs as collaborators", async () => {
+    const { env } = makeEnv();
+    const { ctx, addWs } = makeRoomCtx();
+    const room = new DiagramRoom(ctx as unknown as DurableObjectState, env);
+    await room.init("collab", "Collab");
+    const a = makeWs(),
+      b = makeWs();
+    a.serializeAttachment({ sid: "a", selection: [], focusedAt: 0 });
+    b.serializeAttachment({ sid: "b", selection: [], focusedAt: 0 });
+    addWs(a);
+    addWs(b);
+    const message = (ws: unknown, msg: unknown) =>
+      room.webSocketMessage(ws as WebSocket, JSON.stringify(msg));
+    await message(a, { type: "presence", selection: ["x"], focused: true, username: "Ada" });
+    await message(a, { type: "pointer", pointer: { x: 1, y: 2, tool: "pointer" }, button: "up" });
+    expect(a.sent).toHaveLength(0);
+    expect(b.sent.map((m) => JSON.parse(m))).toEqual([
+      { type: "collaborator", id: "a", username: "Ada", selection: ["x"] },
+      {
+        type: "collaborator",
+        id: "a",
+        pointer: { x: 1, y: 2, tool: "pointer" },
+        button: "up",
+      },
+    ]);
+    await room.webSocketClose(a as unknown as WebSocket);
+    expect(b.sent.map((m) => JSON.parse(m))).toContainEqual({ type: "collaborator_left", id: "a" });
+    // The fake still lists the closing socket; the count must exclude it.
+    expect(b.sent.map((m) => JSON.parse(m))).toContainEqual({ type: "peers", count: 1 });
+  });
+
   it("broadcasts room name changes to connected tabs", async () => {
     const { env } = makeEnv();
     const { ctx, addWs } = makeRoomCtx();

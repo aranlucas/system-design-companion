@@ -44,3 +44,8 @@ export const setupCommands = () => [
   { client: "Codex", cmd: `codex mcp add system-design --url ${mcpUrl()}` },
 ];
 export const linkFor = (id: string, key: string) => `${location.origin}/d/${id}?k=${key}`;
+
+/** Name shown on this browser's cursor for other people on the board. */
+const NAME = "sdc.name";
+export const displayName = () => read<string>(NAME, "");
+export const setDisplayName = (name: string) => write(NAME, name.trim().slice(0, 40));

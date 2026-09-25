@@ -23,6 +23,13 @@ export interface Viewport {
   zoom: number;
 }
 
+/** Live cursor, in scene coordinates (Excalidraw's CollaboratorPointer). */
+export interface Pointer {
+  x: number;
+  y: number;
+  tool: "pointer" | "laser";
+}
+
 export type TabRpcMethod = "screenshot" | "mermaid" | "focus_view";
 
 export interface FocusViewParams {
@@ -38,7 +45,9 @@ export type ClientMessage =
       selection: string[];
       viewport?: Viewport;
       focused: boolean;
+      username?: string;
     }
+  | { type: "pointer"; pointer: Pointer; button: "up" | "down" }
   | { type: "rpc_result"; reqId: string; ok: true; data: unknown }
   | { type: "rpc_result"; reqId: string; ok: false; error: string };
 
@@ -47,7 +56,17 @@ export type ServerMessage =
   | { type: "rename"; name: string }
   | { type: "update"; elements: El[]; origin: "human" | "agent" | "system" }
   | { type: "rpc"; reqId: string; method: TabRpcMethod; params: any }
-  | { type: "peers"; count: number };
+  | { type: "peers"; count: number }
+  /** Another tab's presence; relayed so Excalidraw can draw its cursor and selection. */
+  | {
+      type: "collaborator";
+      id: string;
+      username?: string;
+      selection?: string[];
+      pointer?: Pointer;
+      button?: "up" | "down";
+    }
+  | { type: "collaborator_left"; id: string };
 
 export interface ScreenshotParams {
   elementIds?: string[];

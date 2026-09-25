@@ -132,22 +132,8 @@ body,
   inset: 0;
 }
 
-.agent-pointer {
-  position: fixed;
-  z-index: 1000;
-  width: 14px;
-  height: 14px;
-  border: 2px solid white;
-  border-radius: 50%;
-  background: #e03131;
-  box-shadow:
-    0 0 0 12px #e0313133,
-    0 0 24px #e0313166;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
-}
-/* Canvas chrome is Excalidraw's own: Sidebar.Trigger buttons (top-right Share,
-   footer Rename/Versions) open native <Sidebar>s, toasts use api.setToast.
+/* Canvas chrome is Excalidraw's own: LiveCollaborationTrigger, Sidebar.Trigger,
+   DefaultSidebar tabs (Share, Versions), WelcomeScreen, and api.setToast.
    Inside .excalidraw, the page tokens below resolve to Excalidraw's, so the
    shared classes (.row, .cmd, .list, .tag, .muted) follow its light/dark theme. */
 .canvas-wrap .excalidraw {
@@ -157,6 +143,10 @@ body,
   --muted: var(--color-gray-50);
   --border: var(--input-border-color);
   --accent: var(--color-primary);
+}
+/* Excalidraw's toast sits 10px from the bottom, over the footer; lift it clear. */
+.canvas-wrap .excalidraw .Toast {
+  bottom: calc(var(--lg-button-size) + 1.75rem);
 }
 /* FooterCenter has no leading margin; match .undo-redo-buttons' 0.6em. */
 .footbar {
@@ -183,8 +173,38 @@ body,
   color: var(--text-primary-color);
   font-size: 0.875rem;
 }
+.sd-panel h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+  font-weight: 600;
+}
 .sd-panel p {
   margin: 4px 0 0;
+}
+.sd-panel label {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+.sd-panel .snaps li {
+  align-items: flex-start;
+}
+.sd-panel .snap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.sd-panel .snap-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.3;
+}
+.sd-panel .snaps button {
+  padding: 4px 10px;
+  font-size: 0.8125rem;
 }
 .sd-panel button {
   border: none;

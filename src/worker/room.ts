@@ -12,6 +12,9 @@ import { Scene, graphView, type Author, type Op } from "./scene.ts";
 import { patchSnapshotName } from "./patch-name.ts";
 
 interface TabState {
+  /** Stable per-socket id, used as the Excalidraw collaborator id. */
+  sid: string;
+  username?: string;
   selection: string[];
   viewport?: Viewport;
   focusedAt: number;
@@ -26,6 +29,13 @@ export interface SnapshotMeta {
 }
 
 const RPC_TIMEOUT_MS = 20_000;
+
+const collaborator = (tab: TabState): ServerMessage => ({
+  type: "collaborator",
+  id: tab.sid,
+  username: tab.username,
+  selection: tab.selection,
+});
 
 /** One diagram: live scene, tab sync, and the ops layer MCP (and later an in-room agent) calls. */
 export class DiagramRoom extends DurableObject<Env> {
@@ -143,7 +153,12 @@ export class DiagramRoom extends DurableObject<Env> {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ selection: [], focusedAt: 0 } satisfies TabState);
+    const others = this.ctx.getWebSockets().filter((ws) => ws !== server);
+    server.serializeAttachment({
+      sid: crypto.randomUUID(),
+      selection: [],
+      focusedAt: 0,
+    } satisfies TabState);
     server.send(
       JSON.stringify({
         type: "init",
@@ -151,6 +166,10 @@ export class DiagramRoom extends DurableObject<Env> {
         name: this.name,
       } satisfies ServerMessage),
     );
+    for (const ws of others) {
+      const tab = ws.deserializeAttachment() as TabState;
+      server.send(JSON.stringify(collaborator(tab)));
+    }
     this.broadcast({ type: "peers", count: this.ctx.getWebSockets().length });
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -182,15 +201,27 @@ export class DiagramRoom extends DurableObject<Env> {
       case "presence": {
         const prev = ws.deserializeAttachment() as TabState;
         const focusedAt = msg.focused ? Date.now() : prev.focusedAt;
-        ws.serializeAttachment({
+        const next: TabState = {
+          sid: prev.sid,
+          username: msg.username?.slice(0, 40) || undefined,
           selection: msg.selection,
           viewport: msg.viewport,
           focusedAt,
-        } satisfies TabState);
+        };
+        ws.serializeAttachment(next);
+        this.broadcast(collaborator(next), ws);
         if (msg.focused && focusedAt - this.lastFocusAt > 1000) {
           this.lastFocusAt = focusedAt;
           this.setMeta("focusAt", String(focusedAt));
         }
+        break;
+      }
+      case "pointer": {
+        const { sid } = ws.deserializeAttachment() as TabState;
+        this.broadcast(
+          { type: "collaborator", id: sid, pointer: msg.pointer, button: msg.button },
+          ws,
+        );
         break;
       }
       case "rpc_result": {
@@ -206,7 +237,11 @@ export class DiagramRoom extends DurableObject<Env> {
 
   async webSocketClose(ws: WebSocket) {
     ws.close();
-    this.broadcast({ type: "peers", count: this.ctx.getWebSockets().length - 1 });
+    const { sid } = ws.deserializeAttachment() as TabState;
+    this.broadcast({ type: "collaborator_left", id: sid }, ws);
+    // workerd may or may not still list the closing socket here; exclude it either way.
+    const count = this.ctx.getWebSockets().filter((other) => other !== ws).length;
+    this.broadcast({ type: "peers", count }, ws);
   }
 
   /** Most recently focused open tab — the "human's" tab. */
