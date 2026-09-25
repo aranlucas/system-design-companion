@@ -338,7 +338,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
     "tidy",
     {
       description:
-        "Non-destructive cleanup: attach loose items to the frame they sit in, wrap over-long notes, snap nearly-aligned boxes, push apart overlaps with minimal moves, fit frames and separate overlapping frames. Never changes connections, labels or relative order. Snapshotted first. (apply_patch already tidies the frames it touches.)",
+        "Non-destructive cleanup: attach loose items to the frame they sit in, wrap over-long notes, snap nearly-aligned boxes and even out their gaps, push apart overlaps with minimal moves (groups move whole), fit frames and separate overlapping frames. Never changes connections, labels or relative order. Snapshotted first when anything changes; returns counts of what it did. (apply_patch already tidies the frames it touches.)",
       inputSchema: z.object({
         diagram: diagramArg,
         frame: z.string().optional().describe("only tidy this frame; default: whole diagram"),

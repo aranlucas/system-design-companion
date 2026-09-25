@@ -334,12 +334,23 @@ export class DiagramRoom extends DurableObject<Env> {
     return { snapshotId: snap?.id, changed, results, tidied };
   }
 
-  /** Non-destructive cleanup of the whole diagram, or one frame. */
-  async tidy(frame?: string, origin: "agent" | "system" = "agent") {
+  /**
+   * Non-destructive cleanup of the whole diagram, or of some frames (null = top level).
+   * Snapshotted first, unless there is nothing to change.
+   */
+  async tidy(frames?: string | (string | null)[], origin: "agent" | "system" = "agent") {
+    const run = () => {
+      const scene = new Scene(this.els.values());
+      const list = frames === undefined ? undefined : [frames].flat();
+      const scope = list && new Set(list.map((f) => (f === null ? null : scene.resolve(f).id)));
+      return { scene, stats: scene.tidy(scope) };
+    };
+    const dry = run();
+    if (!dry.scene.changedElements().length)
+      return { snapshotId: undefined, changed: 0, ...dry.stats };
     const snap = await this.snapshot("before tidy", "auto");
-    const scene = new Scene(this.els.values());
-    const scope = frame ? new Set<string | null>([scene.resolve(frame).id]) : undefined;
-    const stats = scene.tidy(scope);
+    // Edits can land while the snapshot is written, so tidy the current state, not the dry run.
+    const { scene, stats } = run();
     const changed = this.commit(scene, origin);
     return { snapshotId: snap.id, changed, ...stats };
   }

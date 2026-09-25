@@ -103,16 +103,59 @@ describe("DiagramRoom ops layer", () => {
     expect(snap?.name).toBe("Before: Rename Database to Events DB");
   });
 
+  const rect = (id: string, x: number, y: number, frameId: string | null = null): El => ({
+    id,
+    type: "rectangle",
+    x,
+    y,
+    width: 160,
+    height: 70,
+    version: 1,
+    versionNonce: 1,
+    isDeleted: false,
+    index: `a${id}`,
+    frameId,
+  });
+
+  it("tidy snapshots before changing anything, and skips the snapshot when already tidy", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    await room.seed([rect("a", 0, 0), rect("b", 20, 10)]);
+    const tidy = await room.tidy();
+    expect(tidy.changed).toBeGreaterThan(0);
+    expect(tidy.separated).toBeGreaterThan(0);
+    const snaps = await room.listSnapshots();
+    expect(snaps.find((s) => s.id === tidy.snapshotId)?.name).toBe("before tidy");
+
+    const again = await room.tidy();
+    expect(again).toMatchObject({ changed: 0, snapshotId: undefined });
+    expect(await room.listSnapshots()).toHaveLength(snaps.length);
+  });
+
+  it("tidy can be scoped to a list of frames, with null for the top level", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    const frame: El = { ...rect("f", 0, 0), type: "frame", width: 1000, height: 600, name: "F" };
+    await room.seed([
+      frame,
+      rect("a", 100, 100, "f"),
+      rect("b", 120, 110, "f"),
+      rect("c", 3000, 0),
+      rect("d", 3020, 10),
+    ]);
+    const before = new Map((await room.getRaw()).map((e) => [e.id, e]));
+    await room.tidy([null]);
+    // Only the top-level pair was separated; the framed pair still overlaps.
+    const moved = (await room.getRaw()).filter(
+      (e) => e.type === "rectangle" && (e.x !== before.get(e.id)!.x || e.y !== before.get(e.id)!.y),
+    );
+    expect(moved.map((e) => e.frameId ?? null)).toEqual([null]);
+  });
+
   it("tidy and layout wrap edits in snapshots", async () => {
     const { env } = makeEnv();
     const room = await makeRoom(env);
-    await room.applyPatch(
-      [
-        { op: "add_node", ref: "a", label: "A" },
-        { op: "add_node", ref: "b", label: "B" },
-      ],
-      "system" as Author,
-    );
+    await room.seed([rect("a", 0, 0), rect("b", 20, 10)]);
     const tidy = await room.tidy();
     expect(tidy.snapshotId).toBeDefined();
     expect(typeof tidy.changed).toBe("number");

@@ -395,13 +395,27 @@ export function Canvas({ id, k }: { id: string; k: string }) {
   // ---------- chrome ----------
 
   const tidy = async () => {
-    const r = await fetch(`/api/d/${id}/tidy?k=${encodeURIComponent(k)}`, { method: "POST" });
-    const d = (await r.json()) as { changed?: number; error?: string };
+    // With a selection, tidy only the frames it touches (null = the top level).
+    const editor = apiRef.current;
+    const selected = editor?.getAppState().selectedElementIds ?? {};
+    const frames = [
+      ...new Set(
+        (editor?.getSceneElements() ?? [])
+          .filter((e) => selected[e.id])
+          .map((e) => (e.type === "frame" ? e.id : e.frameId)),
+      ),
+    ];
+    const r = await fetch(`/api/d/${id}/tidy?k=${encodeURIComponent(k)}`, {
+      method: "POST",
+      body: JSON.stringify({ frames }),
+    });
+    const d = (await r.json()) as TidyResult;
+    const where = frames.length ? "Selection" : "Diagram";
     flash(
       r.ok
         ? d.changed
-          ? `Tidied (${d.changed} changes; undo in Versions)`
-          : "Already tidy"
+          ? `${where} tidied: ${tidySummary(d)}. Undo in Versions.`
+          : `${where} is already tidy`
         : `Tidy failed: ${d.error}`,
     );
   };
@@ -512,7 +526,7 @@ export function Canvas({ id, k }: { id: string; k: string }) {
             <button
               className="sidebar-trigger"
               onClick={tidy}
-              title="Fix overlaps, alignment and frames (undo via Versions)"
+              title="Fix overlaps, alignment and frames; only the selected frames when something is selected (undo via Versions)"
             >
               Tidy
             </button>
@@ -664,6 +678,30 @@ function RenamePanel({
       </button>
     </form>
   );
+}
+
+type TidyResult = { changed?: number; error?: string } & Partial<
+  Record<keyof typeof TIDY_WORDS, number>
+>;
+
+const TIDY_WORDS = {
+  aligned: "aligned",
+  spaced: "spaced",
+  separated: "separated",
+  adopted: "moved into frames",
+  wrapped: "notes wrapped",
+  bound: "arrow ends attached",
+  rerouted: "arrows rerouted",
+  framesFitted: "frames fitted",
+  framesMoved: "frames moved",
+};
+
+/** "3 aligned · 2 separated · 1 frames moved", from the stats the server returns. */
+function tidySummary(d: TidyResult) {
+  const parts = Object.entries(TIDY_WORDS)
+    .filter(([key]) => d[key as keyof typeof TIDY_WORDS])
+    .map(([key, word]) => `${d[key as keyof typeof TIDY_WORDS]} ${word}`);
+  return parts.join(" · ") || `${d.changed} changes`;
 }
 
 function VersionsPanel({ id, k, flash }: { id: string; k: string; flash: (m: string) => void }) {

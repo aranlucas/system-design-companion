@@ -116,6 +116,8 @@ export function newId(): string {
 
 const NOTE_WRAP = 64; // chars per line for notes the agent writes
 const FRAME_GAP = 80;
+/** How far an unbound arrow end may sit from a node and still count as connected to it. */
+const ARROW_REACH = 25;
 
 /** Word-wrap long lines, keeping list markers as a hanging indent. */
 export function wrapText(text: string, max = NOTE_WRAP): string {
@@ -147,7 +149,9 @@ export interface TidyStats {
   adopted: number;
   wrapped: number;
   aligned: number;
+  spaced: number;
   separated: number;
+  framesFitted: number;
   framesMoved: number;
 }
 
@@ -203,6 +207,21 @@ function borderPoint(b: Box, toward: { x: number; y: number }, gap: number, shap
 }
 
 type Pt = { x: number; y: number };
+
+/** Groups of 2+ items whose `key` lies within `tol` of the group's first item. */
+function clusters<T>(items: T[], key: (t: T) => number, tol: number): T[][] {
+  const out: T[][] = [];
+  let cur: T[] = [];
+  for (const t of [...items].sort((a, b) => key(a) - key(b))) {
+    if (cur.length && key(t) - key(cur[0]) > tol) {
+      if (cur.length > 1) out.push(cur);
+      cur = [];
+    }
+    cur.push(t);
+  }
+  if (cur.length > 1) out.push(cur);
+  return out;
+}
 
 function distToSegment(p: Pt, a: Pt, b: Pt): number {
   const l2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
@@ -412,6 +431,24 @@ export class Scene {
     return this.boundText(e)?.text?.replace(/\n/g, " ") ?? "";
   }
 
+  /** Node an unbound arrow end at `p` points at: the closest within ARROW_REACH, centre breaks ties. */
+  nodeAt(p: Pt, nodes: El[]): El | undefined {
+    let best: El | undefined;
+    let bestKey = [Infinity, Infinity];
+    for (const n of nodes) {
+      const b = boxOf(n);
+      const d = distToBox(p, b);
+      if (d > ARROW_REACH) continue;
+      const c = center(b);
+      const key = [d, Math.hypot(p.x - c.x, p.y - c.y)];
+      if (key[0] < bestKey[0] || (key[0] === bestKey[0] && key[1] < bestKey[1])) {
+        best = n;
+        bestKey = key;
+      }
+    }
+    return best;
+  }
+
   isNode(e: El) {
     return !e.isDeleted && !e.customData?.componentPart && SHAPE_TYPES.has(e.type);
   }
@@ -549,25 +586,64 @@ export class Scene {
   }
 
   /** Grow a frame so it encloses all its children. */
-  private fitFrame(frame: El) {
+  /**
+   * Grow a frame to hold its contents plus PAD. With `shrink`, a frame that only grew because
+   * of fitting (and hasn't been resized since) shrinks back as far as its contents allow, but
+   * never below the size someone chose. That size is kept in customData.autoFit, relative to the
+   * frame so moving the frame keeps it valid. Returns true if the frame changed.
+   */
+  private fitFrame(frame: El, shrink = false): boolean {
+    // Connections are routed inside the frame instead (see detour), so they don't grow it.
+    const isBoundArrow = (e: El | undefined) =>
+      e?.type === "arrow" && !!(e.startBinding || e.endBinding);
     const kids = this.live()
-      .filter((e) => e.frameId === frame.id)
+      .filter(
+        (e) =>
+          e.frameId === frame.id &&
+          !isBoundArrow(e) &&
+          !(e.containerId && isBoundArrow(this.els.get(e.containerId))),
+      )
       .map(boxOf);
     const u = unionBox(kids);
-    if (!u) return;
-    const nx = Math.min(frame.x, u.x - PAD);
-    const ny = Math.min(frame.y, u.y - PAD);
-    const nr = Math.max(frame.x + frame.width, u.x + u.w + PAD);
-    const nb = Math.max(frame.y + frame.height, u.y + u.h + PAD);
+    if (!u) return false;
+    const auto = frame.customData?.autoFit as
+      | { dx: number; dy: number; w: number; h: number; fw: number; fh: number }
+      | undefined;
+    const current = { x: frame.x, y: frame.y, w: frame.width, h: frame.height };
+    // A resize since the last fit means someone chose this size: it becomes the new floor.
+    const chosen =
+      auto && frame.width === auto.fw && frame.height === auto.fh
+        ? { x: frame.x + auto.dx, y: frame.y + auto.dy, w: auto.w, h: auto.h }
+        : current;
+    const floor = shrink ? chosen : current;
+    const nx = Math.min(floor.x, u.x - PAD);
+    const ny = Math.min(floor.y, u.y - PAD);
+    const nr = Math.max(floor.x + floor.w, u.x + u.w + PAD);
+    const nb = Math.max(floor.y + floor.h, u.y + u.h + PAD);
     if (
-      nx !== frame.x ||
-      ny !== frame.y ||
-      nr !== frame.x + frame.width ||
-      nb !== frame.y + frame.height
-    ) {
-      this.mutate(frame, { x: nx, y: ny, width: nr - nx, height: nb - ny });
-      this.grownFrames.add(frame.id);
-    }
+      nx === frame.x &&
+      ny === frame.y &&
+      nr === frame.x + frame.width &&
+      nb === frame.y + frame.height
+    )
+      return false;
+    const autoFit = {
+      dx: chosen.x - nx,
+      dy: chosen.y - ny,
+      w: chosen.w,
+      h: chosen.h,
+      fw: nr - nx,
+      fh: nb - ny,
+    };
+    this.mutate(frame, {
+      x: nx,
+      y: ny,
+      width: nr - nx,
+      height: nb - ny,
+      customData: { ...(frame.customData ?? {}), autoFit },
+    });
+    this.grownFrames.add(frame.id);
+    return true;
   }
 
   /** Smallest frame containing the centre of `b`. */
@@ -723,14 +799,19 @@ export class Scene {
     const existing = pts.map(([x, y]) => ({ x: arrow.x + x, y: arrow.y + y }));
     if (pts.length > 2 && !ours && inside(existing)) return false; // preserve valid human curves
     const ends = new Set([arrow.startBinding?.elementId, arrow.endBinding?.elementId]);
+    // A framed arrow must stay inside its frame, so only boxes overlapping the frame can block it.
     const obstacles = this.live()
       .filter((n) => (this.isNode(n) && !ends.has(n.id)) || n.customData?.componentLabel)
-      .map(boxOf);
-    const clear = (path: Pt[]) =>
-      inside(path) &&
-      path.every(
-        (p, i) => i === 0 || !obstacles.some((o) => segmentHitsBox(path[i - 1], p, o, 10)),
+      .map(boxOf)
+      .filter((o) => !frame || overlaps(o, boxOf(frame), 10));
+    const clear = (path: Pt[]) => {
+      if (!inside(path)) return false;
+      const span = unionBox(path.map((p) => ({ ...p, w: 0, h: 0 })))!;
+      const near = obstacles.filter((o) => overlaps(o, span, 10));
+      return path.every(
+        (p, i) => i === 0 || !near.some((o) => segmentHitsBox(path[i - 1], p, o, 10)),
       );
+    };
     const abs = (a: El) =>
       (a.points as [number, number][]).map(([px, py]) => ({ x: a.x + px, y: a.y + py }));
     const setPath = (bends: Pt[]) => {
@@ -882,15 +963,20 @@ export class Scene {
         : null;
     const sc = sOk ? center(boxOf(sOk)) : absStart;
     const tc = tOk ? center(boxOf(tOk)) : absEnd;
-    const start = sOk ? borderPoint(boxOf(sOk), firstBend ?? tc, 8, sOk.type) : absStart;
-    const end = tOk ? borderPoint(boxOf(tOk), lastBend ?? sc, 8, tOk.type) : absEnd;
-    // Bends follow the average movement of the two ends.
-    const shift = !shiftBends
-      ? { x: 0, y: 0 }
-      : {
-          x: (start.x - absStart.x + end.x - absEnd.x) / 2,
-          y: (start.y - absStart.y + end.y - absEnd.y) / 2,
-        };
+    let start = sOk ? borderPoint(boxOf(sOk), firstBend ?? tc, 8, sOk.type) : absStart;
+    let end = tOk ? borderPoint(boxOf(tOk), lastBend ?? sc, 8, tOk.type) : absEnd;
+    // Bends follow the average movement of the two ends. Sub-pixel drift is rounding, not movement.
+    const drift = (d: number) => (shiftBends && Math.abs(d) >= 1 ? d : 0);
+    const shift = {
+      x: drift((start.x - absStart.x + end.x - absEnd.x) / 2),
+      y: drift((start.y - absStart.y + end.y - absEnd.y) / 2),
+    };
+    // Re-aim the ends at the moved bends, so a second pass finds nothing to fix.
+    if (firstBend && lastBend && (shift.x || shift.y)) {
+      const moved = (p: Pt) => ({ x: p.x + shift.x, y: p.y + shift.y });
+      if (sOk) start = borderPoint(boxOf(sOk), moved(firstBend), 8, sOk.type);
+      if (tOk) end = borderPoint(boxOf(tOk), moved(lastBend), 8, tOk.type);
+    }
     const abs = [
       start,
       ...pts
@@ -1346,33 +1432,29 @@ export class Scene {
       adopted: 0,
       wrapped: 0,
       aligned: 0,
+      spaced: 0,
       separated: 0,
+      framesFitted: 0,
       framesMoved: 0,
     };
     const inScope = (fid: string | null | undefined) => !scope || scope.has(fid ?? null);
     const isBlock = (e: El) => this.isNode(e) || (e.type === "text" && !e.containerId);
 
-    // 0. Bind loose arrow ends that touch a node, so links survive every later move.
+    // 0. Bind loose arrow ends, so links survive every later move. Only where graph() already
+    //    infers the edge (both ends on distinct nodes): tidy makes a connection explicit, never new.
     const nodes0 = this.live().filter((e) => this.isNode(e));
-    const near = (p: { x: number; y: number }) =>
-      nodes0.find(
-        (n) =>
-          p.x >= n.x - 20 &&
-          p.x <= n.x + n.width + 20 &&
-          p.y >= n.y - 20 &&
-          p.y <= n.y + n.height + 20,
-      );
     for (const a of this.live()) {
-      if (a.type !== "arrow" || !inScope(a.frameId)) continue;
+      if (a.type !== "arrow" || !inScope(a.frameId) || (a.startBinding && a.endBinding)) continue;
       const pts = a.points as [number, number][];
-      for (const [side, p] of [
-        ["startBinding", pts[0]],
-        ["endBinding", pts[pts.length - 1]],
+      const end = (p: [number, number]) => this.nodeAt({ x: a.x + p[0], y: a.y + p[1] }, nodes0);
+      const from = a.startBinding ? this.els.get(a.startBinding.elementId) : end(pts[0]);
+      const to = a.endBinding ? this.els.get(a.endBinding.elementId) : end(pts[pts.length - 1]);
+      if (!from || !to || from.id === to.id) continue;
+      for (const [side, n] of [
+        ["startBinding", from],
+        ["endBinding", to],
       ] as const) {
         if (a[side]) continue;
-        const n = near({ x: a.x + p[0], y: a.y + p[1] });
-        const other = side === "startBinding" ? a.endBinding : a.startBinding;
-        if (!n || other?.elementId === n.id) continue;
         this.mutate(a, { [side]: { elementId: n.id, focus: 0, gap: 8, fixedPoint: null } });
         this.addBound(n, { id: a.id, type: "arrow" });
         stats.bound++;
@@ -1417,79 +1499,65 @@ export class Scene {
       }
     }
 
-    const groups = new Map<string | null, El[]>();
-    for (const e of this.live()) {
-      if (!isBlock(e) || (e.groupIds?.length && !e.customData?.icon) || !inScope(e.frameId))
-        continue;
-      const k = e.frameId ?? null;
-      groups.set(k, [...(groups.get(k) ?? []), e]);
-    }
+    const byFrame = this.tidyBlocks(inScope);
 
     // Steps 3-4 repeat until stable: a separation can unblock a snap that was refused before.
     for (let outer = 0; outer < 4; outer++) {
-      const before = stats.aligned + stats.separated;
-      for (const items of groups.values()) {
+      const before = stats.aligned + stats.spaced + stats.separated;
+      for (const blocks of byFrame.values()) {
+        const others = (e: El) => blocks.filter((b) => b.node !== e).map((b) => b.box());
         // 3. Snap nodes whose centres are nearly in a row / column onto the cluster's largest box
         //    (a fixed anchor, so repeated runs converge). Never snap into a collision.
-        const nodes = items.filter((e) => this.isNode(e));
+        const nodes = blocks.flatMap((b) => (b.node ? [b.node] : []));
         for (let round = 0; round < 4; round++) {
           let snapped = 0;
           for (const axis of ["y", "x"] as const) {
             const size = axis === "y" ? "height" : "width";
             const mid = (e: El) => e[axis] + e[size] / 2;
-            const sorted = [...nodes].sort((a, b) => mid(a) - mid(b));
-            let cluster: El[] = [];
-            const flush = () => {
-              if (cluster.length > 1) {
-                const anchor = cluster.reduce((m, e) =>
-                  e.width * e.height > m.width * m.height ? e : m,
-                );
-                for (const e of cluster) {
-                  const d = mid(anchor) - mid(e);
-                  if (e === anchor || Math.abs(d) < 1) continue;
-                  const box = {
-                    ...boxOf(e),
-                    [axis]: Math.round(e[axis] + d),
-                  } as Box;
-                  if (items.some((o) => o !== e && overlaps(box, boxOf(o), 23))) continue;
-                  this.moveNode(e, box);
-                  snapped++;
-                }
+            for (const cluster of clusters(nodes, mid, 16)) {
+              const anchor = cluster.reduce((m, e) =>
+                e.width * e.height > m.width * m.height ? e : m,
+              );
+              for (const e of cluster) {
+                const d = mid(anchor) - mid(e);
+                if (e === anchor || Math.abs(d) < 1) continue;
+                const box = { ...boxOf(e), [axis]: Math.round(e[axis] + d) } as Box;
+                if (others(e).some((o) => overlaps(box, o, 23))) continue;
+                this.moveNode(e, box);
+                snapped++;
               }
-              cluster = [];
-            };
-            for (const e of sorted) {
-              if (cluster.length && mid(e) - mid(cluster[0]) > 16) flush();
-              cluster.push(e);
             }
-            flush();
           }
           stats.aligned += snapped;
           if (!snapped) break;
         }
 
-        // 4. Separate overlapping blocks with the smallest push; the later one (reading order) moves.
+        // 3b. Even out the gaps along each aligned row / column.
+        stats.spaced += this.spaceEvenly(nodes, others);
+
+        // 4. Separate overlapping blocks with the smallest push; the later one (reading order)
+        //    moves. When pushing sideways or down cost about the same, prefer fewer arrow crossings.
         const M = 24;
         for (let pass = 0; pass < 40; pass++) {
           let moved = false;
-          const order = [...items].sort((a, b) => a.y - b.y || a.x - b.x);
+          const order = [...blocks].sort((a, b) => a.box().y - b.box().y || a.box().x - b.box().x);
           for (let i = 0; i < order.length; i++) {
             for (let j = i + 1; j < order.length; j++) {
-              const a = order[i];
-              const b = order[j];
-              if (!overlaps(boxOf(a), boxOf(b), M - 1)) continue;
-              const px = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) + M;
-              const py = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y) + M;
-              const box = boxOf(b);
-              if (px < py) box.x += b.x + b.width / 2 >= a.x + a.width / 2 ? px : -px;
-              else box.y += py;
-              if (this.isNode(b))
-                this.moveNode(b, {
-                  ...box,
-                  x: Math.round(box.x),
-                  y: Math.round(box.y),
-                });
-              else this.mutate(b, { x: Math.round(box.x), y: Math.round(box.y) });
+              const a = order[i].box();
+              const b = order[j].box();
+              if (!overlaps(a, b, M - 1)) continue;
+              const px = Math.round(Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) + M);
+              const py = Math.round(Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) + M);
+              const sideways = { dx: center(b).x >= center(a).x ? px : -px, dy: 0 };
+              const down = { dx: 0, dy: py };
+              let push = px < py ? sideways : down;
+              const node = order[j].node;
+              if (node && Math.abs(px - py) <= 48) {
+                const cx = this.crossingsIf(node, sideways.dx, 0);
+                const cy = this.crossingsIf(node, 0, down.dy);
+                if (cx !== cy) push = cx < cy ? sideways : down;
+              }
+              order[j].move(push.dx, push.dy);
               stats.separated++;
               moved = true;
             }
@@ -1497,8 +1565,17 @@ export class Scene {
           if (!moved) break;
         }
       }
-      if (stats.aligned + stats.separated === before) break;
+      if (stats.aligned + stats.spaced + stats.separated === before) break;
     }
+
+    // 5. Fit frames around their contents, then 6. pull overlapping frames apart.
+    //    Before routing, so connections are routed within the frames' final boxes.
+    const frames = this.live().filter((f) => f.type === "frame" && inScope(f.id));
+    for (const f of frames) if (this.fitFrame(f, true)) stats.framesFitted++;
+    stats.framesMoved = this.separateFrames(
+      scope ? [...this.grownFrames, ...frames.map((f) => f.id)] : frames.map((f) => f.id),
+    );
+    this.enforceBindings();
 
     // Repair: every bound arrow in scope is re-derived from its shapes (no-op when already right).
     for (const a of this.live()) {
@@ -1507,24 +1584,147 @@ export class Scene {
     }
 
     // Detour: bend straight arrows (or our own earlier bends) around boxes they pass through.
-    for (const a of this.live()) {
-      if (
-        a.type === "arrow" &&
-        (a.startBinding || a.endBinding) &&
-        inScope(a.frameId) &&
-        this.detour(a)
-      )
-        stats.rerouted++;
+    // Each choice weighs crossings with the other arrows, so repeat until no arrow changes its mind.
+    const rerouted = new Set<string>();
+    for (let round = 0; round < 4; round++) {
+      let changed = false;
+      for (const a of this.live()) {
+        if (
+          a.type === "arrow" &&
+          (a.startBinding || a.endBinding) &&
+          inScope(a.frameId) &&
+          this.detour(a)
+        ) {
+          rerouted.add(a.id);
+          changed = true;
+        }
+      }
+      if (!changed) break;
     }
-
-    // 5. Fit frames around their contents, then 6. pull overlapping frames apart.
-    const frames = this.live().filter((f) => f.type === "frame" && inScope(f.id));
-    for (const f of frames) this.fitFrame(f);
-    stats.framesMoved = this.separateFrames(
-      scope ? [...this.grownFrames, ...frames.map((f) => f.id)] : frames.map((f) => f.id),
-    );
-    this.enforceBindings();
+    stats.rerouted = rerouted.size;
     return stats;
+  }
+
+  /**
+   * What tidy may move, per frame: nodes, notes, and each user group holding one of those as a
+   * single rigid block, so grouped artwork stays intact. Icons are groups of parts but act as nodes.
+   */
+  private tidyBlocks(inScope: (fid: string | null | undefined) => boolean) {
+    type Block = { node?: El; box: () => Box; move: (dx: number, dy: number) => void };
+    const out = new Map<string | null, Block[]>();
+    const add = (fid: string | null | undefined, b: Block) =>
+      out.set(fid ?? null, [...(out.get(fid ?? null) ?? []), b]);
+    const isBlock = (e: El) => this.isNode(e) || (e.type === "text" && !e.containerId);
+    const live = this.live();
+    // An icon's own group (parts + caption) is the icon node; only groups around it count.
+    const seen = new Set(
+      live.flatMap((e) => (e.customData?.icon && e.groupIds?.length === 1 ? e.groupIds : [])),
+    );
+    for (const e of live) {
+      if (!inScope(e.frameId) || e.customData?.componentPart) continue;
+      const gid = e.groupIds?.at(-1);
+      if (!gid || (e.customData?.icon && e.groupIds.length === 1)) {
+        if (!isBlock(e)) continue;
+        add(e.frameId, {
+          node: this.isNode(e) ? e : undefined,
+          box: () => boxOf(e),
+          move: (dx, dy) =>
+            this.isNode(e)
+              ? this.moveNode(e, { ...boxOf(e), x: e.x + dx, y: e.y + dy })
+              : this.mutate(e, { x: e.x + dx, y: e.y + dy }),
+        });
+        continue;
+      }
+      if (seen.has(gid)) continue;
+      seen.add(gid);
+      const members = live.filter((m) => m.groupIds?.includes(gid));
+      if (!members.some(isBlock)) continue; // a pure sketch: left alone, like ungrouped ones
+      const ids = new Set(members.map((m) => m.id));
+      const labels = members.flatMap((m) => {
+        const t = this.boundText(m);
+        return t && !ids.has(t.id) ? [t] : [];
+      });
+      add(e.frameId, {
+        box: () => unionBox(members.map(boxOf))!,
+        move: (dx, dy) => {
+          for (const m of [...members, ...labels]) this.mutate(m, { x: m.x + dx, y: m.y + dy });
+          for (const m of members)
+            for (const a of this.arrowsBoundTo(m.id)) if (!ids.has(a.id)) this.routeArrow(a);
+        },
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Even out the gaps between nodes in each aligned row (and column) of three or more, when
+   * they are already roughly even (widest gap at most 3x the narrowest). The ends stay put, and
+   * so does any node that also sits in an aligned column (row), splitting the run around it.
+   */
+  private spaceEvenly(nodes: El[], others: (e: El) => Box[]): number {
+    let moved = 0;
+    for (const axis of ["y", "x"] as const) {
+      const size = axis === "y" ? "height" : "width";
+      const along = axis === "y" ? "x" : "y";
+      const len = axis === "y" ? "width" : "height";
+      const mid = (e: El) => e[axis] + e[size] / 2;
+      const across = (e: El) => e[along] + e[len] / 2;
+      const pinned = (e: El) => nodes.some((o) => o !== e && Math.abs(across(o) - across(e)) <= 1);
+      for (const row of clusters(nodes, mid, 1)) {
+        row.sort((a, b) => a[along] - b[along]);
+        const runs: El[][] = [[row[0]]];
+        for (const e of row.slice(1)) {
+          runs.at(-1)!.push(e);
+          if (pinned(e)) runs.push([e]);
+        }
+        for (const run of runs) {
+          if (run.length < 3) continue;
+          const gaps = run.slice(1).map((e, i) => e[along] - (run[i][along] + run[i][len]));
+          const lo = Math.min(...gaps);
+          const hi = Math.max(...gaps);
+          if (lo <= 0 || hi > 3 * lo || hi - lo <= 2) continue;
+          const even = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+          let widths = 0;
+          for (let i = 1; i < run.length - 1; i++) {
+            const e = run[i];
+            widths += run[i - 1][len];
+            const target = Math.round(run[0][along] + widths + i * even);
+            if (target === e[along]) continue;
+            const box = { ...boxOf(e), [along]: target } as Box;
+            if (others(e).some((o) => overlaps(box, o, 23))) continue;
+            this.moveNode(e, box);
+            moved++;
+          }
+        }
+      }
+    }
+    return moved;
+  }
+
+  /** Arrow crossings a node's connections would have after moving it by (dx, dy), as straight legs. */
+  private crossingsIf(node: El, dx: number, dy: number): number {
+    const c = center(boxOf(node));
+    const from = { x: c.x + dx, y: c.y + dy };
+    const mine = this.arrowsBoundTo(node.id);
+    const legs = mine.flatMap((a) => {
+      const other = this.els.get(
+        a.startBinding?.elementId === node.id ? a.endBinding?.elementId : a.startBinding?.elementId,
+      );
+      return other && !other.isDeleted ? [center(boxOf(other))] : [];
+    });
+    if (!legs.length) return 0;
+    const ids = new Set(mine.map((a) => a.id));
+    let n = 0;
+    for (const a of this.live()) {
+      if (a.type !== "arrow" || ids.has(a.id)) continue;
+      const pts = (a.points as [number, number][]).map(([px, py]) => ({
+        x: a.x + px,
+        y: a.y + py,
+      }));
+      for (let i = 1; i < pts.length; i++)
+        for (const to of legs) if (segmentsCross(from, to, pts[i - 1], pts[i])) n++;
+    }
+    return n;
   }
 
   // ---------- bulk ----------
@@ -1626,14 +1826,7 @@ export class Scene {
       const l = this.labelOf(e);
       return l && labelCounts.get(l) === 1 ? l : `${l || e.type}#${e.id}`;
     };
-    const hit = (p: { x: number; y: number }) =>
-      nodes.find(
-        (n) =>
-          p.x >= n.x - 25 &&
-          p.x <= n.x + n.width + 25 &&
-          p.y >= n.y - 25 &&
-          p.y <= n.y + n.height + 25,
-      );
+    const hit = (p: Pt) => this.nodeAt(p, nodes);
 
     const edges: {
       id: string;

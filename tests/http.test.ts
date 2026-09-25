@@ -279,7 +279,10 @@ describe("snapshots API", () => {
     await env.rooms.get(d.id)!.applyPatch([{ op: "add_node", label: "A" }], "system" as Author);
     const res = await post(env, `/api/d/${d.id}/tidy?k=${d.key}`, {});
     expect(res.status).toBe(200);
-    expect(await body(res)).toMatchObject({ snapshotId: expect.any(String) });
+    // apply_patch already tidied it: nothing to change, so no snapshot.
+    expect(await body(res)).toMatchObject({ changed: 0 });
+    const scoped = await post(env, `/api/d/${d.id}/tidy?k=${d.key}`, { frames: [null] });
+    expect(scoped.status).toBe(200);
   });
 });
 
