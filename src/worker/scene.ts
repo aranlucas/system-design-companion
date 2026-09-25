@@ -139,7 +139,14 @@ export function newId(): string {
   return s;
 }
 
-const NOTE_WRAP = 64; // chars per line for notes the agent writes
+const NOTE_WRAP = 64; // chars per line for plain-text notes
+// Sticky notes, matching Excalidraw's layout: the label sits inside 16px padding, above a 20px
+// footer that shows the creation date.
+const STICKY_WRAP = 28;
+const STICKY_PAD = 16;
+const STICKY_INSET_Y = STICKY_PAD * 2 + 20;
+const STICKY_MIN = 120;
+const STICKY_BG = "#ffdf6b";
 const FRAME_GAP = 80;
 /** How far an unbound arrow end may sit from a node and still count as connected to it. */
 const ARROW_REACH = 25;
@@ -186,6 +193,15 @@ export function measureText(text: string, fontSize: number) {
   return {
     width: Math.ceil(longest * fontSize * CHAR_W),
     height: Math.ceil(lines.length * fontSize * LINE_HEIGHT),
+  };
+}
+
+/** The smallest sticky note that fits already-wrapped `text`. */
+function stickySize(text: string, fontSize: number) {
+  const m = measureText(text, fontSize);
+  return {
+    width: Math.max(m.width + STICKY_PAD * 2, STICKY_MIN),
+    height: Math.max(m.height + STICKY_INSET_Y, STICKY_MIN),
   };
 }
 
@@ -478,6 +494,15 @@ export class Scene {
     return !e.isDeleted && !e.customData?.componentPart && SHAPE_TYPES.has(e.type);
   }
 
+  /** A sticky note, or free text (what the agent wrote before sticky notes existed). */
+  isNote(e: El) {
+    return (
+      !e.isDeleted &&
+      (e.type === "stickynote" ||
+        (e.type === "text" && !e.containerId && !e.customData?.componentLabel))
+    );
+  }
+
   // ---------- target resolution ----------
 
   resolve(target: string): El {
@@ -488,9 +513,7 @@ export class Scene {
     const want = target.trim().toLowerCase();
     const matches = this.live().filter(
       (e) =>
-        (this.isNode(e) ||
-          e.type === "frame" ||
-          (e.type === "text" && !e.containerId && !e.customData?.componentLabel)) &&
+        (this.isNode(e) || e.type === "frame" || this.isNote(e)) &&
         this.labelOf(e).trim().toLowerCase() === want,
     );
     if (matches.length === 1) return matches[0];
@@ -764,6 +787,19 @@ export class Scene {
       this.mutate(t, {
         x: Math.round(mx - t.width / 2),
         y: Math.round(my - t.height / 2),
+      });
+    } else if (container.type === "stickynote") {
+      // Excalidraw's rule: centred in the padded note, but never over the date footer.
+      const body = container.height - STICKY_INSET_Y;
+      const padded = container.height - STICKY_PAD * 2;
+      this.mutate(t, {
+        x: Math.round(container.x + (container.width - t.width) / 2),
+        y: Math.round(
+          container.y + STICKY_PAD + Math.min((padded - t.height) / 2, body - t.height),
+        ),
+        textAlign: "center",
+        verticalAlign: "middle",
+        frameId: container.frameId ?? null,
       });
     } else {
       const c = center(boxOf(container));
@@ -1114,6 +1150,8 @@ export class Scene {
     const text = el.type === "text" ? el : this.boundText(el);
     if (!text) throw new Error("text_color needs a label to color");
     this.mutate(text, { strokeColor: textColor(color) });
+    // A sticky note's stroke is its ink: Excalidraw keeps it equal to the label's color.
+    if (el.type === "stickynote") this.mutate(el, { strokeColor: textColor(color) });
   }
 
   /** The invisible binding target covers only artwork, never its caption. */
@@ -1267,6 +1305,7 @@ export class Scene {
     const el = this.resolve(o.target);
     if (o.label !== undefined) {
       if (el.type === "frame") this.mutate(el, { name: o.label });
+      else if (el.type === "stickynote") this.layoutSticky(el, o.label);
       else if (el.type === "text") {
         const text = el.containerId ? o.label : wrapText(o.label);
         const m = measureText(text, el.fontSize ?? 20);
@@ -1391,19 +1430,54 @@ export class Scene {
   addNote(o: Extract<Op, { op: "add_note" }>, author: Author): El {
     let frame = this.impliedFrame(o.frame, o.place);
     const fontSize = { s: 16, m: 20, l: 28 }[o.size ?? "m"];
-    const text = wrapText(o.text);
-    const m = measureText(text, fontSize);
-    const box = this.place(o.place, m.width, m.height, frame);
+    const ink =
+      o.text_color !== undefined
+        ? textColor(o.text_color)
+        : author === "agent"
+          ? AGENT_STROKE
+          : "#1e1e1e";
+    const { width, height } = stickySize(wrapText(o.text, STICKY_WRAP), fontSize);
+    const box = this.place(o.place, width, height, frame);
     frame ??= this.frameAt(box);
-    const t = this.add(
-      this.textEl(text, box, author, fontSize, {
+    const note = this.add(
+      this.base("stickynote", box, author, {
+        strokeColor: ink,
+        backgroundColor: STICKY_BG,
+        roughness: 0,
+        roundness: { type: 2 },
+        baseHeight: height,
+        created: Date.now(),
         frameId: frame?.id ?? null,
-        ...(o.text_color !== undefined ? { strokeColor: textColor(o.text_color) } : {}),
       }),
     );
+    const t = this.add(
+      this.textEl("", box, author, fontSize, {
+        containerId: note.id,
+        strokeColor: ink,
+        baseFontSize: fontSize,
+        frameId: frame?.id ?? null,
+      }),
+    );
+    this.addBound(note, { id: t.id, type: "text" });
+    this.layoutSticky(note, o.text);
     if (frame) this.fitFrame(frame);
-    this.setRef(o.ref, t.id);
-    return t;
+    this.setRef(o.ref, note.id);
+    return note;
+  }
+
+  /** Wrap a sticky note's label and grow the note to fit it; the label stays centred. */
+  private layoutSticky(note: El, label: string) {
+    const t = this.boundText(note);
+    if (!t) return;
+    const text = wrapText(label, STICKY_WRAP);
+    const m = measureText(text, t.fontSize ?? 20);
+    const size = stickySize(text, t.fontSize ?? 20);
+    this.mutate(t, { text, originalText: label, width: m.width, height: m.height });
+    const w = Math.max(note.width, size.width);
+    const h = Math.max(note.baseHeight ?? note.height, size.height);
+    this.mutate(note, { baseHeight: Math.min(note.baseHeight ?? h, h) });
+    if (w !== note.width || h !== note.height) this.moveNode(note, { x: note.x, y: note.y, w, h });
+    else this.centerLabel(note);
   }
 
   apply(ops: Op[], author: Author): OpResult[] {
@@ -1478,7 +1552,7 @@ export class Scene {
       framesMoved: 0,
     };
     const inScope = (fid: string | null | undefined) => !scope || scope.has(fid ?? null);
-    const isBlock = (e: El) => this.isNode(e) || (e.type === "text" && !e.containerId);
+    const isBlock = (e: El) => this.isNode(e) || this.isNote(e);
 
     // 0. Bind loose arrow ends, so links survive every later move. Only where graph() already
     //    infers the edge (both ends on distinct nodes): tidy makes a connection explicit, never new.
@@ -1654,7 +1728,7 @@ export class Scene {
     const out = new Map<string | null, Block[]>();
     const add = (fid: string | null | undefined, b: Block) =>
       out.set(fid ?? null, [...(out.get(fid ?? null) ?? []), b]);
-    const isBlock = (e: El) => this.isNode(e) || (e.type === "text" && !e.containerId);
+    const isBlock = (e: El) => this.isNode(e) || this.isNote(e);
     const live = this.live();
     // An icon's own group (parts + caption) is the icon node; only groups around it count.
     const seen = new Set(
@@ -1669,7 +1743,7 @@ export class Scene {
           node: this.isNode(e) ? e : undefined,
           box: () => boxOf(e),
           move: (dx, dy) =>
-            this.isNode(e)
+            this.isNode(e) || e.type === "stickynote"
               ? this.moveNode(e, { ...boxOf(e), x: e.x + dx, y: e.y + dy })
               : this.mutate(e, { x: e.x + dx, y: e.y + dy }),
         });
@@ -1986,17 +2060,21 @@ export class Scene {
         ...(sel?.has(rest.id) ? { selected: true } : {}),
       })),
       notes: live
-        .filter((e) => e.type === "text" && !e.containerId && !e.customData?.componentLabel)
-        .map((t) => ({
-          id: t.id,
-          text: t.text,
-          x: Math.round(t.x),
-          y: Math.round(t.y),
-          ...(t.frameId ? { frame: frameName(t.frameId) } : {}),
-          ...reportTextColor(t),
-          ...(t.customData?.author === "agent" ? { by: "agent" } : {}),
-          ...(sel?.has(t.id) ? { selected: true } : {}),
-        })),
+        .filter((e) => this.isNote(e))
+        .map((n) => {
+          const t = n.type === "stickynote" ? this.boundText(n) : n;
+          return {
+            id: n.id,
+            text: n.type === "stickynote" ? (t?.originalText ?? t?.text ?? "") : n.text,
+            x: Math.round(n.x),
+            y: Math.round(n.y),
+            ...(n.type === "stickynote" ? { sticky: true } : {}),
+            ...(n.frameId ? { frame: frameName(n.frameId) } : {}),
+            ...(t ? reportTextColor(t) : {}),
+            ...(n.customData?.author === "agent" ? { by: "agent" } : {}),
+            ...(sel?.has(n.id) ? { selected: true } : {}),
+          };
+        }),
       sketches,
       _edgesRaw: edges,
     };

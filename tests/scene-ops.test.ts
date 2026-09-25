@@ -280,13 +280,61 @@ describe("add_frame / add_note", () => {
     expect(g.nodes.every((n) => n.frame === "Scope")).toBe(true);
   });
 
-  it("word-wraps long notes at ~64 chars", () => {
+  it("adds a sticky note whose label wraps inside it and grows it", () => {
     const s = fresh();
     const long = `word `.repeat(30).trim();
-    applyOk(s, [{ op: "add_note", text: long }]);
-    const note = graph(s).notes[0];
-    expect(note.text).toContain("\n");
-    for (const line of note.text.split("\n")) expect(line.length).toBeLessThanOrEqual(64);
+    const [r] = applyOk(s, [{ op: "add_note", text: long }]);
+    const note = s.resolve(r.id!);
+    expect(note).toMatchObject({ type: "stickynote", strokeColor: AGENT_STROKE });
+    expect(note.created).toEqual(expect.any(Number));
+    expect(note.baseHeight).toBeLessThanOrEqual(note.height);
+    const label = s.boundText(note)!;
+    expect(label).toMatchObject({ containerId: note.id, originalText: long, baseFontSize: 20 });
+    expect(label.text).toContain("\n");
+    for (const line of label.text.split("\n")) expect(line.length).toBeLessThanOrEqual(28);
+    // The label sits inside the note, clear of the date footer.
+    expect(label.x).toBeGreaterThanOrEqual(note.x + 16);
+    expect(label.x + label.width).toBeLessThanOrEqual(note.x + note.width - 16);
+    expect(label.y + label.height).toBeLessThanOrEqual(note.y + note.height - 36);
+    // The agent reads back what it wrote, not the wrapped label.
+    expect(graph(s).notes[0]).toMatchObject({ id: note.id, text: long, sticky: true });
+  });
+
+  it("relabels a sticky note and keeps its label with it when tidied", () => {
+    const s = fresh();
+    applyOk(s, [
+      { op: "add_note", ref: "n", text: "short", place: { at: { x: 0, y: 0 } } },
+      { op: "update", target: "n", label: `longer `.repeat(20).trim() },
+    ]);
+    const note = s.resolve("n");
+    const label = s.boundText(note)!;
+    expect(label.originalText).toBe(`longer `.repeat(20).trim());
+    expect(label.y + label.height).toBeLessThanOrEqual(note.y + note.height - 36);
+    expect(s.resolve("longer ".repeat(20).trim()).id).toBe(note.id);
+
+    // A node drawn over the note's corner (bypassing placement). Tidy moves the later block in
+    // reading order, here the note, and its label must come along.
+    applyOk(s, [{ op: "add_node", ref: "b", label: "Box", place: { at: { x: 600, y: 0 } } }]);
+    const box = s.resolve("b");
+    const s2 = new Scene(
+      s.live().map((e) => (e.id === box.id ? { ...e, x: note.x - 10, y: note.y - 10 } : e)),
+    );
+    const before = { ...s2.resolve(note.id) };
+    const offset = { x: label.x - note.x, y: label.y - note.y };
+    expect(s2.tidy().separated).toBeGreaterThan(0);
+    const moved = s2.resolve(note.id);
+    expect(moved.x !== before.x || moved.y !== before.y).toBe(true);
+    const after = s2.boundText(moved)!;
+    expect({ x: after.x - moved.x, y: after.y - moved.y }).toEqual(offset);
+  });
+
+  it("still reports free text as a note", () => {
+    const s = new Scene([]);
+    applyOk(s, [{ op: "add_node", label: "A" }]);
+    const text = { ...s.boundText(s.resolve("A"))!, id: "t1", containerId: null, text: "loose" };
+    const s2 = new Scene([...s.live(), text]);
+    expect(graph(s2).notes).toEqual([expect.objectContaining({ id: "t1", text: "loose" })]);
+    expect(graph(s2).notes[0]).not.toHaveProperty("sticky");
   });
 
   it("inherits the anchor frame for notes placed near framed nodes", () => {
@@ -341,6 +389,8 @@ describe("text_color", () => {
     const g = graph(s);
     expect(g.nodes.find((n) => n.label === "Orders DB")?.text_color).toBe("green");
     expect(textOf(s, note.id!)?.strokeColor).toBe("#e8590c");
+    // A sticky note's ink is one color: the note follows its label.
+    expect(s.resolve(note.id!).strokeColor).toBe("#e8590c");
   });
 
   it("fails when there is no text to color", () => {

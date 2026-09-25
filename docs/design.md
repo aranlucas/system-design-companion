@@ -223,7 +223,7 @@ flowchart TD
 
 ## Formatting without overriding
 
-Prevention on agent edits: notes wrap at about 64 characters. New nodes and notes join the
+Prevention on agent edits: `add_note` makes Excalidraw sticky notes, whose labels wrap at about 28 characters inside the note; free-text notes wrap at about 64. New nodes and notes join the
 frame of whatever they are placed relative to, or the frame they land inside. Moving a
 frame moves its contents, and a frame that grows pushes overlapping frames right or down.
 
