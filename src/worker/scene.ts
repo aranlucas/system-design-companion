@@ -4,6 +4,7 @@ import { generateKeyBetween } from "fractional-indexing";
 import { iconElements } from "../shared/icons.ts";
 import { componentByKind } from "../shared/components.ts";
 import { AGENT_STROKE, type El, type Point } from "../shared/protocol.ts";
+import { pointAt, routeOrthogonal, type Route } from "./route-orthogonal.ts";
 import { solveLayout } from "./solve-layout.ts";
 
 export type Author = "agent" | "human" | "template";
@@ -132,10 +133,6 @@ const SHAPE_TYPES = new Set(["rectangle", "ellipse", "diamond", "image", "embedd
 
 type Box = { x: number; y: number; w: number; h: number };
 type Pt = { x: number; y: number };
-/** Two ends of a straight stretch of an arrow. */
-type Leg = [Pt, Pt];
-/** A detour's bends and what it costs. */
-type Candidate = { bends: Pt[]; cost: number };
 /** An entry in an element's `boundElements`. */
 type BoundRef = { id: string; type: string };
 /** Where tidy last fitted a frame, so a later manual resize can be told apart. */
@@ -163,6 +160,9 @@ type Sketch = {
   h: number;
   frame?: string;
 };
+/** An arrow binding (as Excalidraw stores it) and the arrow point drawn at that end. */
+type BindingEnd = [ArrowBinding, Point];
+type ArrowBinding = { elementId: string; fixedPoint?: Point | null; mode?: string };
 type AddNodeOp = Extract<Op, { op: "add_node" }>;
 type ConnectOp = Extract<Op, { op: "connect" }>;
 type DisconnectOp = Extract<Op, { op: "disconnect" }>;
@@ -302,51 +302,11 @@ function clusters<T>(items: T[], key: (t: T) => number, tol: number): T[][] {
   return out;
 }
 
-function distToSegment(p: Pt, a: Pt, b: Pt): number {
-  const l2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
-  const t = l2
-    ? Math.max(0, Math.min(1, ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2))
-    : 0;
-  return Math.hypot(p.x - (a.x + t * (b.x - a.x)), p.y - (a.y + t * (b.y - a.y)));
-}
-
 function distToBox(p: Pt, b: Box): number {
   return Math.hypot(
     Math.max(b.x - p.x, 0, p.x - (b.x + b.w)),
     Math.max(b.y - p.y, 0, p.y - (b.y + b.h)),
   );
-}
-
-/** Proper intersection of segments ab and cd (touching endpoints don't count). */
-function segmentsCross(a: Pt, b: Pt, c: Pt, d: Pt): boolean {
-  const o = (p: Pt, q: Pt, r: Pt) =>
-    Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x));
-  return o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0;
-}
-
-/** Does segment p→q pass through box `b` (inflated by m)? Liang–Barsky clip. */
-function segmentHitsBox(p: Pt, q: Pt, b: Box, m: number): boolean {
-  const [x0, y0, x1, y1] = [b.x - m, b.y - m, b.x + b.w + m, b.y + b.h + m];
-  const dx = q.x - p.x;
-  const dy = q.y - p.y;
-  let t0 = 0;
-  let t1 = 1;
-  for (const [pp, qq] of [
-    [-dx, p.x - x0],
-    [dx, x1 - p.x],
-    [-dy, p.y - y0],
-    [dy, y1 - p.y],
-  ]) {
-    if (pp === 0) {
-      if (qq < 0) return false;
-    } else {
-      const r = qq / pp;
-      if (pp < 0) t0 = Math.max(t0, r);
-      else t1 = Math.min(t1, r);
-      if (t0 > t1) return false;
-    }
-  }
-  return true;
 }
 
 export class Scene {
@@ -355,6 +315,8 @@ export class Scene {
   private refs = new Map<string, string>();
   private lastPlaced: string | null = null;
   private grownFrames = new Set<string>();
+  /** Set during tidy: moves skip per-arrow routing, and one routing pass at the end does it all. */
+  private deferRouting = false;
 
   constructor(elements: Iterable<El>) {
     // Edits stay local until the caller commits them, including nested bindings.
@@ -423,7 +385,13 @@ export class Scene {
   }
 
   /** Mutate an element and bump its version so it wins reconciliation. */
-  mutate(el: El, patch: Partial<El> = {}): El {
+  /** Apply a patch and bump the version. A patch that changes nothing is skipped; a bare call bumps. */
+  mutate(el: El, patch?: Partial<El>): El {
+    if (
+      patch &&
+      Object.entries(patch).every(([k, v]) => JSON.stringify(el[k]) === JSON.stringify(v))
+    )
+      return el;
     Object.assign(el, patch);
     el.version = (el.version ?? 0) + 1;
     el.versionNonce = rnd();
@@ -530,6 +498,15 @@ export class Scene {
 
   isNode(e: El) {
     return !e.isDeleted && !e.customData?.componentPart && SHAPE_TYPES.has(e.type);
+  }
+
+  /** The node an icon piece or caption belongs to; anything else is its own owner. */
+  owner(e: El): El {
+    if (!e.customData?.componentPart && !e.customData?.componentLabel) return e;
+    const group = e.groupIds?.at(-1);
+    return (
+      this.live().find((n) => n.customData?.icon && group && n.groupIds?.at(-1) === group) ?? e
+    );
   }
 
   /** A sticky note, or free text (what the agent wrote before sticky notes existed). */
@@ -818,8 +795,16 @@ export class Scene {
       const mid = (pts.length - 1) / 2;
       const a = pts[Math.floor(mid)];
       const b = pts[Math.ceil(mid)];
-      const mx = container.x + (a[0] + b[0]) / 2;
-      const my = container.y + (a[1] + b[1]) / 2;
+      // Excalidraw puts the label at `labelPosition` (a fraction of the path's length) when set.
+      const at =
+        typeof t.labelPosition === "number"
+          ? pointAt(
+              pts.map(([x, y]) => ({ x, y })),
+              t.labelPosition,
+            )
+          : { x: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2 };
+      const mx = container.x + at.x;
+      const my = container.y + at.y;
       this.mutate(t, {
         x: Math.round(mx - t.width / 2),
         y: Math.round(my - t.height / 2),
@@ -860,190 +845,136 @@ export class Scene {
   }
 
   /**
-   * If a bound arrow passes through a box that isn't one of its ends, route it around nearby
-   * obstacles using short endpoint exits or midpoint bends. Only touches straight arrows and bends we added (autoBend);
-   * straightens our bend again once the straight path is clear. Returns true if it changed.
+   * Route arrows bound at both ends as orthogonal elbow arrows, one group per frame (arrows between
+   * frames route across the whole canvas). Obstacles are the nodes, captions and notes the route
+   * could run through. Returns the ids of arrows that changed.
    */
-  private detour(arrow: El): boolean {
-    const pts = arrow.points as Point[];
-    const ours = arrow.customData?.autoBend === true;
-    const source = this.els.get(arrow.startBinding?.elementId);
-    const target = this.els.get(arrow.endBinding?.elementId);
-    const frame =
-      source?.frameId && source.frameId === target?.frameId
-        ? this.els.get(source.frameId)
-        : undefined;
-    const text = this.boundText(arrow);
-    const inside = (path: Pt[]) => {
-      if (!frame) return true;
-      const contains = (p: Pt, mx = 8, my = 8) =>
-        p.x >= frame.x + mx &&
-        p.x <= frame.x + frame.width - mx &&
-        p.y >= frame.y + my &&
-        p.y <= frame.y + frame.height - my;
-      const mid = (path.length - 1) / 2;
-      const a = path[Math.floor(mid)],
-        b = path[Math.ceil(mid)];
-      return (
-        path.every((p) => contains(p)) &&
-        contains(
-          { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
-          (text?.width ?? 0) / 2 + 8,
-          (text?.height ?? 0) / 2 + 8,
-        )
-      );
-    };
-    const existing = pts.map(([x, y]) => ({ x: arrow.x + x, y: arrow.y + y }));
-    if (pts.length > 2 && !ours && inside(existing)) return false; // preserve valid human curves
-    const ends = new Set([arrow.startBinding?.elementId, arrow.endBinding?.elementId]);
-    // A framed arrow must stay inside its frame, so only boxes overlapping the frame can block it.
-    const obstacles = this.live()
-      .filter((n) => (this.isNode(n) && !ends.has(n.id)) || n.customData?.componentLabel)
-      .map(boxOf)
-      .filter((o) => !frame || overlaps(o, boxOf(frame), 10));
-    const clear = (path: Pt[]) => {
-      if (!inside(path)) return false;
-      const span = unionBox(path.map((p) => ({ ...p, w: 0, h: 0 })))!;
-      const near = obstacles.filter((o) => overlaps(o, span, 10));
-      return path.every(
-        (p, i) => i === 0 || !near.some((o) => segmentHitsBox(path[i - 1], p, o, 10)),
-      );
-    };
-    const abs = (a: El) => (a.points as Point[]).map(([px, py]) => ({ x: a.x + px, y: a.y + py }));
-    const setPath = (bends: Pt[]) => {
-      const cur = abs(arrow);
-      const s0 = cur[0];
-      const e0 = cur.at(-1)!;
-      const rel = (pt: Pt): Point => [Math.round(pt.x - s0.x), Math.round(pt.y - s0.y)];
-      const points = [rel(s0), ...bends.map(rel), rel(e0)];
-      this.mutate(arrow, {
-        points,
-        customData: { ...(arrow.customData ?? {}), autoBend: bends.length > 0 },
-      });
-      this.routeArrow(arrow, false); // recompute the ends toward the bend, keeping the bend fixed
-    };
-
-    // Straight path (ends recomputed without any bend).
-    const current = abs(arrow);
-    const straight = (() => {
-      const s = arrow.startBinding && this.els.get(arrow.startBinding.elementId);
-      const t = arrow.endBinding && this.els.get(arrow.endBinding.elementId);
-      const sc = s ? center(boxOf(s)) : current[0];
-      const tc = t ? center(boxOf(t)) : current.at(-1)!;
-      return [
-        s ? borderPoint(boxOf(s), tc, 8, s.type) : sc,
-        t ? borderPoint(boxOf(t), sc, 8, t.type) : tc,
-      ];
-    })();
-
-    if (clear(straight)) {
-      if (pts.length > 2) {
-        setPath([]);
-        return true;
+  private routeArrows(arrows: El[], convert = false): Set<string> {
+    const changed = new Set<string>();
+    const groups = new Map<string | null, El[]>();
+    for (const a of arrows) {
+      const s0 = this.els.get(a.startBinding?.elementId);
+      const t0 = this.els.get(a.endBinding?.elementId);
+      if (!s0 || !t0 || s0.isDeleted || t0.isDeleted) continue;
+      // An arrow bound to an icon's artwork or caption belongs to the icon node.
+      const s = this.owner(s0);
+      const t = this.owner(t0);
+      if (s.id === t.id || (!a.elbowed && !convert)) continue;
+      for (const [side, from, to] of [
+        ["startBinding", s0, s],
+        ["endBinding", t0, t],
+      ] as const) {
+        if (from.id === to.id) continue;
+        this.removeBound(from, a.id);
+        this.addBound(to, { id: a.id, type: "arrow" });
+        this.mutate(a, { [side]: { ...a[side], elementId: to.id } });
       }
-      return false;
+      const fid = s.frameId && s.frameId === t.frameId ? s.frameId : null;
+      groups.set(fid, [...(groups.get(fid) ?? []), a]);
     }
-
-    // Re-aim endpoints at the proposed bends, using the same pixel rounding as routeArrow.
-    const sEl = arrow.startBinding && this.els.get(arrow.startBinding.elementId);
-    const tEl = arrow.endBinding && this.els.get(arrow.endBinding.elementId);
-    const pixel = (point: Pt): Pt => ({ x: Math.round(point.x), y: Math.round(point.y) });
-    const aimed = (bends: Pt[]): Pt[] => [
-      pixel(sEl ? borderPoint(boxOf(sEl), bends[0], 8, sEl.type) : straight[0]),
-      ...bends,
-      pixel(tEl ? borderPoint(boxOf(tEl), bends.at(-1)!, 8, tEl.type) : straight[1]),
-    ];
-    const [p, q] = straight;
-    const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
-    const nx = -(q.y - p.y) / len;
-    const ny = (q.x - p.x) / len;
-    const mid = { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 };
-    // Other arrows' segments: crossing them costs as much as a 150px longer detour.
-    const others: Leg[] = [];
-    for (const o of this.live()) {
-      if (o.type !== "arrow" || o.id === arrow.id) continue;
-      const op = abs(o);
-      for (let i = 1; i < op.length; i++) others.push([op[i - 1], op[i]]);
-    }
-    const crossings = (path: Pt[]) => {
-      let n = 0;
-      for (let i = 1; i < path.length; i++)
-        for (const [a, b] of others) if (segmentsCross(path[i - 1], path[i], a, b)) n++;
-      return n;
-    };
-    // Score actual travel distance so a short exit beside a caption can beat a
-    // large midpoint loop. Penalise extra bends and crossings for readability.
-    const cost = (path: Pt[]) => {
-      const length = path
-        .slice(1)
-        .reduce((sum, point, i) => sum + Math.hypot(point.x - path[i].x, point.y - path[i].y), 0);
-      const bends = path.slice(1, -1);
-      const cramped = bends.some(
-        (bend) =>
-          others.some(([a, b]) => distToSegment(bend, a, b) < 40) ||
-          obstacles.some((o) => distToBox(bend, o) < 40),
-      );
-      return length + 20 * bends.length + 150 * crossings(path) + (cramped ? 60 : 0);
-    };
-    const candidates: Pt[][] = [];
-    const exits = (node: El | undefined): Pt[] => {
-      if (!node) return [];
-      const caption = node.customData?.icon ? this.boundText(node) : undefined;
-      const bounds = unionBox([boxOf(node), ...(caption ? [boxOf(caption)] : [])])!;
-      const c = center(boxOf(node));
-      return [
-        ...[node.y, c.y, node.y + node.height].flatMap((y) => [
-          { x: bounds.x - 40, y },
-          { x: bounds.x + bounds.w + 40, y },
-        ]),
-        { x: c.x, y: bounds.y - 40 },
-        { x: c.x, y: bounds.y + bounds.h + 40 },
-      ];
-    };
-    const sourceExits = exits(sEl),
-      targetExits = exits(tEl);
-    for (const exit of [...sourceExits, ...targetExits]) candidates.push([exit]);
-    for (const start of sourceExits) for (const end of targetExits) candidates.push([start, end]);
-    for (let d = 40; d <= 800; d += 20)
-      for (const sign of [1, -1])
-        candidates.push([{ x: mid.x + nx * d * sign, y: mid.y + ny * d * sign }]);
-
-    // Keep a valid existing route unless the replacement is materially shorter.
-    // This also prevents rounding or small neighbouring edits from causing jitter.
-    const currentCost = pts.length > 2 && clear(current) ? cost(current) : Infinity;
-    let best: Candidate | undefined;
-    for (const candidate of candidates) {
-      const bends = candidate.map(pixel);
-      const path = aimed(bends);
-      if (!clear(path)) continue;
-      // Intermediate legs must not cut back through either endpoint's artwork.
-      if (
-        path.some(
-          (point, i) =>
-            i > 0 &&
-            ((i > 1 && sEl && segmentHitsBox(path[i - 1], point, boxOf(sEl), 4)) ||
-              (i < path.length - 1 && tEl && segmentHitsBox(path[i - 1], point, boxOf(tEl), 4))),
+    for (const [fid, group] of groups) {
+      const frame = fid ? this.els.get(fid) : undefined;
+      const obstacles = this.live()
+        .filter(
+          (e) =>
+            (this.isNode(e) || e.customData?.componentLabel || this.isNote(e)) &&
+            (!frame || (e.frameId ?? null) === fid),
         )
-      )
-        continue;
-      const candidateCost = cost(path);
-      if (!best || candidateCost < best.cost) best = { bends, cost: candidateCost };
+        .map(boxOf);
+      // Arrows this pass isn't moving still count: new routes avoid crossing them.
+      const ids = new Set(group.map((a) => a.id));
+      const fixed = this.live()
+        .filter((a) => a.type === "arrow" && !ids.has(a.id) && (a.frameId ?? null) === fid)
+        .map((a) => (a.points as Point[]).map(([x, y]) => ({ x: a.x + x, y: a.y + y })));
+      const routes = routeOrthogonal(
+        group.map((a) => {
+          const t = this.boundText(a);
+          return {
+            id: a.id,
+            from: boxOf(this.els.get(a.startBinding.elementId)!),
+            to: boxOf(this.els.get(a.endBinding.elementId)!),
+            ...(t ? { label: { w: t.width, h: t.height } } : {}),
+          };
+        }),
+        obstacles,
+        { ...(frame ? { bounds: boxOf(frame) } : {}), fixed },
+      );
+      for (const a of group) {
+        const route = routes.get(a.id);
+        if (route && this.setRoute(a, route)) changed.add(a.id);
+      }
     }
-    if (best && best.cost + 32 < currentCost) {
-      setPath(best.bends);
-      return true;
-    }
-    // If no obstacle-free detour fits, containment wins over avoiding crossings.
-    // A crowded frame should not send its connections into another design section.
-    if (!inside(current) && inside(straight)) {
-      setPath([]);
-      return true;
-    }
-    return false;
+    return changed;
+  }
+
+  /** Do an elbow arrow's ends still sit where its fixed points put them on its shapes? */
+  private endsInPlace(arrow: El): boolean {
+    const pts = arrow.points as Point[];
+    const ends: BindingEnd[] = [
+      [arrow.startBinding, pts[0]],
+      [arrow.endBinding, pts[pts.length - 1]],
+    ];
+    return ends.every(([b, [px, py]]) => {
+      const el = this.els.get(b.elementId);
+      if (!el || el.isDeleted || !Array.isArray(b.fixedPoint)) return false;
+      const box = boxOf(el);
+      const x = box.x + b.fixedPoint[0] * box.w;
+      const y = box.y + b.fixedPoint[1] * box.h;
+      return Math.abs(arrow.x + px - x) <= 1 && Math.abs(arrow.y + py - y) <= 1;
+    });
+  }
+
+  /** Write a route onto an arrow as an Excalidraw elbow arrow. Returns true if anything changed. */
+  private setRoute(arrow: El, route: Route): boolean {
+    const [p0] = route.points;
+    const points = route.points.map((p): Point => [p.x - p0.x, p.y - p0.y]);
+    const xs = points.map((p) => p[0]);
+    const ys = points.map((p) => p[1]);
+    const fixedPoint = (id: string, p: Pt): Point => {
+      const b = boxOf(this.els.get(id)!);
+      const f = (v: number) => Math.round(v * 1e4) / 1e4;
+      return [f((p.x - b.x) / (b.w || 1)), f((p.y - b.y) / (b.h || 1))];
+    };
+    const patch = {
+      x: p0.x,
+      y: p0.y,
+      points,
+      width: Math.max(...xs) - Math.min(...xs),
+      height: Math.max(...ys) - Math.min(...ys),
+      elbowed: true,
+      roundness: null,
+      fixedSegments: null,
+      startIsSpecial: null,
+      endIsSpecial: null,
+      startBinding: {
+        elementId: arrow.startBinding.elementId,
+        fixedPoint: fixedPoint(arrow.startBinding.elementId, route.points[0]),
+        mode: "orbit",
+      },
+      endBinding: {
+        elementId: arrow.endBinding.elementId,
+        fixedPoint: fixedPoint(arrow.endBinding.elementId, route.points.at(-1)!),
+        mode: "orbit",
+      },
+    };
+    const same = (Object.keys(patch) as (keyof typeof patch)[]).every(
+      (k) => JSON.stringify(arrow[k] ?? null) === JSON.stringify(patch[k] ?? null),
+    );
+    const text = this.boundText(arrow);
+    const labelAt = route.labelAt !== undefined ? Math.round(route.labelAt * 1e4) / 1e4 : null;
+    const labelSame = !text || (text.labelPosition ?? null) === labelAt;
+    if (!same) this.mutate(arrow, patch);
+    if (text && !labelSame) this.mutate(text, { labelPosition: labelAt });
+    if (!same || !labelSame) this.centerLabel(arrow);
+    return !same || !labelSame;
   }
 
   /** Re-derive a bound arrow's geometry from the shapes it is bound to (bends are kept). */
   private routeArrow(arrow: El, shiftBends = true) {
+    if (arrow.elbowed && arrow.startBinding && arrow.endBinding) {
+      if (!this.deferRouting && !this.endsInPlace(arrow)) this.routeArrows([arrow]);
+      return;
+    }
     const pts = arrow.points as Point[];
     const absStart = { x: arrow.x + pts[0][0], y: arrow.y + pts[0][1] };
     const absEnd = { x: arrow.x + pts[pts.length - 1][0], y: arrow.y + pts[pts.length - 1][1] };
@@ -1303,17 +1234,20 @@ export class Scene {
     const arrow = this.add(
       this.base("arrow", { x: 0, y: 0, w: 0, h: 0 }, author, {
         strokeStyle: o.dashed ? "dashed" : "solid",
-        roundness: { type: 2 },
+        roundness: null,
         points: [
           [0, 0],
           [1, 1],
         ],
         lastCommittedPoint: null,
-        startBinding: { elementId: a.id, focus: 0, gap: 8, fixedPoint: null },
-        endBinding: { elementId: b.id, focus: 0, gap: 8, fixedPoint: null },
+        startBinding: { elementId: a.id, fixedPoint: [0.5, 0.5], mode: "orbit" },
+        endBinding: { elementId: b.id, fixedPoint: [0.5, 0.5], mode: "orbit" },
         startArrowhead: o.bidirectional ? "arrow" : null,
         endArrowhead: "arrow",
-        elbowed: false,
+        elbowed: true,
+        fixedSegments: null,
+        startIsSpecial: null,
+        endIsSpecial: null,
       }),
     );
     this.addBound(a, { id: arrow.id, type: "arrow" });
@@ -1577,6 +1511,15 @@ export class Scene {
   tidy(scope?: Set<string | null>): TidyStats {
     // What this batch added or edited gives way first; the rest is where someone put it.
     const fresh = new Set(this.changed);
+    this.deferRouting = true;
+    try {
+      return this.tidyInner(scope, fresh);
+    } finally {
+      this.deferRouting = false;
+    }
+  }
+
+  private tidyInner(scope: Set<string | null> | undefined, fresh: Set<string>): TidyStats {
     const stats: TidyStats = {
       bound: 0,
       rerouted: 0,
@@ -1606,7 +1549,7 @@ export class Scene {
         ["endBinding", to],
       ] as const) {
         if (a[side]) continue;
-        this.mutate(a, { [side]: { elementId: n.id, focus: 0, gap: 8, fixedPoint: null } });
+        this.mutate(a, { [side]: { elementId: n.id, fixedPoint: [0.5, 0.5], mode: "orbit" } });
         this.addBound(n, { id: a.id, type: "arrow" });
         stats.bound++;
       }
@@ -1691,30 +1634,22 @@ export class Scene {
     );
     this.enforceBindings();
 
-    // Repair: every bound arrow in scope is re-derived from its shapes (no-op when already right).
-    for (const a of this.live()) {
-      if (a.type === "arrow" && (a.startBinding || a.endBinding) && inScope(a.frameId))
+    // Route every connection as a right-angle elbow arrow around nodes, captions and notes,
+    // crossing the others as little as possible, with its label on a clear stretch.
+    const connections = this.live().filter(
+      (a) => a.type === "arrow" && a.startBinding && a.endBinding && inScope(a.frameId),
+    );
+    const rerouted = this.routeArrows(connections, true);
+    // Loose arrows with only one bound end keep their shape and just follow that end.
+    this.deferRouting = false;
+    for (const a of this.live())
+      if (
+        a.type === "arrow" &&
+        !(a.startBinding && a.endBinding) &&
+        (a.startBinding || a.endBinding) &&
+        inScope(a.frameId)
+      )
         this.routeArrow(a);
-    }
-
-    // Detour: bend straight arrows (or our own earlier bends) around boxes they pass through.
-    // Each choice weighs crossings with the other arrows, so repeat until no arrow changes its mind.
-    const rerouted = new Set<string>();
-    for (let round = 0; round < 4; round++) {
-      let changed = false;
-      for (const a of this.live()) {
-        if (
-          a.type === "arrow" &&
-          (a.startBinding || a.endBinding) &&
-          inScope(a.frameId) &&
-          this.detour(a)
-        ) {
-          rerouted.add(a.id);
-          changed = true;
-        }
-      }
-      if (!changed) break;
-    }
     stats.rerouted = rerouted.size;
     return stats;
   }
