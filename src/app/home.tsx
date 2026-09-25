@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CopyRow } from "./CopyRow.tsx";
+import { CopyRow } from "./copy-row.tsx";
 import { linkFor, remember, setupCommands } from "./local.ts";
 
 /** What POST /api/diagrams answers. */

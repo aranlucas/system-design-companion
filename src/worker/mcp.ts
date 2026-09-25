@@ -189,7 +189,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
     async (a: A) => {
       try {
         const out = await fn(a);
-        return out && typeof out === "object" && "content" in (out as object)
+        return out && typeof out === "object" && "content" in out
           ? (out as ReturnType<typeof text>)
           : text(out);
       } catch (e) {

@@ -13,3 +13,7 @@ Things we've learned from this:
 ## TypeScript: named types
 
 Declare object and tuple types as named module-level `type`s or `interface`s, not inline in signatures, casts, generics or function bodies. `pnpm lint` enforces this with `local/no-inline-types` (`lint/types-plugin.ts`, loaded as an oxlint JS plugin).
+
+## File names
+
+Use kebab-case for source file names, including React components (for example, `copy-row.tsx`). `pnpm lint` enforces this with `unicorn/filename-case`. Component exports stay PascalCase. Unused lint suppression comments are errors.

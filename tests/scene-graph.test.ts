@@ -158,7 +158,7 @@ describe("graph()", () => {
     ]);
     const g = view(s);
     expect(g.edges ?? []).toHaveLength(0);
-    expect(g.sketches!.map((x) => x.id).sort()).toEqual(["lonely", "scribble"]);
+    expect(g.sketches!.map((x) => x.id).toSorted()).toEqual(["lonely", "scribble"]);
   });
 
   it("hides internal raw edges from the agent view", () => {
@@ -167,7 +167,7 @@ describe("graph()", () => {
       { op: "add_node", ref: "b", label: "B" },
       { op: "connect", from: "a", to: "b" },
     ]);
-    expect("_edgesRaw" in view(s)).toBe(false);
-    expect("_edgesRaw" in (s.graph() as Record<string, unknown>)).toBe(true);
+    expect("rawEdges" in view(s)).toBe(false);
+    expect("rawEdges" in (s.graph() as Record<string, unknown>)).toBe(true);
   });
 });

@@ -77,7 +77,6 @@ export class FakeD1 {
       first: async <T>(): Promise<T | null> => {
         return this.first(sql, []) as T | null;
       },
-      // oxlint-disable-next-line no-unnecessary-type-parameters
       all: async <T>(): Promise<D1Results<T>> => {
         return { results: this.all(sql, []) as T[] };
       },
@@ -93,7 +92,6 @@ export class FakeD1 {
           first: async <T>(): Promise<T | null> => {
             return this.first(sql, params) as T | null;
           },
-          // oxlint-disable-next-line no-unnecessary-type-parameters
           all: async <T>(): Promise<D1Results<T>> => {
             return { results: this.all(sql, params) as T[] };
           },
@@ -173,7 +171,7 @@ export class FakeD1 {
       return [...this.diagrams.values()]
         .filter((d) => !d.is_template && !this.deleted.has(d.id))
         .filter((d) => !hasCursor || d.created_at < time || (d.created_at === time && d.id < id))
-        .sort((a, b) => b.created_at - a.created_at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+        .toSorted((a, b) => b.created_at - a.created_at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
         .slice(0, limit)
         .map((d) => ({
           id: d.id,
@@ -191,7 +189,7 @@ export class FakeD1 {
       const [diagramId, limit] = p as SnapshotListParams;
       return this.snapshots
         .filter((s) => s.diagram_id === diagramId)
-        .sort((a, b) => b.created_at - a.created_at)
+        .toSorted((a, b) => b.created_at - a.created_at)
         .slice(0, limit)
         .map((s) => ({
           id: s.id,

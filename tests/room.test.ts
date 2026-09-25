@@ -58,7 +58,7 @@ describe("DiagramRoom ops layer", () => {
 
     const g = await graphOf(room);
     expect(g.diagram).toBe("Test");
-    expect(g.nodes!.map((n) => n.label).sort()).toEqual(["API", "DB"]);
+    expect(g.nodes!.map((n) => n.label).toSorted()).toEqual(["API", "DB"]);
     expect(g.edges).toHaveLength(1);
     const raw = await room.getRaw();
     expect(raw.filter((e) => e.type !== "text").every((e) => e.strokeColor === AGENT_STROKE)).toBe(
@@ -170,7 +170,7 @@ describe("DiagramRoom ops layer", () => {
     const moved = (await room.getRaw()).filter(
       (e) => e.type === "rectangle" && (e.x !== before.get(e.id)!.x || e.y !== before.get(e.id)!.y),
     );
-    expect(moved.map((e) => e.id).sort()).toEqual(["c", "d"]);
+    expect(moved.map((e) => e.id).toSorted()).toEqual(["c", "d"]);
   });
 
   it("tidy and layout wrap edits in snapshots", async () => {
@@ -191,7 +191,7 @@ describe("DiagramRoom ops layer", () => {
     await room.applyPatch([{ op: "add_node", label: "Keep" }], "system" as Author);
     const v1 = await room.snapshot("v1", "named");
     await room.applyPatch([{ op: "add_node", label: "Later" }], "system" as Author);
-    const labels = async () => ((await graphOf(room)).nodes ?? []).map((n) => n.label).sort();
+    const labels = async () => ((await graphOf(room)).nodes ?? []).map((n) => n.label).toSorted();
     expect(await labels()).toEqual(["Keep", "Later"]);
 
     const restored = await room.restore(v1.id);
@@ -499,7 +499,7 @@ describe("room-level interview flow", () => {
     expect(tidied.changed).toBeGreaterThanOrEqual(0);
     await room.snapshot("checkpoint", "named");
     const g = await graphOf(room);
-    expect(g.nodes!.map((n) => n.label).sort()).toEqual(["API", "Client", "DB"]);
+    expect(g.nodes!.map((n) => n.label).toSorted()).toEqual(["API", "Client", "DB"]);
     expect(g.edges).toHaveLength(2);
     expect(g.frames!.map((f) => f.name)).toEqual(["High-level design"]);
     expect((await room.listSnapshots()).some((s) => s.name === "checkpoint")).toBe(true);
@@ -536,7 +536,7 @@ describe("tombstone collection", () => {
   it("records when each element was deleted", async () => {
     const { ctx, gone } = await roomWithDelete();
     expect(gone).not.toHaveLength(0);
-    expect([...ctx.sql.tombstones.keys()].sort()).toEqual([...gone].sort());
+    expect([...ctx.sql.tombstones.keys()].toSorted()).toEqual([...gone].toSorted());
   });
 
   it("drops tombstones only once they are older than the TTL", async () => {
@@ -562,7 +562,7 @@ describe("tombstone collection", () => {
     expect(ctx.sql.tombstones.size).toBe(0);
     expect(collect(room, deletedAt + TOMBSTONE_TTL_MS + 1000)).toBe(0);
     for (const id of gone) expect(ctx.sql.elements.has(id)).toBe(true);
-    expect(((await graphOf(room)).nodes ?? []).map((n) => n.label).sort()).toEqual([
+    expect(((await graphOf(room)).nodes ?? []).map((n) => n.label).toSorted()).toEqual([
       "Gone",
       "Kept",
     ]);

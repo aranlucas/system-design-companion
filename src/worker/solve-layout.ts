@@ -40,7 +40,7 @@ const mid = (b: Box, axis: Axis) => b[axis] + b[size(axis)] / 2;
 function clusters(ids: number[], key: (i: number) => number, tol: number): number[][] {
   const out: number[][] = [];
   let cur: number[] = [];
-  for (const i of [...ids].sort((a, b) => key(a) - key(b))) {
+  for (const i of ids.toSorted((a, b) => key(a) - key(b))) {
     if (cur.length && key(i) - key(cur[0]) > tol) {
       if (cur.length > 1) out.push(cur);
       cur = [];
@@ -105,7 +105,7 @@ function solveAxis(
     separate(vars.indexOf(c.left), vars.indexOf(c.right)),
   );
   for (const line of lines) {
-    const order = [...line].sort((a, b) => mid(boxes[a], axis) - mid(boxes[b], axis));
+    const order = line.toSorted((a, b) => mid(boxes[a], axis) - mid(boxes[b], axis));
     for (let k = 1; k < order.length; k++) cs.push(separate(order[k - 1], order[k]));
   }
   for (const group of equal) {
