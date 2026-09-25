@@ -309,6 +309,11 @@ function distToBox(p: Pt, b: Box): number {
   );
 }
 
+const isBoundArrow = (e: El | undefined) =>
+  e?.type === "arrow" && !!(e.startBinding || e.endBinding);
+
+const roundBindingCoordinate = (v: number) => Math.round(v * 1e4) / 1e4;
+
 export class Scene {
   els: Map<string, El>;
   private changed = new Set<string>();
@@ -657,8 +662,6 @@ export class Scene {
    */
   private fitFrame(frame: El, shrink = false): boolean {
     // Connections are routed inside the frame instead (see detour), so they don't grow it.
-    const isBoundArrow = (e: El | undefined) =>
-      e?.type === "arrow" && !!(e.startBinding || e.endBinding);
     const kids = this.live()
       .filter(
         (e) =>
@@ -745,7 +748,6 @@ export class Scene {
   /** Translate a frame together with everything in it, re-routing arrows that leave it. */
   private moveFrameBy(frame: El, dx: number, dy: number) {
     if (!dx && !dy) return;
-    const isBoundArrow = (e: El) => e.type === "arrow" && (e.startBinding || e.endBinding);
     const kids = this.live().filter((e) => {
       if (e.frameId !== frame.id || isBoundArrow(e)) return false;
       const c = e.containerId ? this.els.get(e.containerId) : undefined;
@@ -932,8 +934,10 @@ export class Scene {
     const ys = points.map((p) => p[1]);
     const fixedPoint = (id: string, p: Pt): Point => {
       const b = boxOf(this.els.get(id)!);
-      const f = (v: number) => Math.round(v * 1e4) / 1e4;
-      return [f((p.x - b.x) / (b.w || 1)), f((p.y - b.y) / (b.h || 1))];
+      return [
+        roundBindingCoordinate((p.x - b.x) / (b.w || 1)),
+        roundBindingCoordinate((p.y - b.y) / (b.h || 1)),
+      ];
     };
     const patch = {
       x: p0.x,

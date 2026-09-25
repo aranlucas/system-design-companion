@@ -13,6 +13,59 @@ function graphOf(room: DiagramRoom) {
   return room.getGraph();
 }
 
+const rect = (id: string, x: number, y: number, frameId: string | null = null): El => ({
+  id,
+  type: "rectangle",
+  x,
+  y,
+  width: 160,
+  height: 70,
+  version: 1,
+  versionNonce: 1,
+  isDeleted: false,
+  index: `a${id}`,
+  frameId,
+});
+
+async function roomWithNode() {
+  const { env } = makeEnv();
+  const room = await makeRoom(env);
+  const [r] = (await room.applyPatch([{ op: "add_node", label: "X" }], "system" as Author)).results;
+  const cur = (await room.getRaw()).find((e) => e.id === r.id)!;
+  const send = (el: El) =>
+    (room as unknown as SocketHandlers).webSocketMessage(
+      null,
+      JSON.stringify({ type: "update", elements: [el] }),
+    );
+  const versionOf = async () => (await room.getRaw()).find((e) => e.id === r.id)!;
+  return { room, cur, send, versionOf };
+}
+
+const collect = (room: DiagramRoom, now: number) =>
+  (room as unknown as TombstoneCollector).collectTombstones(now);
+
+async function roomWithDelete() {
+  const { env } = makeEnv();
+  const ctx = makeRoomCtx();
+  const room = new DiagramRoom(ctx.ctx as unknown as DurableObjectState, env);
+  await room.init("d", "D");
+  const out = await room.applyPatch(
+    [
+      { op: "add_node", ref: "a", label: "Gone" },
+      { op: "add_node", ref: "b", label: "Kept" },
+    ],
+    "system" as Author,
+  );
+  const beforeDelete = await room.snapshot("before delete");
+  const deletedAt = Date.now();
+  await room.applyPatch([{ op: "remove", target: "Gone" }], "system" as Author);
+  const gone = [...ctx.sql.elements.values()]
+    .map((json) => JSON.parse(json) as El)
+    .filter((e) => e.isDeleted)
+    .map((e) => e.id);
+  return { room, ctx, deletedAt, gone, beforeDelete, keptId: out.results[1].id! };
+}
+
 describe("DiagramRoom ops layer", () => {
   it("deactivation closes active tabs, rejects reconnects and ignores late edits", async () => {
     const { env } = makeEnv();
@@ -99,20 +152,6 @@ describe("DiagramRoom ops layer", () => {
     const out = await room.applyPatch([{ op: "update", target: node.id, label: "Events DB" }]);
     const snap = (await room.listSnapshots()).find((s) => s.id === out.snapshotId);
     expect(snap?.name).toBe("Before: Rename Database to Events DB");
-  });
-
-  const rect = (id: string, x: number, y: number, frameId: string | null = null): El => ({
-    id,
-    type: "rectangle",
-    x,
-    y,
-    width: 160,
-    height: 70,
-    version: 1,
-    versionNonce: 1,
-    isDeleted: false,
-    index: `a${id}`,
-    frameId,
   });
 
   it("tidy snapshots before changing anything, and skips the snapshot when already tidy", async () => {
@@ -299,21 +338,6 @@ describe("failed batch persistence", () => {
 });
 
 describe("concurrent-edit merge rule", () => {
-  async function roomWithNode() {
-    const { env } = makeEnv();
-    const room = await makeRoom(env);
-    const [r] = (await room.applyPatch([{ op: "add_node", label: "X" }], "system" as Author))
-      .results;
-    const cur = (await room.getRaw()).find((e) => e.id === r.id)!;
-    const send = (el: El) =>
-      (room as unknown as SocketHandlers).webSocketMessage(
-        null,
-        JSON.stringify({ type: "update", elements: [el] }),
-      );
-    const versionOf = async () => (await room.getRaw()).find((e) => e.id === r.id)!;
-    return { room, cur, send, versionOf };
-  }
-
   it("higher version wins; stale versions are ignored", async () => {
     const { cur, send, versionOf } = await roomWithNode();
     await send({ ...structuredClone(cur), version: 0, versionNonce: 0 });
@@ -508,30 +532,6 @@ describe("room-level interview flow", () => {
 
 describe("tombstone collection", () => {
   const DAY = 24 * 60 * 60 * 1000;
-  const collect = (room: DiagramRoom, now: number) =>
-    (room as unknown as TombstoneCollector).collectTombstones(now);
-
-  async function roomWithDelete() {
-    const { env } = makeEnv();
-    const ctx = makeRoomCtx();
-    const room = new DiagramRoom(ctx.ctx as unknown as DurableObjectState, env);
-    await room.init("d", "D");
-    const out = await room.applyPatch(
-      [
-        { op: "add_node", ref: "a", label: "Gone" },
-        { op: "add_node", ref: "b", label: "Kept" },
-      ],
-      "system" as Author,
-    );
-    const beforeDelete = await room.snapshot("before delete");
-    const deletedAt = Date.now();
-    await room.applyPatch([{ op: "remove", target: "Gone" }], "system" as Author);
-    const gone = [...ctx.sql.elements.values()]
-      .map((json) => JSON.parse(json) as El)
-      .filter((e) => e.isDeleted)
-      .map((e) => e.id);
-    return { room, ctx, deletedAt, gone, beforeDelete, keptId: out.results[1].id! };
-  }
 
   it("records when each element was deleted", async () => {
     const { ctx, gone } = await roomWithDelete();

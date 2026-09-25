@@ -19,7 +19,7 @@
     "typescript/consistent-return": "off",
     "unicorn/prefer-add-event-listener": "error",
     "unicorn/no-array-sort": "error",
-    "unicorn/consistent-function-scoping": "off",
+    "unicorn/consistent-function-scoping": "error",
     "unicorn/prefer-set-has": "error",
     "unicorn/no-useless-fallback-in-spread": "error",
     "unicorn/no-useless-spread": "error",

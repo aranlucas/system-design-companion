@@ -149,6 +149,23 @@ const text = (v: unknown) => ({
 });
 const fail = (msg: string) => ({ content: [{ type: "text" as const, text: msg }], isError: true });
 
+const guard =
+  <A>(fn: (a: A) => Promise<unknown>) =>
+  async (a: A) => {
+    try {
+      const out = await fn(a);
+      return out && typeof out === "object" && "content" in out
+        ? (out as ReturnType<typeof text>)
+        : text(out);
+    } catch (e) {
+      return fail((e as Error).message);
+    }
+  };
+
+const userMsg = (t: string) => ({
+  messages: [{ role: "user" as const, content: { type: "text" as const, text: t } }],
+});
+
 export function buildServer(env: Env, ctx: McpRequestContext) {
   const url = new URL(ctx.requestInfo?.url ?? "http://localhost/mcp");
   const origin = url.origin;
@@ -183,19 +200,6 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
     if (!row) throw new Error("invalid or revoked diagram link");
     return row;
   }
-
-  const guard =
-    <A>(fn: (a: A) => Promise<unknown>) =>
-    async (a: A) => {
-      try {
-        const out = await fn(a);
-        return out && typeof out === "object" && "content" in out
-          ? (out as ReturnType<typeof text>)
-          : text(out);
-      } catch (e) {
-        return fail((e as Error).message);
-      }
-    };
 
   // ---------- sessions ----------
 
@@ -516,10 +520,6 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       contents: [{ uri: uri.href, mimeType: "text/markdown", text: RUBRIC }],
     }),
   );
-
-  const userMsg = (t: string) => ({
-    messages: [{ role: "user" as const, content: { type: "text" as const, text: t } }],
-  });
 
   server.registerPrompt(
     "review_design",
