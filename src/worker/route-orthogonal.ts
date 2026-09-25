@@ -138,6 +138,8 @@ function port(b: Box, side: Side, d: number, along = 0): Port {
       return { p: { x: cx, y: Math.round(b.y + b.h + d) }, dir: 2 };
     case "left":
       return { p: { x: Math.round(b.x - d), y: cy }, dir: 3 };
+    default:
+      throw new Error(`Unsupported port side: ${JSON.stringify(side satisfies never)}`);
   }
 }
 

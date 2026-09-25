@@ -41,6 +41,8 @@ export function patchSnapshotName(ops: Op[], scene: Scene, summary?: string): st
         return op.label
           ? `Rename ${label(op.target)} to ${compact(op.label, 40)}`
           : `${op.move ? "Move" : "Update"} ${label(op.target)}`;
+      default:
+        throw new Error(`Unsupported patch operation: ${JSON.stringify(op satisfies never)}`);
     }
   });
   const unique = [...new Set(descriptions)];

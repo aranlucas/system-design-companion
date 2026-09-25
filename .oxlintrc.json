@@ -16,7 +16,7 @@
     "typescript/no-unsafe-type-assertion": "off",
     "typescript/no-unnecessary-type-assertion": "error",
     "typescript/no-base-to-string": "error",
-    "typescript/consistent-return": "off",
+    "typescript/consistent-return": "error",
     "unicorn/prefer-add-event-listener": "error",
     "unicorn/no-array-sort": "error",
     "unicorn/consistent-function-scoping": "error",
