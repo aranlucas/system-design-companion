@@ -25,4 +25,17 @@
   ],
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "system-design-companion" }],
   "observability": { "enabled": true },
+  // Branch builds run `wrangler preview`. Each Preview gets its own Durable Object storage;
+  // D1 and R2 point at shared preview resources so previews never touch production data.
+  "previews": {
+    "durable_objects": { "bindings": [{ "name": "ROOM", "class_name": "DiagramRoom" }] },
+    "d1_databases": [
+      {
+        "binding": "DB",
+        "database_name": "system-design-companion-preview",
+        "database_id": "511519d3-cbd6-44be-8f66-a67e835bc5eb",
+      },
+    ],
+    "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "system-design-companion-preview" }],
+  },
 }
