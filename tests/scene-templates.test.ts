@@ -13,12 +13,7 @@ function applied(id: string): Scene {
 }
 
 function counts(s: Scene) {
-  const g = graphView(s) as {
-    nodes?: unknown[];
-    edges?: unknown[];
-    frames?: unknown[];
-    notes?: unknown[];
-  };
+  const g = graphView(s);
   return {
     nodes: g.nodes?.length ?? 0,
     edges: g.edges?.length ?? 0,
@@ -46,7 +41,7 @@ describe("builtin templates", () => {
   it("web baseline: client-to-storage path with cache and queue", () => {
     const s = applied("builtin:web-baseline");
     expect(counts(s)).toMatchObject({ nodes: 9, edges: 8 });
-    const g = graphView(s) as { edges?: Array<{ from?: string; to?: string }> };
+    const g = graphView(s);
     const pairs = g.edges!.map((e) => `${e.from}->${e.to}`);
     expect(pairs).toContain("Client->CDN");
     expect(pairs).toContain("Client->Load Balancer");

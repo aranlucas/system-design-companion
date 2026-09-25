@@ -11,7 +11,7 @@ function build(ops: Op[]): Scene {
 }
 
 function labels(s: Scene): string[] {
-  return ((graphView(s) as { nodes?: Array<{ label: string }> }).nodes ?? []).map((n) => n.label);
+  return (graphView(s).nodes ?? []).map((n) => n.label);
 }
 
 describe("wrapText / measureText", () => {
@@ -249,21 +249,13 @@ describe("tidy", () => {
     const s = cluttered();
     const before = {
       labels: labels(s),
-      edges: (graphView(s) as { edges?: Array<{ from: string; to: string }> }).edges?.map((e) => [
-        e.from,
-        e.to,
-      ]),
+      edges: graphView(s).edges?.map((e) => [e.from, e.to]),
       colors: s.live().map((e) => e.backgroundColor),
       count: s.live().length,
     };
     s.tidy();
     expect(labels(s)).toEqual(before.labels);
-    expect(
-      (graphView(s) as { edges?: Array<{ from: string; to: string }> }).edges?.map((e) => [
-        e.from,
-        e.to,
-      ]),
-    ).toEqual(before.edges);
+    expect(graphView(s).edges?.map((e) => [e.from, e.to])).toEqual(before.edges);
     expect(s.live().map((e) => e.backgroundColor)).toEqual(before.colors);
     expect(s.live().length).toBe(before.count);
   });
@@ -302,7 +294,7 @@ describe("layout", () => {
     ]);
     expect(s.layout("LR")).toBe(3);
     expect(s.layout("TB")).toBe(3);
-    const g = graphView(s) as { edges?: unknown[] };
+    const g = graphView(s);
     expect(g.edges).toHaveLength(2);
     for (const e of s.live()) {
       expect(Number.isFinite(e.x) && Number.isFinite(e.y)).toBe(true);

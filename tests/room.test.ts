@@ -5,14 +5,12 @@ import { DiagramRoom, TOMBSTONE_TTL_MS } from "../src/worker/room.ts";
 import type { Author, Op } from "../src/worker/scene.ts";
 import { makeEnv, makeRoom, makeRoomCtx, makeWs } from "./helpers/fakes.ts";
 
-function graphOf(room: { getGraph: () => Promise<unknown> }) {
-  return room.getGraph() as Promise<{
-    diagram: string;
-    nodes?: Array<{ id: string; label: string; [k: string]: unknown }>;
-    edges?: Array<{ id: string; from?: string; to?: string }>;
-    frames?: Array<{ id: string; name: string }>;
-    notes?: Array<{ id: string; text: string }>;
-  }>;
+/** The socket handlers, called directly with a fake socket. */
+type SocketHandlers = { webSocketMessage: (ws: unknown, raw: string) => Promise<void> };
+type TombstoneCollector = { collectTombstones: (now: number) => number };
+
+function graphOf(room: DiagramRoom) {
+  return room.getGraph();
 }
 
 describe("DiagramRoom ops layer", () => {
@@ -285,9 +283,10 @@ describe("concurrent-edit merge rule", () => {
       .results;
     const cur = (await room.getRaw()).find((e) => e.id === r.id)!;
     const send = (el: El) =>
-      (
-        room as unknown as { webSocketMessage: (ws: null, raw: string) => Promise<void> }
-      ).webSocketMessage(null, JSON.stringify({ type: "update", elements: [el] }));
+      (room as unknown as SocketHandlers).webSocketMessage(
+        null,
+        JSON.stringify({ type: "update", elements: [el] }),
+      );
     const versionOf = async () => (await room.getRaw()).find((e) => e.id === r.id)!;
     return { room, cur, send, versionOf };
   }
@@ -321,9 +320,10 @@ describe("concurrent-edit merge rule", () => {
     addWs(ws1);
     addWs(ws2);
     const el = { id: "ext", type: "rectangle", version: 1, versionNonce: 7 } as El;
-    await (
-      room as unknown as { webSocketMessage: (ws: unknown, raw: string) => Promise<void> }
-    ).webSocketMessage(ws1, JSON.stringify({ type: "update", elements: [el] }));
+    await (room as unknown as SocketHandlers).webSocketMessage(
+      ws1,
+      JSON.stringify({ type: "update", elements: [el] }),
+    );
     expect(ws1.sent).toHaveLength(0);
     expect(ws2.sent).toHaveLength(1);
     expect(JSON.parse(ws2.sent[0])).toMatchObject({ type: "update", origin: "human" });
@@ -427,9 +427,7 @@ describe("presence and tab RPC", () => {
     const idA = out.results[0].id!;
     const ws = makeWs();
     addWs(ws);
-    const send = (
-      room as unknown as { webSocketMessage: (ws: unknown, raw: string) => Promise<void> }
-    ).webSocketMessage.bind(room);
+    const send = (room as unknown as SocketHandlers).webSocketMessage.bind(room);
     await send(
       ws,
       JSON.stringify({
@@ -439,14 +437,10 @@ describe("presence and tab RPC", () => {
         focused: true,
       }),
     );
-    const sel = (await room.getSelection()) as {
-      tabOpen: boolean;
-      viewport: unknown;
-      nodes: Array<{ id: string }>;
-    };
+    const sel = await room.getSelection();
     expect(sel.tabOpen).toBe(true);
     expect(sel.viewport).toMatchObject({ x: 1, y: 2 });
-    expect(sel.nodes.map((n) => n.id)).toEqual([idA]);
+    expect(sel.nodes?.map((n) => n.id)).toEqual([idA]);
   });
 
   it("rejects plain HTTP on the WS route", async () => {
@@ -492,7 +486,7 @@ describe("room-level interview flow", () => {
 describe("tombstone collection", () => {
   const DAY = 24 * 60 * 60 * 1000;
   const collect = (room: DiagramRoom, now: number) =>
-    (room as unknown as { collectTombstones: (now: number) => number }).collectTombstones(now);
+    (room as unknown as TombstoneCollector).collectTombstones(now);
 
   async function roomWithDelete() {
     const { env } = makeEnv();

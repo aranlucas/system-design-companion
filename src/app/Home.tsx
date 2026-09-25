@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { CopyRow } from "./CopyRow.tsx";
 import { linkFor, remember, setupCommands } from "./local.ts";
 
+/** What POST /api/diagrams answers. */
+type CreatedDiagram = { id: string; key: string; name: string; error?: string };
+
 interface Diagram {
   id: string;
   key: string;
@@ -123,7 +126,7 @@ export function Home() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name: name || "Untitled", template }),
       });
-      const d = (await res.json()) as { id: string; key: string; name: string; error?: string };
+      const d = (await res.json()) as CreatedDiagram;
       if (!res.ok) throw new Error(d.error);
       remember({ id: d.id, key: d.key, name: d.name });
       location.href = linkFor(d.id, d.key);

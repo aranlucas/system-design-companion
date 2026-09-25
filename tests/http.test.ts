@@ -22,6 +22,15 @@ function post(env: TestEnv, path: string, payload: unknown) {
   );
 }
 
+/** Response bodies the API returns. */
+type Created = { id: string; key: string; name: string; link: string };
+type ListedDiagram = { id: string; key: string; name: string };
+type DiagramPage = { items: ListedDiagram[]; nextCursor: string | null };
+type WithId = { id: string };
+type ErrorBody = { error: string };
+type TemplateInfo = { id: string; name: string };
+type SnapshotInfo = { id: string; name: string };
+
 async function body(res: Response) {
   return (await res.json()) as Record<string, unknown>;
 }
@@ -29,7 +38,7 @@ async function body(res: Response) {
 async function create(env: TestEnv, name: string, template?: string) {
   const res = await post(env, "/api/diagrams", template ? { name, template } : { name });
   expect(res.status).toBe(200);
-  return (await body(res)) as { id: string; key: string; name: string; link: string };
+  return (await body(res)) as Created;
 }
 
 describe("diagrams API", () => {
@@ -43,10 +52,7 @@ describe("diagrams API", () => {
     const response = await worker.fetch(req("/api/diagrams"), env.env);
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    const page = (await response.json()) as {
-      items: Array<{ id: string; key: string; name: string }>;
-      nextCursor: string | null;
-    };
+    const page = (await response.json()) as DiagramPage;
     const listed = page.items;
     expect(listed.map((d) => d.id)).toEqual([agent.id, old.id]);
     const opened = await Promise.all(
@@ -86,10 +92,9 @@ describe("diagrams API", () => {
       .map((d) => d.id)
       .sort()
       .toReversed();
-    const first = (await (await worker.fetch(req("/api/diagrams?limit=2"), env.env)).json()) as {
-      items: Array<{ id: string; key: string }>;
-      nextCursor: string;
-    };
+    const first = (await (
+      await worker.fetch(req("/api/diagrams?limit=2"), env.env)
+    ).json()) as DiagramPage;
     expect(first.items.map((d) => d.id)).toEqual(expected.slice(0, 2));
     expect(env.db.library.size).toBe(2); // Backfill is bounded to the requested page.
     await create(env, "Newer during pagination");
@@ -101,14 +106,14 @@ describe("diagrams API", () => {
     expect(removed.status).toBe(204);
     const second = (await (
       await worker.fetch(
-        req(`/api/diagrams?limit=2&cursor=${encodeURIComponent(first.nextCursor)}`),
+        req(`/api/diagrams?limit=2&cursor=${encodeURIComponent(first.nextCursor!)}`),
         env.env,
       )
     ).json()) as typeof first;
     expect(second.items.map((d) => d.id)).toEqual(expected.slice(2, 4));
     const third = (await (
       await worker.fetch(
-        req(`/api/diagrams?limit=2&cursor=${encodeURIComponent(second.nextCursor)}`),
+        req(`/api/diagrams?limit=2&cursor=${encodeURIComponent(second.nextCursor!)}`),
         env.env,
       )
     ).json()) as typeof first;
@@ -138,9 +143,7 @@ describe("diagrams API", () => {
   it("deletes only an authorized board and disables old and library links", async () => {
     const env = makeEnv();
     const [target, keep] = await Promise.all([create(env, "Prod smoke"), create(env, "Keep")]);
-    const page = (await (await worker.fetch(req("/api/diagrams"), env.env)).json()) as {
-      items: Array<{ id: string; key: string }>;
-    };
+    const page = (await (await worker.fetch(req("/api/diagrams"), env.env)).json()) as DiagramPage;
     const libraryKey = page.items.find((d) => d.id === target.id)!.key;
     expect(
       (await worker.fetch(req(`/api/d/${target.id}?k=wrong`, { method: "DELETE" }), env.env))
@@ -212,7 +215,7 @@ describe("diagrams API", () => {
   it("creates from a builtin template into the live room", async () => {
     const env = makeEnv();
     const d = await create(env, "Web", "builtin:web-baseline");
-    const g = (await env.rooms.get(d.id)!.getGraph()) as { nodes?: unknown[]; edges?: unknown[] };
+    const g = await env.rooms.get(d.id)!.getGraph();
     expect(g.nodes).toHaveLength(9);
     expect(g.edges).toHaveLength(8);
   });
@@ -222,9 +225,9 @@ describe("diagrams API", () => {
     const src = await create(env, "Src", "builtin:read-heavy");
     const tpl = await post(env, `/api/d/${src.id}/template?k=${src.key}`, { name: "Saved" });
     expect(tpl.status).toBe(200);
-    const tplId = ((await body(tpl)) as { id: string }).id;
+    const tplId = ((await body(tpl)) as WithId).id;
     const copy = await create(env, "Copy", tplId);
-    const g = (await env.rooms.get(copy.id)!.getGraph()) as { nodes?: unknown[] };
+    const g = await env.rooms.get(copy.id)!.getGraph();
     expect(g.nodes).toHaveLength(6);
   });
 
@@ -232,21 +235,20 @@ describe("diagrams API", () => {
     const env = makeEnv();
     const res = await post(env, "/api/diagrams", { name: "X", template: "nope" });
     expect(res.status).toBe(500);
-    expect(((await body(res)) as { error: string }).error).toMatch("unknown template");
+    expect(((await body(res)) as ErrorBody).error).toMatch("unknown template");
   });
 
   it("lists builtin and saved templates", async () => {
     const env = makeEnv();
-    const before = (await (await worker.fetch(req("/api/templates"), env.env)).json()) as Array<{
-      id: string;
-    }>;
+    const before = (await (
+      await worker.fetch(req("/api/templates"), env.env)
+    ).json()) as TemplateInfo[];
     expect(before.some((t) => t.id === "builtin:interview")).toBe(true);
     const src = await create(env, "Src");
     await post(env, `/api/d/${src.id}/template?k=${src.key}`, { name: "Mine" });
-    const after = (await (await worker.fetch(req("/api/templates"), env.env)).json()) as Array<{
-      id: string;
-      name: string;
-    }>;
+    const after = (await (
+      await worker.fetch(req("/api/templates"), env.env)
+    ).json()) as TemplateInfo[];
     expect(after.some((t) => t.name === "Mine")).toBe(true);
   });
 });
@@ -260,7 +262,7 @@ describe("snapshots API", () => {
 
     const snap = await post(env, `/api/d/${d.id}/snapshots?k=${d.key}`, { name: "v1" });
     expect(snap.status).toBe(200);
-    const meta = (await body(snap)) as { id: string; name: string };
+    const meta = (await body(snap)) as SnapshotInfo;
     expect(meta.name).toBe("v1");
 
     await room.applyPatch([{ op: "add_node", label: "B" }], "system" as Author);
@@ -269,7 +271,7 @@ describe("snapshots API", () => {
 
     const restore = await post(env, `/api/d/${d.id}/restore?k=${d.key}`, { snapshotId: meta.id });
     expect(restore.status).toBe(200);
-    const g = (await room.getGraph()) as { nodes?: Array<{ label: string }> };
+    const g = await room.getGraph();
     expect(g.nodes!.map((n) => n.label)).toEqual(["A"]);
   });
 
@@ -345,7 +347,7 @@ describe("files API", () => {
     await put(env, `/api/d/${d.id}/files/file1?k=${d.key}`, png);
     const tpl = (await body(
       await post(env, `/api/d/${d.id}/template?k=${d.key}`, { name: "With image" }),
-    )) as { id: string };
+    )) as WithId;
     const copy = await create(env, "Copy", tpl.id);
     const res = await worker.fetch(req(`/api/d/${copy.id}/files/file1?k=${copy.key}`), env.env);
     expect(res.status).toBe(200);

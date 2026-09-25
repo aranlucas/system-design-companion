@@ -1,4 +1,5 @@
 import type { Component } from "./components.ts";
+import type { Point } from "./protocol.ts";
 
 export interface IconPart {
   type: "rectangle" | "ellipse" | "line";
@@ -127,7 +128,7 @@ export function iconElements(c: Component, width: number): IconPart[] {
           points: [
             [0, 0],
             [38, 0],
-          ] as [number, number][],
+          ] as Point[],
         },
       ]);
     case "cache":
@@ -141,7 +142,7 @@ export function iconElements(c: Component, width: number): IconPart[] {
             points: [
               [0, 0],
               [0, 10],
-            ] as [number, number][],
+            ] as Point[],
           },
           {
             type: "line" as const,
@@ -150,7 +151,7 @@ export function iconElements(c: Component, width: number): IconPart[] {
             points: [
               [0, 0],
               [0, 10],
-            ] as [number, number][],
+            ] as Point[],
           },
           {
             type: "line" as const,
@@ -159,7 +160,7 @@ export function iconElements(c: Component, width: number): IconPart[] {
             points: [
               [0, 0],
               [10, 0],
-            ] as [number, number][],
+            ] as Point[],
           },
           {
             type: "line" as const,
@@ -168,7 +169,7 @@ export function iconElements(c: Component, width: number): IconPart[] {
             points: [
               [0, 0],
               [10, 0],
-            ] as [number, number][],
+            ] as Point[],
           },
         ]),
       ];

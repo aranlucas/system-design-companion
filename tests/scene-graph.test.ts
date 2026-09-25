@@ -1,6 +1,6 @@
 // Read model: graph(), graphView(), selection, inferred edges, sketches.
 import { describe, expect, it } from "vitest";
-import type { El } from "../src/shared/protocol.ts";
+import type { El, Point } from "../src/shared/protocol.ts";
 import { Scene, graphView, type Op } from "../src/worker/scene.ts";
 
 let seq = 0;
@@ -47,7 +47,7 @@ function arrow(
   id: string,
   x: number,
   y: number,
-  pts: [number, number][],
+  pts: Point[],
   startId?: string,
   endId?: string,
 ): El {
@@ -72,13 +72,7 @@ function arrow(
 }
 
 function view(s: Scene, sel?: Set<string>) {
-  return graphView(s, sel) as {
-    nodes?: Array<{ id: string; label: string; [k: string]: unknown }>;
-    edges?: Array<{ id: string; from?: string; to?: string; [k: string]: unknown }>;
-    frames?: Array<{ id: string; name: string }>;
-    notes?: Array<{ id: string; text: string; frame?: string }>;
-    sketches?: Array<{ id: string }>;
-  };
+  return graphView(s, sel);
 }
 
 function build(ops: Op[]): Scene {

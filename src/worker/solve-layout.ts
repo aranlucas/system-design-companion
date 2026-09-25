@@ -18,6 +18,13 @@ export interface LayoutItem {
   weight: number;
 }
 
+export interface SolveOptions {
+  /** Minimum clear space between any two items. */
+  gap: number;
+  /** How close two centres must be to line up. */
+  alignTolerance: number;
+}
+
 export interface LayoutMove {
   dx: number;
   dy: number;
@@ -116,10 +123,7 @@ const overlapping = (a: Box, b: Box, m: number) =>
  * Line nodes up and keep every pair at least `gap` apart, moving items as little as possible
  * in total (weighted squared distance). Items keep their left-right and above-below order.
  */
-export function solveLayout(
-  items: LayoutItem[],
-  opts: { gap: number; alignTolerance: number },
-): LayoutMove[] {
+export function solveLayout(items: LayoutItem[], opts: SolveOptions): LayoutMove[] {
   const attempt = (align: boolean) => {
     const { target, groups } = align
       ? alignmentTargets(items, opts.alignTolerance)
