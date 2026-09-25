@@ -5,102 +5,86 @@
 <h1 align="center">System Design Companion</h1>
 
 <p align="center">
-  A live Excalidraw canvas that you, your interviewer, and your coding agent edit together.
+  A shared whiteboard for system design interviews, where your AI agent draws alongside you.
 </p>
 
 <p align="center">
-  <a href="#run-locally">Run locally</a> ·
-  <a href="#deploy-cloudflare">Deploy</a> ·
-  <a href="#using-it-in-the-interview">Features</a> ·
+  <a href="#a-session">A session</a> ·
+  <a href="#what-you-can-do">Features</a> ·
+  <a href="docs/setup.md">Set up</a> ·
   <a href="docs/design.md">Design</a>
 </p>
 
-## How it works
+You, your interviewer and Claude Code (or Codex) work on the same Excalidraw canvas in
+real time. The agent sees the diagram as components and connections, not pixels. It can
+add to it, rearrange it, point at parts of it and review it, while everyone watches the
+changes land.
 
-- **One shared canvas.** Everyone with the link draws on the same Excalidraw board in real time, with live cursors and presence.
-- **The agent joins over MCP.** Claude Code or Codex reads the diagram as a graph, edits it with semantic operations (`add_node`, `connect`, …), and can point at things on your screen.
-- **Nothing is lost.** Every agent edit is snapshotted first, so one click in **Versions** undoes it.
-- **It stays readable.** Agent edits are tidied as they land: no overlaps, aligned rows, connections kept inside their frames.
+## A session
 
-The stack: a Cloudflare Worker with one Durable Object per diagram, D1 for the diagram index, and R2 for snapshots. See [docs/design.md](docs/design.md) for the architecture.
+1. **Start a diagram**, blank or from a template: an interview framework (requirements,
+   estimates, API, high-level design, deep dives), a web-service baseline, a read-heavy
+   URL shortener or a realtime chat/feed fan-out.
+2. **Share the link** with your interviewer. Anyone with it can edit, and you see each
+   other's cursors and selections.
+3. **Tell your agent "join" and paste the link.** From then on, you can talk about the
+   diagram in plain words: "add a cache in front of the database", "split the write
+   path into a queue".
+4. **Point and ask.** Select something on the canvas and ask "what about this?". The
+   agent knows what you selected.
+5. **Go deeper.** Ask the agent to review the design against a system design rubric,
+   suggest the next step, or do back-of-envelope capacity estimates and write them onto
+   the canvas.
 
-## Run locally
+## What you can do
 
-```sh
-pnpm install
-pnpm dev          # http://localhost:5173
-```
+**Draw together**
 
-1. Open http://localhost:5173, create a diagram (optionally from a template).
-2. Add the MCP server once (use the deployed URL + `/mcp` in production):
-   - Claude Code: `claude mcp add --transport http system-design http://localhost:5173/mcp`
-   - Codex: `codex mcp add system-design --url http://localhost:5173/mcp`
-3. Tell the agent "join <share link>", then draw together. Select things on the canvas and say "what about this?".
+- Live multiplayer canvas with cursors, selections and presence, for any number of tabs.
+- A component library of editable icons: people, devices, phones, databases, servers,
+  caches, queues, load balancers, clouds, object storage, search, auth, DNS,
+  notifications and schedulers. Each icon connects, moves and resizes as a single piece.
+- Frames to organise a design into sections, like the interview framework's stages.
 
-If you previously registered this server as `canvas`, remove that entry in your MCP client and add it again as `system-design` using the command above. Existing diagram links still work.
+**Work with the agent**
 
-## Deploy (Cloudflare)
+- The agent edits with high-level operations (add a component, connect two, rename,
+  restyle, group into a frame) rather than raw drawing commands. Its work shows up in
+  violet, and a toast tells you when it changed something.
+- It can **focus** everyone's view on a component, or **point** at it with a temporary
+  laser marker, without touching the diagram.
+- Each edit brings the changed components into view in every open tab.
+- It can import Mermaid diagrams, lay out a section as a layered graph when you ask,
+  and take a screenshot of the canvas to check its own work.
+- In chat apps that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps)
+  (Claude Desktop and web, ChatGPT, VS Code), the conversation shows a live hand-drawn
+  picture of the canvas.
 
-```sh
-npx wrangler d1 create system-design-companion   # paste database_id into wrangler.jsonc if not auto-provisioned
-npx wrangler r2 bucket create system-design-companion
-pnpm deploy
-```
+**Keep it readable**
 
-Then `claude mcp add --transport http system-design https://<your-worker>.workers.dev/mcp` (or `codex mcp add system-design --url …/mcp`).
+- **Tidy** cleans up without redesigning: it fixes overlaps, near-miss alignments and
+  uneven spacing, keeps connections inside their frame, and moves grouped artwork as one
+  piece. Select something first to tidy only that part.
+- Agent edits are tidied as they land, and long notes wrap automatically.
 
-Git-connected Workers Builds deploy `main` and build a Preview for every other branch. Previews get their own Durable Object storage automatically but need separate D1 and R2 resources, set in the `previews` block of `wrangler.jsonc`:
+**Never lose work**
 
-```sh
-npx wrangler d1 create system-design-companion-preview        # paste its database_id into previews.d1_databases
-npx wrangler r2 bucket create system-design-companion-preview
-```
+- Every agent edit is saved as a version first, named after the change, so one click in
+  **Versions** undoes it.
+- Save your own checkpoints, and save a good layout as a template to start from next time.
 
-## Using it in the interview
+**Find your diagrams**
 
-- **Share / Agent**: copies the edit link for the interviewer, plus the Claude setup command and join prompt.
-- **Rename**: click the diagram title in the bottom toolbar, or choose **Rename diagram** from the menu. The name updates in connected tabs and your recent diagrams.
-- **Shape library**: editable icons for people, devices, phones, databases, servers, caches, queues, load balancers, clouds, object storage, search, auth, DNS, notifications, and schedulers. The agent gets the same drawings through `apply_patch` → `add_node` with a `kind`; there is no separate library insertion tool. Icons remain single semantic components for connecting, moving, resizing, and deleting. An explicit `shape` uses a basic shape instead. Icons have tight artwork bounds for arrow bindings; captions wrap independently below them.
-- **Focus / point**: `focus_view` targets components or frames by label or ID in the most recently active open tab. `mode=focus` pans/zooms and highlights; `mode=point` shows a temporary laser-style marker without panning. Use `gesture=heart` to draw a fading heart. It does not edit the diagram or selection, and creates no version. Agent edits automatically focus and highlight the changed components in every connected tab.
-- **Tidy**: fixes overlaps, near-misses in alignment and uneven spacing, and keeps connections and labels inside their endpoints’ shared frame, repairing bends that escape it. Grouped artwork moves as one piece. With a selection, only the selected frames are tidied.
-- **Versions**: every Claude edit is snapshotted first with a name based on the requested change (or the edited components), so one click undoes it. You can also save named checkpoints and save a diagram as a template.
-- Claude's elements are violet, and a toast says when Claude changed something.
-- MCP prompts: `review_design`, `suggest_next_step`, `estimate_capacity`. Resource: `rubric://system-design`.
-- In clients that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps) (Claude Desktop/web, ChatGPT, VS Code), `get_scene` also shows a hand-drawn picture of the canvas inline, with refresh, full screen (live-updating) and open-canvas buttons. Terminal clients get the usual text. The view lives in `src/view/`; `pnpm build:view` bundles it into `public/mcp-view.html`, which the worker reads via the `ASSETS` binding.
+- **All diagrams** lists every board in the deployment, including ones the agent created.
+  Rename a diagram from its title, and delete it (with confirmation) for everyone.
 
-## Checks
+> A deployment is a shared workspace: anyone who can reach it can list, open and edit its
+> diagrams. Put it behind access controls if it should be private.
 
-```sh
-pnpm check                    # typecheck, Oxlint, Oxfmt
-pnpm test                     # vitest: scene engine, tidy, rooms, HTTP routes
-pnpm format                   # apply Oxfmt
-node scripts/scene-smoke.ts   # scene engine smoke test
-node scripts/tidy-check.ts <raw.json>   # layout problems before/after tidy on a real export
-```
+## Get started
 
-See [docs/improvements.md](docs/improvements.md) for test coverage, findings, and
-related-project research.
+Run it locally or deploy it to Cloudflare, then connect your agent. It takes one command
+each: see [docs/setup.md](docs/setup.md).
 
-## Shared diagram library
-
-All diagrams lists every saved non-template board in this deployment, including boards
-created through MCP and boards that predate the library. No browser history or manual
-link registration is needed. The list refreshes every ten seconds while visible and
-when the window regains focus. Original share links remain valid.
-
-This deployment is a shared workspace: anyone who can reach the app can list and open
-its diagrams, including editing them. Protect the deployment with access controls if
-it should be private. The library uses additional server-managed links rather than
-recovering or replacing the original capability keys. Clearing browser storage does
-not remove boards from the library.
-
-The diagrams API is paginated: `GET /api/diagrams?limit=50&cursor=...` returns
-`{ items, nextCursor }`. The default page size is 50, with a maximum of 100.
-Pass the returned cursor unchanged; a null cursor means the final page. Ordering
-uses creation time and ID, so newer inserts do not shift subsequent pages.
-The homepage offers **Load more diagrams** when needed and refreshes loaded pages.
-
-**Delete** asks for confirmation, then removes a diagram for everyone and disables
-its original and library links, including active canvas connections. The authorized
-API is `DELETE /api/d/:id?k=<key>`. Deletion is logical: saved data and snapshots
-remain for administrative recovery; there is no restore action in the UI.
+How it's built (a Cloudflare Worker with one Durable Object per diagram) is in
+[docs/design.md](docs/design.md).
