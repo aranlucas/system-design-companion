@@ -183,28 +183,36 @@ describe("tidy: even spacing", () => {
   });
 });
 
-describe("tidy: push direction", () => {
-  // B overlaps A: pushing down (54px) is shorter than sideways (84px).
-  const scene = (withArrowInTheWay: boolean) =>
-    new Scene([
-      rect("A", 0, 0),
-      rect("B", 100, 40, { boundElements: [{ id: "bt", type: "arrow" }] }),
-      rect("T", 1000, 60, { boundElements: [{ id: "bt", type: "arrow" }] }),
-      arrow("bt", [268, 75], [992, 95], { startBinding: bound("B"), endBinding: bound("T") }),
-      // A connection B's arrow would only cross if B moved down.
-      ...(withArrowInTheWay ? [arrow("other", [900, 100], [960, 100])] : []),
-    ]);
+describe("tidy: overlap removal", () => {
+  // B overlaps A by 30px vertically and 60px sideways, so the cheaper axis is vertical.
+  const pair = () => new Scene([rect("A", 0, 0), rect("B", 100, 40)]);
+  const pos = (s: Scene, id: string) => ({ x: s.resolve(id).x, y: s.resolve(id).y });
 
-  it("takes the shorter push when the directions don't differ in crossings", () => {
-    const s = scene(false);
-    s.tidy();
-    expect(s.resolve("B")).toMatchObject({ x: 100, y: 94 });
+  it("splits the shortest push between both blocks, keeping their order", () => {
+    const s = pair();
+    expect(s.tidy().separated).toBe(2);
+    expect(pos(s, "A")).toEqual({ x: 0, y: -27 });
+    expect(pos(s, "B")).toEqual({ x: 100, y: 67 });
+    expect(idempotent(s)).toBe(0);
   });
 
-  it("pushes sideways instead when pushing down would cross another arrow", () => {
-    const s = scene(true);
+  it("moves what was just added or edited more than what was already there", () => {
+    const s = pair();
+    s.mutate(s.resolve("B"), { strokeColor: "#000" }); // B is part of this batch
     s.tidy();
-    expect(s.resolve("B")).toMatchObject({ x: 184, y: 40 });
+    expect(pos(s, "A")).toEqual({ x: 0, y: -5 });
+    expect(pos(s, "B")).toEqual({ x: 100, y: 89 });
+  });
+
+  it("separates and aligns in one solve, without snapping into a collision", () => {
+    // C sits 10px below B's row and overlaps it; lining it up must still keep them apart.
+    const s = new Scene([rect("A", 0, 0), rect("B", 400, 0), rect("C", 470, 10)]);
+    s.tidy();
+    expect(layoutReport(s).blockOverlaps).toBe(0);
+    const [a, b, c] = ["A", "B", "C"].map((id) => s.resolve(id));
+    expect(new Set([a.y, b.y, c.y]).size).toBe(1);
+    expect(b.x + b.width + 24).toBeLessThanOrEqual(c.x);
+    expect(idempotent(s)).toBe(0);
   });
 });
 

@@ -235,9 +235,8 @@ flowchart TD
     A["Bind loose arrow ends<br/>(only where graph() already sees the edge;<br/>nearest node wins)"] --> B["Adopt loose items into<br/>the frame they sit in"]
     B --> C["Wrap over-long notes"]
     C --> D
-    subgraph Loop["Repeat until stable"]
-        D["Snap near-aligned nodes onto<br/>the row / column's largest box"] --> E["Even out roughly even gaps"]
-        E --> F["Separate overlaps with the smallest push<br/>(groups move whole; fewer arrow crossings wins a tie)"]
+    subgraph Loop["Per frame, repeat until stable"]
+        D["One VPSC solve: line near-aligned nodes up on<br/>the row / column's largest box and keep every block<br/>24px apart, moving things as little as possible<br/>(groups move whole; this batch's edits give way first)"] --> F["Even out roughly even gaps"]
     end
     F --> G["Fit frames<br/>(shrink back to the chosen size,<br/>kept in customData.autoFit)"]
     G --> H["Pull overlapping frames apart"]
@@ -245,6 +244,12 @@ flowchart TD
 ```
 
 - It never changes connections, labels, colours or relative order.
+- Overlap removal and alignment are one weighted least-squares problem
+  (`src/worker/solve-layout.ts`), solved with VPSC (Dwyer, Marriott & Stuckey, the solver
+  behind WebCola): an x pass for pairs that are cheaper to separate sideways, then a y pass.
+  Rows can only separate sideways and columns only vertically; if alignment still conflicts
+  with separation, separation wins. Blocks the current batch added or edited weigh 1, the
+  rest 10, so an agent's new node moves out of the way of what someone placed.
 - It is idempotent: a second run changes nothing.
 - It snapshots first, but only when something will change.
 - The full dagre `layout` stays opt-in.
