@@ -87,7 +87,9 @@ sequenceDiagram
 
 - Merging uses Excalidraw's element versioning, and each tab reconciles incoming updates
   with `reconcileElements`. Deletions are tombstones (`isDeleted`), so they sync like any
-  other change.
+  other change. The room drops a tombstone 7 days after the delete (`TOMBSTONE_TTL_MS`),
+  and only while no tab is connected, so a tab can only miss a delete if it stayed
+  offline for longer than that.
 - Each tab's presence is stored on its WebSocket attachment, so it survives Durable Object
   hibernation. The most recently focused tab is the "primary" one for tab RPCs.
 
@@ -157,7 +159,7 @@ It changes no elements and creates no version.
 
 | Where     | What                                                                                       |
 | --------- | ------------------------------------------------------------------------------------------ |
-| DO SQLite | Live elements (including tombstones) and room meta (id, name).                             |
+| DO SQLite | Live elements, tombstones from the last 7 days with their delete times, room meta.         |
 | D1        | Diagram index, capability key hashes, library links, deletions, snapshot metadata.         |
 | R2        | Snapshot and saved-template JSON (`snapshots/<diagram>/<id>.json`, `templates/<id>.json`). |
 

@@ -6,7 +6,6 @@ import {
 import { McpServer, type McpRequestContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { COMPONENT_KINDS, COMPONENTS } from "../shared/components.ts";
-import type { El } from "../shared/protocol.ts";
 import { SHAPES, type Op } from "./scene.ts";
 import { RUBRIC } from "./rubric.ts";
 import {
@@ -245,10 +244,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
     },
     guard(async ({ diagram }: { diagram: string }) => {
       const d = await pick(diagram);
-      const raw = (await room(env, d.id).getRaw()) as unknown as El[];
-      const elements = raw.sort((a, b) =>
-        (a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0,
-      );
+      const elements = await room(env, d.id).getRaw();
       return {
         content: [{ type: "text" as const, text: `${elements.length} elements` }],
         structuredContent: { name: d.name, url: diagram, elements },

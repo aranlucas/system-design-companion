@@ -10,6 +10,7 @@ import type {
 } from "../shared/protocol.ts";
 import { Scene, graphView, type Author, type Op } from "./scene.ts";
 import { patchSnapshotName } from "./patch-name.ts";
+import { copyFiles } from "./store.ts";
 
 interface TabState {
   /** Stable per-socket id, used as the Excalidraw collaborator id. */
@@ -29,6 +30,12 @@ export interface SnapshotMeta {
 }
 
 const RPC_TIMEOUT_MS = 20_000;
+/**
+ * How long a deleted element is kept before it is dropped from storage and `init`.
+ * Tabs that were already connected need the tombstone to see the delete, so this
+ * has to be longer than any realistic offline gap.
+ */
+export const TOMBSTONE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const collaborator = (tab: TabState): ServerMessage => ({
   type: "collaborator",
@@ -40,6 +47,8 @@ const collaborator = (tab: TabState): ServerMessage => ({
 /** One diagram: live scene, tab sync, and the ops layer MCP (and later an in-room agent) calls. */
 export class DiagramRoom extends DurableObject<Env> {
   private els = new Map<string, El>();
+  /** Tombstoned element id → when it was deleted. */
+  private deletedAt = new Map<string, number>();
   private diagramId = "";
   private name = "Untitled";
   private pending = new Map<
@@ -55,10 +64,22 @@ export class DiagramRoom extends DurableObject<Env> {
       const sql = ctx.storage.sql;
       sql.exec("CREATE TABLE IF NOT EXISTS elements (id TEXT PRIMARY KEY, json TEXT NOT NULL)");
       sql.exec("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)");
+      sql.exec(
+        "CREATE TABLE IF NOT EXISTS tombstones (id TEXT PRIMARY KEY, deleted_at INTEGER NOT NULL)",
+      );
       for (const row of sql.exec<{ json: string }>("SELECT json FROM elements")) {
         const el = JSON.parse(row.json) as El;
         this.els.set(el.id, el);
       }
+      for (const row of sql.exec<{ id: string; deleted_at: number }>(
+        "SELECT id, deleted_at FROM tombstones",
+      ))
+        this.deletedAt.set(row.id, row.deleted_at);
+      // Tombstones written before this table existed start their TTL now.
+      const untracked = [...this.els.values()].filter(
+        (e) => e.isDeleted && !this.deletedAt.has(e.id),
+      );
+      if (untracked.length) this.trackTombstones(untracked);
       for (const row of sql.exec<{ k: string; v: string }>("SELECT k, v FROM meta")) {
         if (row.k === "deleted") this.deleted = row.v === "true";
         if (row.k === "id") this.diagramId = row.v;
@@ -75,17 +96,62 @@ export class DiagramRoom extends DurableObject<Env> {
   }
 
   private persist(changed: El[]) {
+    const now = Date.now();
+    const tombstoned = changed.filter((el) => el.isDeleted && !this.deletedAt.has(el.id));
+    const revived = changed.filter((el) => !el.isDeleted && this.deletedAt.has(el.id));
     this.ctx.storage.transactionSync(() => {
+      const sql = this.ctx.storage.sql;
       for (const el of changed) {
-        this.ctx.storage.sql.exec(
+        sql.exec(
           "INSERT OR REPLACE INTO elements (id, json) VALUES (?, ?)",
           el.id,
           JSON.stringify(el),
         );
       }
+      for (const el of tombstoned)
+        sql.exec("INSERT OR REPLACE INTO tombstones (id, deleted_at) VALUES (?, ?)", el.id, now);
+      for (const el of revived) sql.exec("DELETE FROM tombstones WHERE id = ?", el.id);
     });
     // Publish in memory only after every write succeeds.
     for (const el of changed) this.els.set(el.id, el);
+    for (const el of tombstoned) this.deletedAt.set(el.id, now);
+    for (const el of revived) this.deletedAt.delete(el.id);
+  }
+
+  private trackTombstones(els: El[], now = Date.now()) {
+    this.ctx.storage.transactionSync(() => {
+      for (const el of els)
+        this.ctx.storage.sql.exec(
+          "INSERT OR REPLACE INTO tombstones (id, deleted_at) VALUES (?, ?)",
+          el.id,
+          now,
+        );
+    });
+    for (const el of els) this.deletedAt.set(el.id, now);
+  }
+
+  /**
+   * Drop tombstones older than TOMBSTONE_TTL_MS. Only runs while no tab is connected: an
+   * open tab may still hold a purged tombstone, and a later restore that brings the element
+   * back at a lower version would then stay hidden in that tab.
+   */
+  private collectTombstones(now = Date.now()) {
+    if (this.ctx.getWebSockets().length) return 0;
+    const expired = [...this.deletedAt]
+      .filter(([, at]) => now - at >= TOMBSTONE_TTL_MS)
+      .map(([id]) => id);
+    if (!expired.length) return 0;
+    this.ctx.storage.transactionSync(() => {
+      for (const id of expired) {
+        this.ctx.storage.sql.exec("DELETE FROM elements WHERE id = ?", id);
+        this.ctx.storage.sql.exec("DELETE FROM tombstones WHERE id = ?", id);
+      }
+    });
+    for (const id of expired) {
+      this.els.delete(id);
+      this.deletedAt.delete(id);
+    }
+    return expired.length;
   }
 
   private broadcast(msg: ServerMessage, except?: WebSocket) {
@@ -150,6 +216,8 @@ export class DiagramRoom extends DurableObject<Env> {
     if (this.deleted) return new Response("Diagram deleted", { status: 410 });
     if (request.headers.get("Upgrade") !== "websocket")
       return new Response("expected websocket", { status: 426 });
+    // Before this tab joins, so its init never carries expired tombstones.
+    this.collectTombstones();
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
@@ -301,8 +369,9 @@ export class DiagramRoom extends DurableObject<Env> {
     return { diagram: this.name, ...graphView(scene, new Set(tab?.state.selection ?? [])) };
   }
 
+  /** Live elements in z-order. */
   async getRaw() {
-    return [...this.els.values()].filter((e) => !e.isDeleted);
+    return this.ordered().filter((e) => !e.isDeleted);
   }
 
   async getSelection() {
@@ -431,6 +500,17 @@ export class DiagramRoom extends DurableObject<Env> {
     scene.restoreTo(target);
     this.commit(scene, "system");
     return { restored: snapshotId, undoSnapshotId: safety.id };
+  }
+
+  /**
+   * Save this diagram as template `templateId`: its elements and the image files they use.
+   * Done here rather than in the caller so the elements never cross RPC: the stub's type for
+   * El recurses forever on its `[key: string]: any` (TS2589).
+   */
+  async saveAsTemplate(templateId: string) {
+    const elements = await this.getRaw();
+    await copyFiles(this.env, this.diagramId, templateId, elements);
+    await this.env.BUCKET.put(`templates/${templateId}.json`, JSON.stringify(elements));
   }
 
   /** Seed a brand-new diagram from elements (saved template) — no snapshot needed. */

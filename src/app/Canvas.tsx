@@ -6,16 +6,24 @@ import {
   exportToBlob,
   Footer,
   getCommonBounds,
+  isInvisiblySmallElement,
   LiveCollaborationTrigger,
   MainMenu,
+  newElementWith,
   Sidebar,
   reconcileElements,
   restoreElements,
   WelcomeScreen,
 } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
-import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
-import type { Collaborator, ExcalidrawImperativeAPI, SocketId } from "@excalidraw/excalidraw/types";
+import type { ExcalidrawElement, FileId } from "@excalidraw/excalidraw/element/types";
+import type {
+  BinaryFileData,
+  Collaborator,
+  DataURL,
+  ExcalidrawImperativeAPI,
+  SocketId,
+} from "@excalidraw/excalidraw/types";
 import useWebSocket from "partysocket/use-ws";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -89,6 +97,8 @@ export function Canvas({ id, k }: { id: string; k: string }) {
 
   const synced = useRef(new Map<string, number>()); // element id → last version exchanged with the room
   const pendingSend = useRef<number | null>(null);
+  const uploadedFiles = useRef(new Set<string>()); // file ids the room already has
+  const fetchingFiles = useRef(new Set<string>());
   const lastPresence = useRef("");
   const lastPointer = useRef(0);
   const offline = useRef(false);
@@ -243,7 +253,10 @@ export function Canvas({ id, k }: { id: string; k: string }) {
       } else if (msg.method === "mermaid") {
         const { source } = msg.params as MermaidParams;
         const { parseMermaidToExcalidraw } = await import("@excalidraw/mermaid-to-excalidraw");
-        const { elements } = await parseMermaidToExcalidraw(source);
+        const { elements, files } = await parseMermaidToExcalidraw(source);
+        // Diagram types Excalidraw can't draw natively come back as an image; keep its bytes
+        // here so this tab uploads them once the room adds the element.
+        if (files) apiRef.current?.addFiles(Object.values(files));
         const converted = convertToExcalidrawElements(elements, { regenerateIds: true });
         send({ type: "rpc_result", reqId: msg.reqId, ok: true, data: { elements: converted } });
       }
@@ -287,6 +300,7 @@ export function Canvas({ id, k }: { id: string; k: string }) {
           : remote;
         for (const e of msg.elements) synced.current.set(e.id, e.version);
         api.updateScene({ elements: merged, captureUpdate: CaptureUpdateAction.NEVER });
+        fetchFiles();
         // Fitting an empty board would zoom to Excalidraw's 3000% maximum.
         if (!local.length && msg.elements.some((e) => !e.isDeleted))
           api.scrollToContent(undefined, { fitToViewport: true, viewportZoomFactor: 0.8 });
@@ -298,14 +312,16 @@ export function Canvas({ id, k }: { id: string; k: string }) {
         document.title = `${msg.name} · System Design`;
         remember({ id, key: k, name: msg.name });
       } else if (msg.type === "update") {
+        // Like init: agent-built elements may lack fields Excalidraw fills in on restore.
         const merged = reconcileElements(
           api.getSceneElementsIncludingDeleted(),
-          msg.elements as any,
+          restoreElements(msg.elements as any, null) as any,
           api.getAppState(),
         );
         for (const e of msg.elements)
           synced.current.set(e.id, Math.max(e.version, synced.current.get(e.id) ?? 0));
         api.updateScene({ elements: merged, captureUpdate: CaptureUpdateAction.NEVER });
+        fetchFiles();
         if (msg.origin === "agent") {
           flash(
             `Agent updated ${msg.elements.length} element${msg.elements.length === 1 ? "" : "s"}`,
@@ -367,8 +383,11 @@ export function Canvas({ id, k }: { id: string; k: string }) {
     pendingSend.current = null;
     const a = apiRef.current;
     if (!a || ws.current?.readyState !== WebSocket.OPEN) return;
+    uploadFiles();
     const changed: El[] = [];
     for (const e of a.getSceneElementsIncludingDeleted()) {
+      // A click with a drawing tool leaves a zero-size element; send it once it has a size.
+      if (!e.isDeleted && isInvisiblySmallElement(e)) continue;
       if (e.version > (synced.current.get(e.id) ?? 0)) {
         changed.push(e as unknown as El);
         synced.current.set(e.id, e.version);
@@ -376,6 +395,106 @@ export function Canvas({ id, k }: { id: string; k: string }) {
     }
     if (changed.length) send({ type: "update", elements: changed });
   };
+
+  // ---------- image files ----------
+  // Elements only carry a fileId; the bytes go through R2 (/api/d/:id/files/:fileId).
+  // As in excalidraw.com, the tab that has the bytes uploads them and then marks the element
+  // "saved", which syncs like any edit and tells the other tabs the file is ready to fetch.
+
+  const fileUrl = (fileId: string) =>
+    `/api/d/${id}/files/${encodeURIComponent(fileId)}?k=${encodeURIComponent(k)}`;
+
+  const setImageStatus = (fileId: string, status: "saved" | "error") => {
+    const a = apiRef.current;
+    if (!a) return;
+    const els = a.getSceneElementsIncludingDeleted();
+    const stale = (e: ExcalidrawElement) =>
+      e.type === "image" && e.fileId === fileId && e.status !== status;
+    if (!els.some(stale)) return;
+    a.updateScene({
+      elements: els.map((e) => (stale(e) ? newElementWith(e as any, { status }) : e)),
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
+  };
+
+  const uploadFiles = () => {
+    const a = apiRef.current;
+    if (!a) return;
+    const have = a.getFiles();
+    for (const e of a.getSceneElementsIncludingDeleted()) {
+      if (e.type !== "image" || e.isDeleted || !e.fileId) continue;
+      const fileId = e.fileId;
+      const file = have[fileId];
+      if (!file || uploadedFiles.current.has(fileId)) continue;
+      uploadedFiles.current.add(fileId);
+      void (async () => {
+        try {
+          const body = await (await fetch(file.dataURL)).blob();
+          const res = await fetch(fileUrl(fileId), {
+            method: "PUT",
+            headers: { "Content-Type": file.mimeType },
+            body,
+          });
+          if (res.ok) return setImageStatus(fileId, "saved");
+          // The room refused the file (too large, not an image); retrying won't help.
+          if (res.status === 413 || res.status === 415) {
+            setImageStatus(fileId, "error");
+            flash(
+              res.status === 413
+                ? "Image is too large to share (4 MB max)"
+                : "Only images can be shared",
+            );
+            return;
+          }
+          uploadedFiles.current.delete(fileId);
+        } catch {
+          uploadedFiles.current.delete(fileId); // offline: the next flush retries
+        }
+      })();
+    }
+  };
+
+  const fetchFiles = () => {
+    const a = apiRef.current;
+    if (!a) return;
+    const have = a.getFiles();
+    const missing = new Set<string>();
+    for (const e of a.getSceneElementsIncludingDeleted())
+      if (e.type === "image" && !e.isDeleted && e.fileId && e.status === "saved" && !have[e.fileId])
+        missing.add(e.fileId);
+    for (const fileId of missing) {
+      if (fetchingFiles.current.has(fileId)) continue;
+      fetchingFiles.current.add(fileId);
+      void (async () => {
+        try {
+          const res = await fetch(fileUrl(fileId));
+          if (!res.ok) throw new Error(`file ${fileId}: ${res.status}`);
+          const blob = await res.blob();
+          const dataURL = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(blob);
+          });
+          uploadedFiles.current.add(fileId);
+          apiRef.current?.addFiles([
+            {
+              id: fileId as FileId,
+              dataURL: dataURL as DataURL,
+              mimeType: blob.type as BinaryFileData["mimeType"],
+              created: Date.now(),
+            },
+          ]);
+        } catch (e) {
+          console.warn(e);
+        } finally {
+          // A failed fetch is retried on the next update from the room.
+          fetchingFiles.current.delete(fileId);
+        }
+      })();
+    }
+  };
+
   const scheduleSend = () => {
     if (pendingSend.current === null) pendingSend.current = window.setTimeout(flush, 60);
   };

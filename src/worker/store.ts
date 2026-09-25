@@ -193,7 +193,9 @@ export async function createDiagram(env: Env, name: string, template?: string) {
     } else {
       const obj = await env.BUCKET.get(`templates/${template}.json`);
       if (!obj) throw new Error(`unknown template "${template}"`);
-      await stub.seed((await obj.json()) as El[]);
+      const elements = (await obj.json()) as El[];
+      await copyFiles(env, template, id, elements);
+      await stub.seed(elements);
     }
   }
   return { id, key, name };
@@ -206,9 +208,8 @@ export async function saveAsTemplate(
   description?: string,
 ) {
   await ensureSchema(env);
-  const elements = await room(env, sourceId).getRaw();
   const id = "tpl" + newId().replace(/[_-]/g, "x");
-  await env.BUCKET.put(`templates/${id}.json`, JSON.stringify(elements));
+  await room(env, sourceId).saveAsTemplate(id);
   const now = Date.now();
   // Templates are public starting points: the key hash is random and never handed out.
   await env.DB.prepare(
@@ -217,4 +218,53 @@ export async function saveAsTemplate(
     .bind(id, name, await sha256(newId()), description ?? null, now, now)
     .run();
   return { id, name };
+}
+
+// ---------- image files ----------
+// Excalidraw keeps image bytes out of elements: an image element holds a `fileId` and each
+// client needs the matching BinaryFileData. Files are content-addressed, so they never change.
+
+export const MAX_FILE_BYTES = 4 * 1024 * 1024;
+const fileKey = (diagramId: string, fileId: string) => `files/${diagramId}/${fileId}`;
+
+export async function putFile(env: Env, diagramId: string, fileId: string, request: Request) {
+  const type = request.headers.get("Content-Type") ?? "";
+  if (!type.startsWith("image/")) return Response.json({ error: "images only" }, { status: 415 });
+  if (Number(request.headers.get("Content-Length") ?? 0) > MAX_FILE_BYTES)
+    return Response.json({ error: "file too large" }, { status: 413 });
+  const key = fileKey(diagramId, fileId);
+  if (await env.BUCKET.head(key)) return new Response(null, { status: 204 });
+  const bytes = await request.arrayBuffer();
+  if (bytes.byteLength > MAX_FILE_BYTES)
+    return Response.json({ error: "file too large" }, { status: 413 });
+  await env.BUCKET.put(key, bytes, { httpMetadata: { contentType: type } });
+  return new Response(null, { status: 204 });
+}
+
+export async function getFile(env: Env, diagramId: string, fileId: string) {
+  const obj = await env.BUCKET.get(fileKey(diagramId, fileId));
+  if (!obj) return Response.json({ error: "not found" }, { status: 404 });
+  return new Response(obj.body, {
+    headers: {
+      "Content-Type": obj.httpMetadata?.contentType ?? "application/octet-stream",
+      "Cache-Control": "private, max-age=31536000, immutable",
+      // SVGs are served from our origin; never let one run as a document.
+      "Content-Security-Policy": "sandbox",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
+/** Copy the files that `elements` reference, e.g. when a template is saved or used. */
+export async function copyFiles(env: Env, from: string, to: string, elements: El[]) {
+  const ids = new Set(
+    elements.filter((e) => e.type === "image" && e.fileId).map((e) => e.fileId as string),
+  );
+  await Promise.all(
+    [...ids].map(async (fileId) => {
+      const obj = await env.BUCKET.get(fileKey(from, fileId));
+      if (obj)
+        await env.BUCKET.put(fileKey(to, fileId), obj.body, { httpMetadata: obj.httpMetadata });
+    }),
+  );
 }

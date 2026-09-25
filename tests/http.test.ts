@@ -286,6 +286,73 @@ describe("snapshots API", () => {
   });
 });
 
+describe("files API", () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  const put = (env: TestEnv, path: string, bytes: BodyInit, type = "image/png") =>
+    worker.fetch(
+      req(path, { method: "PUT", headers: { "Content-Type": type }, body: bytes }),
+      env.env,
+    );
+
+  it("stores an image in R2 and serves it back to key holders only", async () => {
+    const env = makeEnv();
+    const d = await create(env, "F");
+    expect((await put(env, `/api/d/${d.id}/files/abc123?k=${d.key}`, png)).status).toBe(204);
+    // Content-addressed: a second upload of the same id is a no-op.
+    expect((await put(env, `/api/d/${d.id}/files/abc123?k=${d.key}`, png)).status).toBe(204);
+
+    const res = await worker.fetch(req(`/api/d/${d.id}/files/abc123?k=${d.key}`), env.env);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("image/png");
+    expect(res.headers.get("Content-Security-Policy")).toBe("sandbox");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(png);
+
+    expect((await worker.fetch(req(`/api/d/${d.id}/files/abc123?k=wrong`), env.env)).status).toBe(
+      403,
+    );
+    expect((await worker.fetch(req(`/api/d/${d.id}/files/nope?k=${d.key}`), env.env)).status).toBe(
+      404,
+    );
+  });
+
+  it("rejects non-images and files over 4 MB", async () => {
+    const env = makeEnv();
+    const d = await create(env, "F");
+    const path = `/api/d/${d.id}/files/x?k=${d.key}`;
+    expect((await put(env, path, "<html>", "text/html")).status).toBe(415);
+    expect((await put(env, path, new Uint8Array(4 * 1024 * 1024 + 1))).status).toBe(413);
+    expect(env.bucket.objects.has(`files/${d.id}/x`)).toBe(false);
+  });
+
+  it("copies referenced images into templates and diagrams made from them", async () => {
+    const env = makeEnv();
+    const d = await create(env, "Source");
+    await env.rooms.get(d.id)!.seed([
+      {
+        id: "img",
+        type: "image",
+        fileId: "file1",
+        status: "saved",
+        x: 0,
+        y: 0,
+        width: 10,
+        height: 10,
+        version: 1,
+        versionNonce: 1,
+        isDeleted: false,
+      },
+    ]);
+    await put(env, `/api/d/${d.id}/files/file1?k=${d.key}`, png);
+    const tpl = (await body(
+      await post(env, `/api/d/${d.id}/template?k=${d.key}`, { name: "With image" }),
+    )) as { id: string };
+    const copy = await create(env, "Copy", tpl.id);
+    const res = await worker.fetch(req(`/api/d/${copy.id}/files/file1?k=${copy.key}`), env.env);
+    expect(res.status).toBe(200);
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(png);
+  });
+});
+
 describe("routing", () => {
   it("returns 404 for unknown routes and reaches the MCP handler", async () => {
     const env = makeEnv();

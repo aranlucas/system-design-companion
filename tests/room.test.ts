@@ -1,7 +1,7 @@
 // DiagramRoom on fake storage: ops layer, snapshots, merge rule, presence.
 import { describe, expect, it, vi } from "vitest";
 import { AGENT_STROKE, type El } from "../src/shared/protocol.ts";
-import { DiagramRoom } from "../src/worker/room.ts";
+import { DiagramRoom, TOMBSTONE_TTL_MS } from "../src/worker/room.ts";
 import type { Author, Op } from "../src/worker/scene.ts";
 import { makeEnv, makeRoom, makeRoomCtx, makeWs } from "./helpers/fakes.ts";
 
@@ -486,5 +486,94 @@ describe("room-level interview flow", () => {
     expect(g.edges).toHaveLength(2);
     expect(g.frames!.map((f) => f.name)).toEqual(["High-level design"]);
     expect((await room.listSnapshots()).some((s) => s.name === "checkpoint")).toBe(true);
+  });
+});
+
+describe("tombstone collection", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const collect = (room: DiagramRoom, now: number) =>
+    (room as unknown as { collectTombstones: (now: number) => number }).collectTombstones(now);
+
+  async function roomWithDelete() {
+    const { env } = makeEnv();
+    const ctx = makeRoomCtx();
+    const room = new DiagramRoom(ctx.ctx as unknown as DurableObjectState, env);
+    await room.init("d", "D");
+    const out = await room.applyPatch(
+      [
+        { op: "add_node", ref: "a", label: "Gone" },
+        { op: "add_node", ref: "b", label: "Kept" },
+      ],
+      "system" as Author,
+    );
+    const beforeDelete = await room.snapshot("before delete");
+    const deletedAt = Date.now();
+    await room.applyPatch([{ op: "remove", target: "Gone" }], "system" as Author);
+    const gone = [...ctx.sql.elements.values()]
+      .map((json) => JSON.parse(json) as El)
+      .filter((e) => e.isDeleted)
+      .map((e) => e.id);
+    return { room, ctx, deletedAt, gone, beforeDelete, keptId: out.results[1].id! };
+  }
+
+  it("records when each element was deleted", async () => {
+    const { ctx, gone } = await roomWithDelete();
+    expect(gone).not.toHaveLength(0);
+    expect([...ctx.sql.tombstones.keys()].sort()).toEqual([...gone].sort());
+  });
+
+  it("drops tombstones only once they are older than the TTL", async () => {
+    const { room, ctx, deletedAt, gone, keptId } = await roomWithDelete();
+    expect(collect(room, deletedAt + DAY)).toBe(0);
+    expect(collect(room, deletedAt + TOMBSTONE_TTL_MS + 1000)).toBe(gone.length);
+    for (const id of gone) expect(ctx.sql.elements.has(id)).toBe(false);
+    expect(ctx.sql.tombstones.size).toBe(0);
+    expect(ctx.sql.elements.has(keptId)).toBe(true);
+    expect(((await graphOf(room)).nodes ?? []).map((n) => n.label)).toEqual(["Kept"]);
+  });
+
+  it("keeps tombstones while a tab is connected", async () => {
+    const { room, ctx, deletedAt, gone } = await roomWithDelete();
+    ctx.addWs(makeWs());
+    expect(collect(room, deletedAt + TOMBSTONE_TTL_MS + 1000)).toBe(0);
+    for (const id of gone) expect(ctx.sql.elements.has(id)).toBe(true);
+  });
+
+  it("forgets the deletion when a restore brings the element back", async () => {
+    const { room, ctx, deletedAt, gone, beforeDelete } = await roomWithDelete();
+    await room.restore(beforeDelete.id);
+    expect(ctx.sql.tombstones.size).toBe(0);
+    expect(collect(room, deletedAt + TOMBSTONE_TTL_MS + 1000)).toBe(0);
+    for (const id of gone) expect(ctx.sql.elements.has(id)).toBe(true);
+    expect(((await graphOf(room)).nodes ?? []).map((n) => n.label).sort()).toEqual([
+      "Gone",
+      "Kept",
+    ]);
+  });
+
+  it("starts the TTL for tombstones stored before tracking existed, and reloads it", async () => {
+    const { env } = makeEnv();
+    const ctx = makeRoomCtx();
+    const old: El = {
+      id: "old",
+      type: "rectangle",
+      x: 0,
+      y: 0,
+      width: 10,
+      height: 10,
+      version: 3,
+      versionNonce: 1,
+      isDeleted: true,
+    };
+    ctx.sql.elements.set(old.id, JSON.stringify(old));
+    const loadedAt = Date.now();
+    const room = new DiagramRoom(ctx.ctx as unknown as DurableObjectState, env);
+    await room.init("d", "D");
+    expect(ctx.sql.tombstones.get("old")).toBeGreaterThanOrEqual(loadedAt);
+
+    const reloaded = new DiagramRoom(ctx.ctx as unknown as DurableObjectState, env);
+    expect(collect(reloaded, loadedAt + DAY)).toBe(0);
+    expect(collect(reloaded, Date.now() + TOMBSTONE_TTL_MS)).toBe(1);
+    expect(ctx.sql.elements.has("old")).toBe(false);
   });
 });

@@ -1,7 +1,7 @@
 # Improvements & research
 
 Companion to [design.md](design.md). Sources: the new `tests/` suite (`pnpm test`,
-99 tests), a review of `src/worker/*.ts`, and a survey of comparable projects (Sep 2026).
+143 tests), a review of `src/worker/*.ts`, and a survey of comparable projects (Sep 2026).
 
 ## 1. What the test suite covers
 
@@ -31,16 +31,6 @@ High impact:
 - **No snapshot retention or pagination.** `listSnapshots()` caps at 30 with no offset
   (`src/worker/room.ts:330`); R2/D1 grow forever. Cap auto-snapshots per diagram and add
   `DELETE /snapshots/:id`.
-- **Fixed: failed batches could change live memory before persistence succeeded.**
-  `Scene` now clones its input elements, and `persist()` wraps writes in
-  `transactionSync` before updating the room's map and broadcasting. Injected second-write
-  failures cover agent patches and human WebSocket updates, rollback, reload, and retry.
-  Correction to the original finding: Cloudflare already coalesces synchronous writes
-  into an atomic implicit transaction; the explicit transaction guarantees rollback when
-  its callback throws. See [Cloudflare storage semantics](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#transactionsync).
-  Tests use fake storage; workerd crash/output-gate behavior remains outside this suite.
-- **Tombstones are never collected.** `restoreTo()` only adds `isDeleted`
-  (`src/worker/scene.ts:1371`); elements table and `init` payloads grow unboundedly.
 - **`seed()` has no empty-check and `init()` is re-callable** (`src/worker/room.ts:351`,
   `src/worker/room.ts:97`). A retried `createDiagram` duplicates template elements.
   Guard both (`els.size > 0` / already-initialised).
@@ -57,9 +47,6 @@ High impact:
 
 Medium impact:
 
-- **`webSocketClose` peers count looks off by one** (`src/worker/room.ts:184`): it
-  broadcasts `getWebSockets().length - 1`, but the closed socket is already removed when
-  the handler runs. Verify against the runtime.
 - **`callTab` targets only the primary tab** (`src/worker/room.ts:199`) with a 20s timeout
   and unbounded `pending` map. Broadcast the RPC to all tabs (first answer wins) and cap
   pending RPCs.
@@ -69,9 +56,6 @@ Medium impact:
   instantiation excessively deep" appeared on two `tsc` runs, then vanished with no code
   change. If it recurs, annotate that handler's return type explicitly to break the
   `registerAppTool` + zod inference loop.
-- **Parallel workstream note:** `src/view/`, `src/worker/view.ts`, and the `@modelcontextprotocol/ext-apps`
-  integration in `src/worker/mcp.ts` are uncommitted work in progress. The suite does not
-  cover the view or `/mcp` handshake yet — see §3.
 
 ## 3. Coverage gaps (deliberate; need heavier harnesses)
 
