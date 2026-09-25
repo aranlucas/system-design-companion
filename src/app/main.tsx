@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client";
-import { Canvas } from "./Canvas.tsx";
-import { Home } from "./Home.tsx";
+import { Canvas } from "./canvas.tsx";
+import { Home } from "./home.tsx";
 import "./styles.css";
 
 const m = location.pathname.match(/^\/d\/([A-Za-z0-9_-]+)/);

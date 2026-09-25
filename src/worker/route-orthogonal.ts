@@ -225,7 +225,7 @@ function firstAtOrAbove(vs: number[], v: number) {
   return lo;
 }
 
-const uniq = (xs: number[]) => [...new Set(xs.map(Math.round))].sort((a, b) => a - b);
+const uniq = (xs: number[]) => [...new Set(xs.map(Math.round))].toSorted((a, b) => a - b);
 
 /** Remove points that don't turn, so every point is an end or a bend. */
 function simplify(pts: Pt[]): Pt[] {
@@ -281,7 +281,7 @@ export function routeOrthogonal(
       p.y >= bounds.y &&
       p.y <= bounds.y + bounds.h);
 
-  const order = [...requests].sort((a, b) => {
+  const order = requests.toSorted((a, b) => {
     const d = (r: RouteRequest) =>
       Math.abs(r.from.x + r.from.w / 2 - r.to.x - r.to.w / 2) +
       Math.abs(r.from.y + r.from.h / 2 - r.to.y - r.to.h / 2);
@@ -291,7 +291,7 @@ export function routeOrthogonal(
   const grids = new Map<string, Uint8Array>();
   const state = new Map<string, Found>();
   const key = (b: Box, s: Side, along = 0) => `${b.x},${b.y},${b.w},${b.h}:${s}:${along}`;
-  const pair = (r: RouteRequest) => [key(r.from, "top"), key(r.to, "top")].sort().join("|");
+  const pair = (r: RouteRequest) => [key(r.from, "top"), key(r.to, "top")].toSorted().join("|");
   const context = (req: RouteRequest) => {
     const segs = [...fixedSegs];
     const sides = new Map<string, number>();
@@ -481,10 +481,10 @@ export function routeOrthogonal(
     }
     // Other routes, horizontal ones sorted by y and vertical ones by x, so a step only looks at
     // the few that lie in its own band.
-    const hs = routed.filter((t) => t.a.y === t.b.y).sort((u, v) => u.a.y - v.a.y);
+    const hs = routed.filter((t) => t.a.y === t.b.y).toSorted((u, v) => u.a.y - v.a.y);
     const vs = routed
       .filter((t) => t.a.x === t.b.x && t.a.y !== t.b.y)
-      .sort((u, v) => u.a.x - v.a.x);
+      .toSorted((u, v) => u.a.x - v.a.x);
     const hKeys = hs.map((t) => t.a.y);
     const vKeys = vs.map((t) => t.a.x);
     const segCost = (a: Pt, b: Pt) => {

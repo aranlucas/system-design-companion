@@ -38,7 +38,7 @@ async function load() {
   try {
     const res = await app.callServerTool({ name: "render_scene", arguments: { diagram } });
     if (res.isError) throw new Error(res.content.find((c) => c.type === "text")?.text ?? "error");
-    data = res.structuredContent as unknown as SceneData;
+    data = res.structuredContent as SceneData;
     const sig = data.elements.map((e) => `${e.id}:${e.version}`).join(",");
     if (sig !== signature) {
       signature = sig;

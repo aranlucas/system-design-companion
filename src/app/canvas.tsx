@@ -36,7 +36,7 @@ import {
   type ScreenshotParams,
   type ServerMessage,
 } from "../shared/protocol.ts";
-import { CopyRow } from "./CopyRow.tsx";
+import { CopyRow } from "./copy-row.tsx";
 import { componentLibrary } from "./library.ts";
 import { displayName, linkFor, remember, setDisplayName, setupCommands } from "./local.ts";
 
@@ -104,8 +104,11 @@ const libraryIcon = icon("M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z");
 const blobToBase64 = (b: Blob) =>
   new Promise<string>((resolve, reject) => {
     const r = new FileReader();
-    r.onload = () => resolve(String(r.result).split(",")[1]);
-    r.onerror = reject;
+    r.addEventListener("load", () => {
+      if (typeof r.result === "string") resolve(r.result.split(",")[1]);
+      else reject(new Error("Expected a data URL from FileReader"));
+    });
+    r.addEventListener("error", () => reject(r.error));
     r.readAsDataURL(b);
   });
 
@@ -424,7 +427,7 @@ export function Canvas({ id, k }: CanvasProps) {
       // A click with a drawing tool leaves a zero-size element; send it once it has a size.
       if (!e.isDeleted && isInvisiblySmallElement(e)) continue;
       if (e.version > (synced.current.get(e.id) ?? 0)) {
-        changed.push(e as unknown as El);
+        changed.push(e);
         synced.current.set(e.id, e.version);
       }
     }
@@ -507,8 +510,11 @@ export function Canvas({ id, k }: CanvasProps) {
           const blob = await res.blob();
           const dataURL = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = () => reject(reader.error);
+            reader.addEventListener("load", () => {
+              if (typeof reader.result === "string") resolve(reader.result);
+              else reject(new Error("Expected a data URL from FileReader"));
+            });
+            reader.addEventListener("error", () => reject(reader.error));
             reader.readAsDataURL(blob);
           });
           uploadedFiles.current.add(fileId);

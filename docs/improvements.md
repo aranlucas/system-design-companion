@@ -65,7 +65,7 @@ Medium impact:
   reachability is asserted. An MCP client-in-test (or `mcp inspector` in CI) would cover it.
 - Multi-tab concurrency and reconnect races; DO alarms/hibernation — needs
   `@cloudflare/vitest-pool-workers` (workerd under vitest) instead of the node fakes.
-- `src/app/Canvas.tsx` (reconciliation, presence spam, reconnect UX) has no tests at all.
+- `src/app/canvas.tsx` (reconciliation, presence spam, reconnect UX) has no tests at all.
 
 ## 4. Comparable projects and what to borrow
 

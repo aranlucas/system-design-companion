@@ -80,7 +80,7 @@ describe("add_node", () => {
 
   it("rejects unknown kinds and missing labels", () => {
     const s = fresh();
-    const res = s.apply([{ op: "add_node", kind: "nonsense" }, { op: "add_node" } as Op], "agent");
+    const res = s.apply([{ op: "add_node", kind: "nonsense" }, { op: "add_node" }], "agent");
     expect(res[0].ok).toBe(false);
     expect(res[0].error).toMatch("unknown kind");
     expect(res[1].ok).toBe(false);

@@ -90,7 +90,7 @@ describe("diagrams API", () => {
     for (const d of created) env.db.diagrams.get(d.id)!.created_at = 100;
     const expected = created
       .map((d) => d.id)
-      .sort()
+      .toSorted()
       .toReversed();
     const first = (await (
       await worker.fetch(req("/api/diagrams?limit=2"), env.env)
@@ -267,7 +267,9 @@ describe("snapshots API", () => {
 
     await room.applyPatch([{ op: "add_node", label: "B" }], "system" as Author);
     const list = await worker.fetch(req(`/api/d/${d.id}/snapshots?k=${d.key}`), env.env);
-    expect(((await list.json()) as unknown as unknown[]).length).toBeGreaterThanOrEqual(1);
+    expect(await list.json()).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: meta.id })]),
+    );
 
     const restore = await post(env, `/api/d/${d.id}/restore?k=${d.key}`, { snapshotId: meta.id });
     expect(restore.status).toBe(200);

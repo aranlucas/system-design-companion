@@ -222,7 +222,7 @@ describe("tidy", () => {
       frameId: null,
     } as El;
     return new Scene([
-      f as El,
+      f,
       ...mkNode("a", 100, 100, "Alpha", null),
       ...mkNode("b", 120, 120, "Beta", null),
       ...mkNode("c", 200, 150, "Gamma", null), // loose but inside F's area
@@ -363,8 +363,8 @@ describe("addForeign / restoreTo", () => {
       ],
       "agent",
     );
-    s.restoreTo(structuredClone(snap) as ReturnType<Scene["live"]>);
-    expect(labels(s).sort()).toEqual(["A", "B"]);
+    s.restoreTo(structuredClone(snap));
+    expect(labels(s).toSorted()).toEqual(["A", "B"]);
     expect(s.resolve("a").version).toBeGreaterThan(vBefore);
   });
 

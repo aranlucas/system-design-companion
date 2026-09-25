@@ -212,7 +212,7 @@ export class DiagramRoom extends DurableObject<Env> {
 
   /** All elements (incl. tombstones) in z-order; Excalidraw re-indexes anything out of order. */
   private ordered(): El[] {
-    return [...this.els.values()].sort((a, b) =>
+    return [...this.els.values()].toSorted((a, b) =>
       (a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0,
     );
   }

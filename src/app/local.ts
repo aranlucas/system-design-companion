@@ -25,7 +25,8 @@ function write(k: string, v: unknown) {
   }
 }
 
-export const library = () => read<LibraryEntry[]>(LIB, []).sort((a, b) => b.openedAt - a.openedAt);
+export const library = () =>
+  read<LibraryEntry[]>(LIB, []).toSorted((a, b) => b.openedAt - a.openedAt);
 
 export function remember(e: Omit<LibraryEntry, "openedAt">) {
   write(LIB, [{ ...e, openedAt: Date.now() }, ...library().filter((x) => x.id !== e.id)]);

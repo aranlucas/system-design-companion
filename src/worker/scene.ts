@@ -1,5 +1,5 @@
 // Scene engine: semantic ops ⇄ Excalidraw elements. Pure logic, no Workers APIs.
-import dagre from "@dagrejs/dagre";
+import { graphlib, layout as layoutGraph } from "@dagrejs/dagre";
 import { generateKeyBetween } from "fractional-indexing";
 import { iconElements } from "../shared/icons.ts";
 import { componentByKind } from "../shared/components.ts";
@@ -291,7 +291,7 @@ function borderPoint(b: Box, toward: Pt, gap: number, shape = "rectangle") {
 function clusters<T>(items: T[], key: (t: T) => number, tol: number): T[][] {
   const out: T[][] = [];
   let cur: T[] = [];
-  for (const t of [...items].sort((a, b) => key(a) - key(b))) {
+  for (const t of items.toSorted((a, b) => key(a) - key(b))) {
     if (cur.length && key(t) - key(cur[0]) > tol) {
       if (cur.length > 1) out.push(cur);
       cur = [];
@@ -328,7 +328,7 @@ export class Scene {
   live(): El[] {
     return [...this.els.values()]
       .filter((e) => !e.isDeleted)
-      .sort((a, b) =>
+      .toSorted((a, b) =>
         (a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0,
       );
   }
@@ -339,7 +339,7 @@ export class Scene {
     return [...this.changed]
       .map((id) => this.els.get(id)!)
       .filter(Boolean)
-      .sort((a, b) =>
+      .toSorted((a, b) =>
         (a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0,
       );
   }
@@ -361,7 +361,7 @@ export class Scene {
 
   /** Excalidraw invariant: a bound text must sit above its container in z-order. */
   private fixLabelOrder() {
-    for (const id of [...this.changed]) {
+    for (const id of this.changed) {
       const t = this.els.get(id);
       if (!t || t.type !== "text" || !t.containerId || t.isDeleted) continue;
       const c = this.els.get(t.containerId);
@@ -701,7 +701,7 @@ export class Scene {
       y: ny,
       width: nr - nx,
       height: nb - ny,
-      customData: { ...(frame.customData ?? {}), autoFit },
+      customData: { ...frame.customData, autoFit },
     });
     this.grownFrames.add(frame.id);
     return true;
@@ -720,7 +720,7 @@ export class Scene {
           c.y >= f.y &&
           c.y <= f.y + f.height,
       )
-      .sort((f1, f2) => f1.width * f1.height - f2.width * f2.height);
+      .toSorted((f1, f2) => f1.width * f1.height - f2.width * f2.height);
     return hits[0] ?? null;
   }
 
@@ -1262,8 +1262,8 @@ export class Scene {
     const a = this.resolve(o.from);
     const b = this.resolve(o.to);
     const between = this.arrowsBoundTo(a.id).filter((e) => {
-      const ends = [e.startBinding?.elementId, e.endBinding?.elementId];
-      return ends.includes(a.id) && ends.includes(b.id);
+      const ends = new Set([e.startBinding?.elementId, e.endBinding?.elementId]);
+      return ends.has(a.id) && ends.has(b.id);
     });
     if (!between.length) throw new Error(`no arrow between "${o.from}" and "${o.to}"`);
     between.forEach((e) => this.deleteEl(e));
@@ -1362,7 +1362,7 @@ export class Scene {
 
   private customTag(el: El, author: Author) {
     if (author === "agent" && el.customData?.author !== "agent") {
-      el.customData = { ...(el.customData ?? {}), editedBy: "agent" };
+      el.customData = { ...el.customData, editedBy: "agent" };
     }
   }
 
@@ -1740,7 +1740,7 @@ export class Scene {
             widths += run[i - 1][len];
             const target = Math.round(run[0][along] + widths + i * even);
             if (target === e[along]) continue;
-            const box = { ...boxOf(e), [along]: target } as Box;
+            const box = { ...boxOf(e), [along]: target };
             if (others(e).some((o) => overlaps(box, o, 23))) continue;
             this.moveNode(e, box);
             moved++;
@@ -1762,7 +1762,7 @@ export class Scene {
     if (!nodes.length) throw new Error("nothing to lay out");
     const ids = new Set(nodes.map((n) => n.id));
     const before = unionBox(nodes.map(boxOf))!;
-    const g = new dagre.graphlib.Graph();
+    const g = new graphlib.Graph();
     g.setGraph({
       rankdir: direction,
       nodesep: 60,
@@ -1772,9 +1772,9 @@ export class Scene {
     });
     g.setDefaultEdgeLabel(() => ({}));
     for (const n of nodes) g.setNode(n.id, { width: n.width, height: n.height });
-    for (const e of this.graph()._edgesRaw)
+    for (const e of this.graph().rawEdges)
       if (ids.has(e.fromId ?? "") && ids.has(e.toId ?? "")) g.setEdge(e.fromId!, e.toId!);
-    dagre.layout(g);
+    layoutGraph(g);
     for (const n of nodes) {
       const p = g.node(n.id);
       this.moveNode(n, {
@@ -1792,7 +1792,7 @@ export class Scene {
   addForeign(elements: El[], author: Author) {
     const live = elements
       .filter((e) => !e.isDeleted)
-      .sort((a, b) =>
+      .toSorted((a, b) =>
         (a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0,
       );
     const u = unionBox(live.map(boxOf));
@@ -1808,7 +1808,7 @@ export class Scene {
         version: 1,
         versionNonce: rnd(),
         updated: Date.now(),
-        customData: { ...(e.customData ?? {}), author },
+        customData: { ...e.customData, author },
       };
       if (author === "agent" && el.type !== "text" && el.strokeColor !== "transparent")
         el.strokeColor = AGENT_STROKE;
@@ -1968,18 +1968,18 @@ export class Scene {
           };
         }),
       sketches,
-      _edgesRaw: edges,
+      rawEdges: edges,
     };
   }
 }
 
 /** What the agent reads: `graph()` without the internal edge list, empty sections left out. */
-export type GraphView = Partial<Omit<ReturnType<Scene["graph"]>, "_edgesRaw">>;
+export type GraphView = Partial<Omit<ReturnType<Scene["graph"]>, "rawEdges">>;
 
 /** Compact graph for the agent (drops the internal raw edge list). */
 export function graphView(scene: Scene, selection?: Set<string>): GraphView {
-  const { _edgesRaw, ...g } = scene.graph(selection);
+  const { rawEdges: _rawEdges, ...g } = scene.graph(selection);
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(g)) if (v.length) out[k] = v;
-  return out as GraphView;
+  return out;
 }
