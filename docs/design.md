@@ -240,10 +240,18 @@ flowchart TD
     end
     F --> G["Fit frames<br/>(shrink back to the chosen size,<br/>kept in customData.autoFit)"]
     G --> H["Pull overlapping frames apart"]
-    H --> I["Route connections inside their frame<br/>(repeat until no arrow changes)"]
+    H --> I["Route every connection as a right-angle elbow arrow<br/>around nodes, captions and notes, then reroute<br/>each against the rest until stable; labels last"]
 ```
 
 - It never changes connections, labels, colours or relative order.
+- Connections are routed by `src/worker/route-orthogonal.ts`: A* over a sparse grid of obstacle
+  edges and the channel centres between them, costing length, bends (40), crossing another route
+  (240) and running along one (4/px). Ports are side midpoints plus points ±24px along the side
+  and one lined up with the other shape, so parallel arrows can run side by side. Shortest routes
+  go first, then each is ripped up and rerouted against the others (up to 3 rounds). Each label
+  goes on the clearest stretch of its route, pinned with Excalidraw's `labelPosition`. Arrows are
+  written as Excalidraw elbow arrows, bound by fixed point to the icon node (not its artwork or
+  caption); an arrow whose ends still sit on their fixed points is left alone.
 - Overlap removal and alignment are one weighted least-squares problem
   (`src/worker/solve-layout.ts`), solved with VPSC (Dwyer, Marriott & Stuckey, the solver
   behind WebCola): an x pass for pairs that are cheaper to separate sideways, then a y pass.

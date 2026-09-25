@@ -130,6 +130,29 @@ describe("DiagramRoom ops layer", () => {
     expect(await room.listSnapshots()).toHaveLength(snaps.length);
   });
 
+  it("tidy keeps an edit that lands while its snapshot is written", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    await room.seed([rect("a", 0, 0), rect("b", 20, 10)]);
+    // Someone recolours "b", which tidy is about to move, while tidy writes its snapshot.
+    const snapshot = room.snapshot.bind(room);
+    vi.spyOn(room, "snapshot").mockImplementationOnce(async (...args) => {
+      const meta = await snapshot(...args);
+      const b = (await room.getRaw()).find((e) => e.id === "b")!;
+      await (room as unknown as SocketHandlers).webSocketMessage(
+        null,
+        JSON.stringify({
+          type: "update",
+          elements: [{ ...b, version: b.version + 1, strokeColor: "#e03131" }],
+        }),
+      );
+      return meta;
+    });
+    const tidy = await room.tidy();
+    expect(tidy.separated).toBeGreaterThan(0);
+    expect((await room.getRaw()).find((e) => e.id === "b")!.strokeColor).toBe("#e03131");
+  });
+
   it("tidy can be scoped to a list of frames, with null for the top level", async () => {
     const { env } = makeEnv();
     const room = await makeRoom(env);

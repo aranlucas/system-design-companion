@@ -56,6 +56,8 @@ const collaborator = (tab: TabState): ServerMessage => ({
 /** One diagram: live scene, tab sync, and the ops layer MCP (and later an in-room agent) calls. */
 export class DiagramRoom extends DurableObject<Env> {
   private els = new Map<string, El>();
+  /** Bumped on every write, so a long operation can tell whether edits landed meanwhile. */
+  private edits = 0;
   /** Tombstoned element id → when it was deleted. */
   private deletedAt = new Map<string, number>();
   private diagramId = "";
@@ -117,6 +119,7 @@ export class DiagramRoom extends DurableObject<Env> {
       for (const el of revived) sql.exec("DELETE FROM tombstones WHERE id = ?", el.id);
     });
     // Publish in memory only after every write succeeds.
+    this.edits++;
     for (const el of changed) this.els.set(el.id, el);
     for (const el of tombstoned) this.deletedAt.set(el.id, now);
     for (const el of revived) this.deletedAt.delete(el.id);
@@ -418,12 +421,13 @@ export class DiagramRoom extends DurableObject<Env> {
       const scope = list && new Set(list.map((f) => (f === null ? null : scene.resolve(f).id)));
       return { scene, stats: scene.tidy(scope) };
     };
-    const dry = run();
-    if (!dry.scene.changedElements().length)
-      return { snapshotId: undefined, changed: 0, ...dry.stats };
+    const edits = this.edits;
+    const first = run();
+    if (!first.scene.changedElements().length)
+      return { snapshotId: undefined, changed: 0, ...first.stats };
     const snap = await this.snapshot("before tidy", "auto");
-    // Edits can land while the snapshot is written, so tidy the current state, not the dry run.
-    const { scene, stats } = run();
+    // Edits can land while the snapshot is written; only then tidy again from the current state.
+    const { scene, stats } = this.edits === edits ? first : run();
     const changed = this.commit(scene, origin);
     return { snapshotId: snap.id, changed, ...stats };
   }
