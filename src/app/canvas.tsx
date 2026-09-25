@@ -26,7 +26,7 @@ import type {
   SocketId,
 } from "@excalidraw/excalidraw/types";
 import useWebSocket from "partysocket/use-ws";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   AGENT_STROKE,
   type ClientMessage,
@@ -117,6 +117,9 @@ export function Canvas({ id, k }: CanvasProps) {
   const [name, setName] = useState("…");
   const [peers, setPeers] = useState(1);
   const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    if (loaded) document.title = `${name} · System Design`;
+  }, [loaded, name]);
   // The heart has no Excalidraw equivalent; the plain "point" gesture is drawn as the
   // agent's collaborator cursor instead.
   const [heart, setHeart] = useState<Heart | null>(null);
@@ -138,8 +141,16 @@ export function Canvas({ id, k }: CanvasProps) {
   const wsUrl = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws/${id}?k=${encodeURIComponent(k)}`;
   const collaborators = useRef(new Map<SocketId, Collaborator>());
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
-  apiRef.current = api;
-  (window as any).excalidrawAPI = api; // handy for debugging from the console
+  const ws = useRef<ReturnType<typeof useWebSocket> | null>(null);
+  // Publish committed handles before the socket's effects can deliver events.
+  useLayoutEffect(() => {
+    apiRef.current = api;
+    (window as any).excalidrawAPI = api; // handy for debugging from the console
+    return () => {
+      apiRef.current = null;
+      (window as any).excalidrawAPI = null;
+    };
+  }, [api]);
 
   const flash = (message: string) => apiRef.current?.setToast({ message, duration: 2500 });
   // Share and Versions are tabs in Excalidraw's default sidebar, next to the library.
@@ -330,7 +341,6 @@ export function Canvas({ id, k }: CanvasProps) {
       const msg = JSON.parse(ev.data) as ServerMessage;
       if (msg.type === "init") {
         setName(msg.name);
-        document.title = `${msg.name} · System Design`;
         remember({ id, key: k, name: msg.name });
         const remote = restoreElements(msg.elements as any, null);
         const local = api.getSceneElementsIncludingDeleted();
@@ -353,7 +363,6 @@ export function Canvas({ id, k }: CanvasProps) {
         scheduleSend();
       } else if (msg.type === "rename") {
         setName(msg.name);
-        document.title = `${msg.name} · System Design`;
         remember({ id, key: k, name: msg.name });
       } else if (msg.type === "update") {
         // Like init: agent-built elements may lack fields Excalidraw fills in on restore.
@@ -418,8 +427,12 @@ export function Canvas({ id, k }: CanvasProps) {
       }
     },
   });
-  const ws = useRef(socket);
-  ws.current = socket;
+  useLayoutEffect(() => {
+    ws.current = socket;
+    return () => {
+      ws.current = null;
+    };
+  }, [socket]);
 
   // ---------- local changes → room ----------
 
@@ -742,7 +755,6 @@ export function Canvas({ id, k }: CanvasProps) {
             diagramKey={k}
             onRenamed={(newName) => {
               setName(newName);
-              document.title = `${newName} · System Design`;
               remember({ id, key: k, name: newName });
               api?.toggleSidebar({ name: "rename", force: false });
               flash("Diagram renamed");
