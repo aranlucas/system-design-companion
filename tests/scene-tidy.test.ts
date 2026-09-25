@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { El, Point } from "../src/shared/protocol.ts";
 import { Scene, graphView, type Op } from "../src/worker/scene.ts";
 import { BUILTIN_TEMPLATES } from "../src/worker/templates.ts";
+import { DISPATCH_ARCHITECTURE } from "./fixtures/dispatch-architecture.ts";
 import { layoutReport } from "./helpers/layout-report.ts";
 
 /** Where a test drags a node; y defaults to where it is. */
@@ -221,6 +222,30 @@ describe("tidy: overlap removal", () => {
   });
 });
 
+describe("tidy: a real architecture frame", () => {
+  // "Dispatch architecture" from a practice diagram: before orthogonal routing, its arrows
+  // crossed each other, cut through captions and ran at angles, and two labels collided.
+  const fixture = () => new Scene(DISPATCH_ARCHITECTURE);
+
+  it("routes every connection at right angles, clear of captions, with readable labels", () => {
+    const s = fixture();
+    const before = layoutReport(s);
+    expect(before).toMatchObject({
+      arrowCrossings: 6,
+      throughText: 4,
+      diagonal: 24,
+      labelClashes: 2,
+    });
+    s.tidy();
+    const after = layoutReport(s);
+    expect(after).toMatchObject({ throughText: 0, diagonal: 0, crossings: 0 });
+    expect(after.arrowCrossings).toBeLessThanOrEqual(3);
+    // ETA worker and Progress log sit too close for both of their labels to fit side by side.
+    expect(after.labelClashes).toBeLessThanOrEqual(1);
+    expect(idempotent(s)).toBe(0);
+  });
+});
+
 describe("tidy: no regressions", () => {
   // A seeded messy diagram: four frames of jittered nodes with random links, bent routes and
   // frames that have to move. It reproduced a second pass rerouting bent arrows.
@@ -278,6 +303,10 @@ describe("tidy: no regressions", () => {
     for (const k of [
       "brokenArrows",
       "crossings",
+      "arrowCrossings",
+      "throughText",
+      "diagonal",
+      "labelClashes",
       "blockOverlaps",
       "frameOverlaps",
       "outsideFrame",
