@@ -1,5 +1,6 @@
 import {
   CaptureUpdateAction,
+  CommandPalette,
   convertToExcalidrawElements,
   DefaultSidebar,
   Excalidraw,
@@ -166,7 +167,7 @@ export function Canvas({ id, k }: { id: string; k: string }) {
           .filter((e) => !ids.has(e.id) && e.groupIds.some((groupId) => groups.has(groupId))),
       ];
       if (mode === "focus")
-        a.scrollToContent(elements, { fitToContent: true, animate: false, maxZoom: 1 });
+        a.setViewport({ target: elements, fit: "scale-down", animation: false });
       // Wait for the viewport change to be applied before positioning the temporary pointer.
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const state = a.getAppState();
@@ -303,7 +304,12 @@ export function Canvas({ id, k }: { id: string; k: string }) {
         fetchFiles();
         // Fitting an empty board would zoom to Excalidraw's 3000% maximum.
         if (!local.length && msg.elements.some((e) => !e.isDeleted))
-          api.scrollToContent(undefined, { fitToViewport: true, viewportZoomFactor: 0.8 });
+          api.setViewport({
+            target: api.getSceneElements(),
+            fit: "contain",
+            animation: false,
+            offsets: { ui: { padding: 48 } },
+          });
         setLoaded(true);
         // Push anything drawn while offline.
         scheduleSend();
@@ -563,7 +569,7 @@ export function Canvas({ id, k }: { id: string; k: string }) {
         </output>
       )}
       <Excalidraw
-        excalidrawAPI={setApi}
+        onExcalidrawAPI={setApi}
         initialData={{ libraryItems: componentLibrary() }}
         name={name}
         isCollaborating={peers > 1}
@@ -605,9 +611,42 @@ export function Canvas({ id, k }: { id: string; k: string }) {
           <MainMenu.DefaultItems.SearchMenu />
           <MainMenu.DefaultItems.Help />
           <MainMenu.Separator />
-          <MainMenu.DefaultItems.ToggleTheme />
+          <MainMenu.DefaultItems.ToggleTheme allowSystemTheme={false} />
           <MainMenu.DefaultItems.ChangeCanvasBackground />
         </MainMenu>
+        {/* Excalidraw doesn't mount the palette itself; the menu item and Cmd+/ only open it. */}
+        <CommandPalette
+          customCommandPaletteItems={[
+            { label: "Rename diagram", category: "App", perform: openRename },
+            {
+              label: "Tidy layout",
+              category: "App",
+              keywords: ["overlap", "align"],
+              perform: tidy,
+            },
+            {
+              label: "Versions",
+              category: "App",
+              icon: historyIcon,
+              keywords: ["history", "restore", "undo"],
+              perform: () => open("versions"),
+            },
+            {
+              label: "Share & connect agent",
+              category: "App",
+              icon: shareIcon,
+              keywords: ["link", "mcp", "invite"],
+              perform: () => open("share"),
+            },
+            {
+              label: "Component library",
+              category: "Library",
+              icon: libraryIcon,
+              perform: () => open("library"),
+            },
+            { label: "All diagrams", category: "Links", perform: () => location.assign("/") },
+          ]}
+        />
         {/* Mounted after the room's first sync so it never flashes over a non-empty board. */}
         {loaded && (
           <WelcomeScreen>

@@ -24,7 +24,7 @@ Workflow:
 1. Every diagram tool takes \`diagram\`: the canvas share link (…/d/<id>?k=<key>). If you don't have one, ask the user for it, or call create_diagram. Call join_session once to validate it and get an overview, then keep passing the same link.
 2. Read before you write: get_scene (semantic graph) and get_selection ("this"/"these" means the user's selection). Use get_screenshot when layout, freehand sketches, or visual clarity matter.
 3. Edit with apply_patch: batch related ops in one call. Address nodes by id, unique label, or a ref defined earlier in the same batch. Use placement hints instead of coordinates. Prefer add_node with a standard \`kind\` (sql_db, cache, queue, load_balancer, …) so the agent uses the same icons as the human library. An explicit shape overrides the icon. Include a short summary of the user’s requested change in apply_patch so version names reflect their feedback. Every batch also nudges all open subscribers to the changed components. Every batch is auto-snapshotted and tinted violet, so the user can undo with restore.
-4. Structure: put content inside frames (pass \`frame\`, or place relative to something already in the frame). Keep labels short; notes are word-wrapped automatically. Use tidy when things look cluttered; use layout only when asked to re-arrange.
+4. Structure: put content inside frames (pass \`frame\`, or place relative to something already in the frame). Keep labels short; notes are sticky notes that wrap and grow to fit. Use tidy when things look cluttered; use layout only when asked to re-arrange.
 5. Use focus_view to bring a frame or component into the current subscriber’s view, or mode=point for a temporary laser-style marker without panning. Neither changes the diagram.
 6. When asked for feedback, reply in chat. Only annotate the canvas (add_note) when asked. Keep labels short; put detail in notes.`;
 
@@ -112,7 +112,7 @@ const opSchema = z.discriminatedUnion("op", [
   z.object({
     op: z.literal("add_note"),
     ref: z.string().optional(),
-    text: z.string(),
+    text: z.string().describe("a sticky note's text; it wraps inside the note, which grows to fit"),
     place: placement.optional(),
     frame: target.optional(),
     size: z.enum(["s", "m", "l"]).optional(),
