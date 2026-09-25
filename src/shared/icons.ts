@@ -173,22 +173,23 @@ export function iconElements(c: Component, width: number): IconPart[] {
         ]),
       ];
     case "queue":
+      // A tube holding three messages.
       return [
         {
-          type: "line",
+          type: "rectangle",
           x: x - 6,
-          y: 36,
-          points: [
-            [0, 0],
-            [92, 0],
-          ],
+          y: 18,
+          width: 92,
+          height: 36,
+          backgroundColor: "transparent",
+          roundness: { type: 3 },
         },
-        ...[0, 28, 56].map((offset) => ({
+        ...[4, 30, 56].map((offset) => ({
           type: "rectangle" as const,
           x: x + offset,
-          y: 18,
-          width: 24,
-          height: 36,
+          y: 25,
+          width: 20,
+          height: 22,
         })),
       ];
     case "balance":
