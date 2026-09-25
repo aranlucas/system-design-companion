@@ -49,7 +49,7 @@ describe("wrapText / measureText", () => {
 });
 
 describe("tidy", () => {
-  it("replaces a wide geofence detour with a compact route around its caption", () => {
+  it("routes the geofence connection compactly around its caption, clear of its neighbour", () => {
     const s = build([
       {
         op: "add_node",
@@ -88,8 +88,20 @@ describe("tidy", () => {
       target.x + target.width + 40,
     );
     const source = s.resolve("Geofence processor");
-    // The local exit must not lie on the adjacent horizontal transition arrow.
-    expect(path[1][1]).toBeGreaterThan(source.y + source.height / 2 + 10);
+    // Right angles only, and never running on top of the neighbouring transition arrow.
+    for (let i = 1; i < path.length; i++)
+      expect(path[i][0] === path[i - 1][0] || path[i][1] === path[i - 1][1]).toBe(true);
+    const other = s.live().find((e) => e.type === "arrow" && e.strokeStyle !== "dashed")!;
+    const otherPath = other.points.map(([x, y]: number[]) => [other.x + x, other.y + y]);
+    const runsOn = (p: number[], q: number[], u: number[], v: number[]) =>
+      p[1] === q[1] &&
+      u[1] === v[1] &&
+      Math.abs(p[1] - u[1]) <= 4 &&
+      Math.min(Math.max(p[0], q[0]), Math.max(u[0], v[0])) >
+        Math.max(Math.min(p[0], q[0]), Math.min(u[0], v[0]));
+    for (let i = 1; i < path.length; i++)
+      for (let j = 1; j < otherPath.length; j++)
+        expect(runsOn(path[i - 1], path[i], otherPath[j - 1], otherPath[j])).toBe(false);
     const caption = s.boundText(source)!;
     // Check every segment, not just the control points, clears the caption.
     for (let i = 1; i < path.length; i++) {
