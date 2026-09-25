@@ -37,7 +37,6 @@ import {
   type ServerMessage,
 } from "../shared/protocol.ts";
 import { CopyRow } from "./copy-row.tsx";
-import { componentLibrary } from "./library.ts";
 import { displayName, linkFor, remember, setDisplayName, setupCommands } from "./local.ts";
 
 interface CanvasProps {
@@ -134,6 +133,7 @@ export function Canvas({ id, k }: CanvasProps) {
   const synced = useRef(new Map<string, number>()); // element id → last version exchanged with the room
   const pendingSend = useRef<number | null>(null);
   const uploadedFiles = useRef(new Set<string>()); // file ids the room already has
+  const libraryRequested = useRef(false);
   const fetchingFiles = useRef(new Set<string>());
   const lastPresence = useRef("");
   const lastPointer = useRef(0);
@@ -153,6 +153,21 @@ export function Canvas({ id, k }: CanvasProps) {
   }, [api]);
 
   const flash = (message: string) => apiRef.current?.setToast({ message, duration: 2500 });
+  const loadLibrary = async () => {
+    const currentApi = apiRef.current;
+    if (!currentApi || libraryRequested.current) return;
+    libraryRequested.current = true;
+    try {
+      await currentApi.updateLibrary({
+        libraryItems: import("./library.ts").then(({ componentLibrary }) => componentLibrary()),
+        merge: true,
+        defaultStatus: "published",
+      });
+    } catch {
+      libraryRequested.current = false;
+      flash("Could not load components. Close and reopen the library to retry.");
+    }
+  };
   // Share and Versions are tabs in Excalidraw's default sidebar, next to the library.
   const open = (tab: "share" | "versions" | "library") =>
     apiRef.current?.toggleSidebar({ name: "default", tab, force: true });
@@ -624,7 +639,6 @@ export function Canvas({ id, k }: CanvasProps) {
       )}
       <Excalidraw
         onExcalidrawAPI={setApi}
-        initialData={{ libraryItems: componentLibrary() }}
         name={name}
         isCollaborating={peers > 1}
         UIOptions={{
@@ -761,7 +775,11 @@ export function Canvas({ id, k }: CanvasProps) {
             }}
           />
         </Sidebar>
-        <DefaultSidebar>
+        <DefaultSidebar
+          onStateChange={(state) => {
+            if (state && (state.tab ?? "library") === "library") void loadLibrary();
+          }}
+        >
           <DefaultSidebar.TabTriggers>
             <Sidebar.TabTrigger tab="versions" title="Versions">
               {historyIcon}

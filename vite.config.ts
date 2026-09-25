@@ -4,5 +4,6 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [react(), cloudflare()],
-  define: { "process.env.IS_PREACT": JSON.stringify("false") },
+  // Vite leaves server builds unminified by default; the Worker is deployed code too.
+  build: { manifest: true, minify: true },
 });

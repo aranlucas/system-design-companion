@@ -45,10 +45,23 @@ npx wrangler r2 bucket create system-design-companion-preview
 ```sh
 pnpm check                              # typecheck, Oxlint, Oxfmt
 pnpm test                               # vitest: scene engine, tidy, rooms, HTTP routes
+pnpm check:bundle                       # production build + home-page and total Worker size budgets
 pnpm format                             # apply Oxfmt
 node scripts/scene-smoke.ts             # scene engine smoke test
 node scripts/tidy-check.ts <raw.json>   # layout problems before/after tidy on a real export
 ```
+
+The component library and its scene builder load only when the library sidebar opens.
+Excalidraw's `updateLibrary` API imports the items, shows its loading state, and preserves
+any existing library items.
+
+For a source-map breakdown, run `pnpm build:view`, then
+`pnpm exec vite build --sourcemap`. The optional
+[bundle-analyzer](https://github.com/lhorie/bundle-analyzer) can inspect
+`dist/client/assets`, `dist/system_design_companion`, and
+`dist/system_design_companion/assets` separately (it does not recurse into directories).
+Its estimates are uncompressed; `check:bundle` measures actual output bytes and gzip sizes.
+Run a normal `pnpm build` afterward to return to a build without source maps.
 
 See [improvements.md](improvements.md) for test coverage, findings, and related-project
 research.

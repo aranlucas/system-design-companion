@@ -1,122 +1,126 @@
-import { createMcpHandler } from "@modelcontextprotocol/server";
-import { buildServer } from "./mcp.ts";
+import { Hono, type Handler, type MiddlewareHandler } from "hono";
+import { HTTPException } from "hono/http-exception";
+import {
+  createBody,
+  paginationQuery,
+  renameBody,
+  restoreBody,
+  snapshotBody,
+  templateBody,
+  tidyBody,
+  validate,
+} from "./request-schemas.ts";
 import {
   createDiagram,
   deleteDiagram,
   getFile,
   listDiagrams,
-  parseDiagramCursor,
   putFile,
   listTemplates,
   room,
   saveAsTemplate,
   shareLink,
   verifyKey,
+  type DiagramRow,
 } from "./store.ts";
 
 export { DiagramRoom } from "./room.ts";
 
-/** Request bodies, as the routes below read them. */
-type CreateBody = { name?: string; template?: string };
-type RenameBody = { name?: unknown };
-type SnapshotBody = { name: string };
-type RestoreBody = { snapshotId: string };
-/** `null` in `frames` is the top level. */
-type TidyBody = { frames?: (string | null)[] };
-type TemplateBody = { name: string; description?: string };
+type DiagramVariables = { diagram: DiagramRow; room: ReturnType<typeof room> };
+type WorkerEnv = { Bindings: Env; Variables: DiagramVariables };
 
-const json = (v: unknown, status = 200) => Response.json(v, { status });
+const app = new Hono<WorkerEnv>();
 
-export default {
-  async fetch(request, env): Promise<Response> {
-    const url = new URL(request.url);
-    const path = url.pathname;
+app.onError((error, c) => {
+  if (error instanceof HTTPException) return c.json({ error: error.message }, error.status);
+  console.error(error);
+  return c.json({ error: error.message }, 500);
+});
+app.notFound((c) => c.json({ error: "not found" }, 404));
 
-    try {
-      if (path === "/mcp") {
-        const handler = createMcpHandler((ctx) => buildServer(env, ctx));
-        return await handler.fetch(request);
-      }
+app.all("/mcp", async (c) => {
+  // HTTP and Durable Object requests do not need to initialize the MCP SDK or its schemas.
+  const { handleMcp } = await import("./mcp.ts");
+  return handleMcp(c.req.raw, c.env);
+});
 
-      if (path === "/api/templates" && request.method === "GET")
-        return json(await listTemplates(env));
+app.get("/api/templates", async (c) => c.json(await listTemplates(c.env)));
 
-      if (path === "/api/diagrams" && request.method === "GET") {
-        const rawLimit = url.searchParams.get("limit") ?? "50";
-        if (!/^[1-9][0-9]{0,2}$/.test(rawLimit) || Number(rawLimit) > 100)
-          return json({ error: "limit must be an integer between 1 and 100" }, 400);
-        const rawCursor = url.searchParams.get("cursor");
-        const cursor = rawCursor === null ? undefined : parseDiagramCursor(rawCursor);
-        if (cursor === null) return json({ error: "invalid cursor" }, 400);
-        return Response.json(await listDiagrams(env, Number(rawLimit), cursor), {
-          headers: { "Cache-Control": "no-store" },
-        });
-      }
+app.get("/api/diagrams", validate("query", paginationQuery), async (c) => {
+  const { limit, cursor } = c.req.valid("query");
+  c.header("Cache-Control", "no-store");
+  return c.json(await listDiagrams(c.env, limit, cursor));
+});
 
-      if (path === "/api/diagrams" && request.method === "POST") {
-        const body = (await request.json()) as CreateBody;
-        const d = await createDiagram(
-          env,
-          body.name?.trim() || "Untitled",
-          body.template || undefined,
-        );
-        return json({ ...d, link: shareLink(url.origin, d.id, d.key) });
-      }
+app.post("/api/diagrams", validate("json", createBody), async (c) => {
+  const { name, template } = c.req.valid("json");
+  const d = await createDiagram(c.env, name, template || undefined);
+  return c.json({ ...d, link: shareLink(new URL(c.req.url).origin, d.id, d.key) });
+});
 
-      // Capability-protected routes: /api/d/:id/... and /ws/:id, all require ?k=<key>
-      const m = path.match(/^\/(?:api\/d|ws)\/([A-Za-z0-9_-]+)(\/.*)?$/);
-      if (m) {
-        const [, id, sub = ""] = m;
-        const row = await verifyKey(env, id, url.searchParams.get("k"));
-        if (!row) return json({ error: "invalid link" }, 403);
-        const stub = room(env, id);
-        if (sub === "" && request.method === "DELETE") {
-          if (row.is_template) return json({ error: "Templates cannot be deleted here" }, 400);
-          await deleteDiagram(env, id);
-          return new Response(null, { status: 204 });
-        }
+// Both route groups require a capability key, including requests to unknown subpaths.
+const authorizeDiagram: MiddlewareHandler<WorkerEnv> = async (c, next) => {
+  const id = c.req.param("id")!;
+  const diagram = await verifyKey(c.env, id, c.req.query("k"));
+  if (!diagram) return c.json({ error: "invalid link" }, 403);
+  c.set("diagram", diagram);
+  c.set("room", room(c.env, id));
+  await next();
+  return c.res;
+};
 
-        if (path.startsWith("/ws/")) return stub.fetch(request);
-        if (sub === "" && request.method === "GET") return json({ id: row.id, name: row.name });
-        const file = sub.match(/^\/files\/([A-Za-z0-9_-]{1,128})$/);
-        if (file && request.method === "PUT") return await putFile(env, id, file[1], request);
-        if (file && request.method === "GET") return await getFile(env, id, file[1]);
-        if (sub === "/rename" && request.method === "POST") {
-          const body = (await request.json()) as RenameBody;
-          const name = typeof body.name === "string" ? body.name.trim() : "";
-          if (!name || name.length > 120)
-            return json({ error: "Use a name between 1 and 120 characters." }, 400);
-          await env.DB.prepare("UPDATE diagrams SET name = ?, updated_at = ? WHERE id = ?")
-            .bind(name, Date.now(), id)
-            .run();
-          await stub.rename(name);
-          return json({ ok: true, name });
-        }
-        if (sub === "/snapshots" && request.method === "GET")
-          return json(await stub.listSnapshots());
-        if (sub === "/snapshots" && request.method === "POST") {
-          const { name } = (await request.json()) as SnapshotBody;
-          return json(await stub.snapshot(name || "manual", "named"));
-        }
-        if (sub === "/restore" && request.method === "POST") {
-          const { snapshotId } = (await request.json()) as RestoreBody;
-          return json(await stub.restore(snapshotId));
-        }
-        if (sub === "/tidy" && request.method === "POST") {
-          // Optional { frames: [id | null] }; null is the top level. Default: whole diagram.
-          const { frames } = (await request.json().catch(() => ({}))) as TidyBody;
-          return json(await stub.tidy(frames?.length ? frames : undefined, "system"));
-        }
-        if (sub === "/template" && request.method === "POST") {
-          const { name, description } = (await request.json()) as TemplateBody;
-          return json(await saveAsTemplate(env, id, name, description));
-        }
-      }
+const deleteAuthorizedDiagram: Handler<WorkerEnv> = async (c) => {
+  if (c.var.diagram.is_template) return c.json({ error: "Templates cannot be deleted here" }, 400);
+  await deleteDiagram(c.env, c.var.diagram.id);
+  return c.body(null, 204);
+};
 
-      return json({ error: "not found" }, 404);
-    } catch (e) {
-      console.error(e);
-      return json({ error: (e as Error).message }, 500);
-    }
-  },
-} satisfies ExportedHandler<Env>;
+const diagrams = new Hono<WorkerEnv>();
+diagrams.use("*", authorizeDiagram);
+diagrams.get("/", (c) => c.json({ id: c.var.diagram.id, name: c.var.diagram.name }));
+diagrams.delete("/", deleteAuthorizedDiagram);
+
+diagrams.put("/files/:file{[A-Za-z0-9_-]{1,128}}", (c) =>
+  putFile(c.env, c.var.diagram.id, c.req.param("file"), c.req.raw),
+);
+diagrams.get("/files/:file{[A-Za-z0-9_-]{1,128}}", (c) =>
+  getFile(c.env, c.var.diagram.id, c.req.param("file")),
+);
+
+diagrams.post("/rename", validate("json", renameBody), async (c) => {
+  const { name } = c.req.valid("json");
+  await c.env.DB.prepare("UPDATE diagrams SET name = ?, updated_at = ? WHERE id = ?")
+    .bind(name, Date.now(), c.var.diagram.id)
+    .run();
+  await c.var.room.rename(name);
+  return c.json({ ok: true, name });
+});
+
+diagrams.get("/snapshots", async (c) => c.json(await c.var.room.listSnapshots()));
+diagrams.post("/snapshots", validate("json", snapshotBody), async (c) => {
+  const { name } = c.req.valid("json");
+  return c.json(await c.var.room.snapshot(name, "named"));
+});
+diagrams.post("/restore", validate("json", restoreBody), async (c) => {
+  const { snapshotId } = c.req.valid("json");
+  return c.json(await c.var.room.restore(snapshotId));
+});
+diagrams.post("/tidy", validate("json", tidyBody), async (c) => {
+  // Optional { frames: [id | null] }; null is the top level. Default: whole diagram.
+  const { frames } = c.req.valid("json");
+  return c.json(await c.var.room.tidy(frames?.length ? frames : undefined, "system"));
+});
+diagrams.post("/template", validate("json", templateBody), async (c) => {
+  const { name, description } = c.req.valid("json");
+  return c.json(await saveAsTemplate(c.env, c.var.diagram.id, name, description));
+});
+app.route("/api/d/:id{[A-Za-z0-9_-]+}", diagrams);
+
+const sockets = new Hono<WorkerEnv>();
+sockets.use("*", authorizeDiagram);
+sockets.delete("/", deleteAuthorizedDiagram);
+// Preserve the Durable Object's upgrade response and WebSocket; Hono only routes the request.
+sockets.all("*", (c) => c.var.room.fetch(c.req.raw));
+app.route("/ws/:id{[A-Za-z0-9_-]+}", sockets);
+
+export default app;

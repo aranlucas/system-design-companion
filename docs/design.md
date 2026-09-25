@@ -44,6 +44,13 @@ flowchart LR
     MCP -. "view HTML" .-> Assets
 ```
 
+- **HTTP routing** (`src/worker/index.ts`) uses Hono with typed Cloudflare bindings.
+  Zod schemas in `src/worker/request-schemas.ts` validate query parameters and JSON bodies
+  before handlers read `c.req.valid()`. Invalid fields or malformed JSON return 400;
+  unsupported body media types return 415, using the API's `{ error: string }` format.
+  Diagram and WebSocket routes share capability-key middleware, which runs before body
+  validation. WebSocket requests pass directly to the Durable Object, while `/mcp` loads
+  its handler on demand.
 - **DiagramRoom** (`src/worker/room.ts`) is the core. It owns the live scene, merges
   concurrent edits, relays presence between tabs, and exposes an **ops layer**
   (`applyPatch`, `tidy`, `layout`, `snapshot`, `restore`, `focusView`, …). The HTTP
