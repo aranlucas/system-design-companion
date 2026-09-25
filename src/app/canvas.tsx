@@ -36,6 +36,7 @@ import {
   type ScreenshotParams,
   type ServerMessage,
 } from "../shared/protocol.ts";
+import { apiErrorMessage, type ApiFailure } from "./api-error.ts";
 import { CopyRow } from "./copy-row.tsx";
 import { displayName, linkFor, remember, setDisplayName, setupCommands } from "./local.ts";
 
@@ -47,7 +48,7 @@ interface CanvasProps {
 /** The heart gesture being drawn: where, and when it started (it fades out). */
 type Heart = { x: number; y: number; startedAt: number };
 type RpcMessage = Extract<ServerMessage, { type: "rpc" }>;
-type RenameResult = { name: string; error?: string };
+type RenameResult = { name: string } & ApiFailure;
 
 interface SharePanelProps {
   link: string;
@@ -601,6 +602,7 @@ export function Canvas({ id, k }: CanvasProps) {
     ];
     const r = await fetch(`/api/d/${id}/tidy?k=${encodeURIComponent(k)}`, {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ frames }),
     });
     const d = (await r.json()) as TidyResult;
@@ -610,7 +612,7 @@ export function Canvas({ id, k }: CanvasProps) {
         ? d.changed
           ? `${where} tidied: ${tidySummary(d)}. Undo in Versions.`
           : `${where} is already tidy`
-        : `Tidy failed: ${d.error}`,
+        : `Tidy failed: ${apiErrorMessage(d, "Could not tidy the diagram.")}`,
     );
   };
 
@@ -865,7 +867,8 @@ function RenamePanel({ name, id, diagramKey, onRenamed }: RenamePanelProps) {
             body: JSON.stringify({ name: draft.trim() }),
           });
           const result = (await response.json()) as RenameResult;
-          if (!response.ok) throw new Error(result.error || "Could not rename the diagram.");
+          if (!response.ok)
+            throw new Error(apiErrorMessage(result, "Could not rename the diagram."));
           onRenamed(result.name);
         } catch (err) {
           setError((err as Error).message);
@@ -891,9 +894,8 @@ function RenamePanel({ name, id, diagramKey, onRenamed }: RenamePanelProps) {
   );
 }
 
-type TidyResult = { changed?: number; error?: string } & Partial<
-  Record<keyof typeof TIDY_WORDS, number>
->;
+type TidyResult = { changed?: number } & ApiFailure &
+  Partial<Record<keyof typeof TIDY_WORDS, number>>;
 
 const TIDY_WORDS = {
   aligned: "aligned",

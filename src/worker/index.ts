@@ -1,3 +1,4 @@
+import { zValidator } from "@hono/zod-validator";
 import { Hono, type Handler, type MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import {
@@ -8,7 +9,6 @@ import {
   snapshotBody,
   templateBody,
   tidyBody,
-  validate,
 } from "./request-schemas.ts";
 import {
   createDiagram,
@@ -46,13 +46,13 @@ app.all("/mcp", async (c) => {
 
 app.get("/api/templates", async (c) => c.json(await listTemplates(c.env)));
 
-app.get("/api/diagrams", validate("query", paginationQuery), async (c) => {
+app.get("/api/diagrams", zValidator("query", paginationQuery), async (c) => {
   const { limit, cursor } = c.req.valid("query");
   c.header("Cache-Control", "no-store");
   return c.json(await listDiagrams(c.env, limit, cursor));
 });
 
-app.post("/api/diagrams", validate("json", createBody), async (c) => {
+app.post("/api/diagrams", zValidator("json", createBody), async (c) => {
   const { name, template } = c.req.valid("json");
   const d = await createDiagram(c.env, name, template || undefined);
   return c.json({ ...d, link: shareLink(new URL(c.req.url).origin, d.id, d.key) });
@@ -87,7 +87,7 @@ diagrams.get("/files/:file{[A-Za-z0-9_-]{1,128}}", (c) =>
   getFile(c.env, c.var.diagram.id, c.req.param("file")),
 );
 
-diagrams.post("/rename", validate("json", renameBody), async (c) => {
+diagrams.post("/rename", zValidator("json", renameBody), async (c) => {
   const { name } = c.req.valid("json");
   await c.env.DB.prepare("UPDATE diagrams SET name = ?, updated_at = ? WHERE id = ?")
     .bind(name, Date.now(), c.var.diagram.id)
@@ -97,20 +97,20 @@ diagrams.post("/rename", validate("json", renameBody), async (c) => {
 });
 
 diagrams.get("/snapshots", async (c) => c.json(await c.var.room.listSnapshots()));
-diagrams.post("/snapshots", validate("json", snapshotBody), async (c) => {
+diagrams.post("/snapshots", zValidator("json", snapshotBody), async (c) => {
   const { name } = c.req.valid("json");
   return c.json(await c.var.room.snapshot(name, "named"));
 });
-diagrams.post("/restore", validate("json", restoreBody), async (c) => {
+diagrams.post("/restore", zValidator("json", restoreBody), async (c) => {
   const { snapshotId } = c.req.valid("json");
   return c.json(await c.var.room.restore(snapshotId));
 });
-diagrams.post("/tidy", validate("json", tidyBody), async (c) => {
+diagrams.post("/tidy", zValidator("json", tidyBody), async (c) => {
   // Optional { frames: [id | null] }; null is the top level. Default: whole diagram.
   const { frames } = c.req.valid("json");
   return c.json(await c.var.room.tidy(frames?.length ? frames : undefined, "system"));
 });
-diagrams.post("/template", validate("json", templateBody), async (c) => {
+diagrams.post("/template", zValidator("json", templateBody), async (c) => {
   const { name, description } = c.req.valid("json");
   return c.json(await saveAsTemplate(c.env, c.var.diagram.id, name, description));
 });

@@ -46,8 +46,10 @@ flowchart LR
 
 - **HTTP routing** (`src/worker/index.ts`) uses Hono with typed Cloudflare bindings.
   Zod schemas in `src/worker/request-schemas.ts` validate query parameters and JSON bodies
-  before handlers read `c.req.valid()`. Invalid fields or malformed JSON return 400;
-  unsupported body media types return 415, using the API's `{ error: string }` format.
+  through route-level `zValidator()` middleware before handlers read `c.req.valid()`.
+  Invalid fields return the standard Zod validation response with status 400; malformed
+  JSON also returns 400. JSON callers set `Content-Type: application/json` so Hono parses
+  the body. The UI displays Zod issue messages alongside other API errors.
   Diagram and WebSocket routes share capability-key middleware, which runs before body
   validation. WebSocket requests pass directly to the Durable Object, while `/mcp` loads
   its handler on demand.

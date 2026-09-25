@@ -1,5 +1,6 @@
 // Worker HTTP routes with real DiagramRooms on fake D1/R2.
 import { describe, expect, it, vi } from "vitest";
+import { apiErrorMessage, type ApiFailure } from "../src/app/api-error.ts";
 import worker from "../src/worker/index.ts";
 import { createDiagram, parseLink } from "../src/worker/store.ts";
 import type { Author } from "../src/worker/scene.ts";
@@ -382,7 +383,12 @@ describe("request validation", () => {
     const path = route.startsWith("/api/") ? route : `/api/d/${d.id}${route}?k=${d.key}`;
     const response = await post(env, path, payload);
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: expect.any(String) });
+    const failure = (await response.json()) as ApiFailure;
+    expect(failure).toMatchObject({
+      success: false,
+      error: { name: "ZodError", message: expect.any(String) },
+    });
+    expect(apiErrorMessage(failure, "fallback")).not.toBe("fallback");
     expect(env.db.diagrams.size).toBe(1);
     expect(env.db.snapshots).toHaveLength(0);
   });
@@ -402,24 +408,6 @@ describe("request validation", () => {
     expect(await response.json()).toEqual({ error: "Malformed JSON in request body" });
     expect(env.db.snapshots).toHaveLength(0);
   });
-
-  it.each(["text/plain", "application/xml"])(
-    "rejects ignored JSON bodies sent as %s",
-    async (contentType) => {
-      const env = makeEnv();
-      const response = await worker.fetch(
-        req("/api/diagrams", {
-          method: "POST",
-          headers: { "Content-Type": contentType },
-          body: JSON.stringify({ name: 42 }),
-        }),
-        env.env,
-      );
-      expect(response.status).toBe(415);
-      expect(await response.json()).toEqual({ error: "Expected an application/json request body" });
-      expect(env.db.diagrams.size).toBe(0);
-    },
-  );
 
   it("keeps name defaults, trims names, and accepts JSON media types", async () => {
     const env = makeEnv();

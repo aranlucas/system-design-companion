@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { apiErrorMessage, type ApiFailure } from "./api-error.ts";
 import { CopyRow } from "./copy-row.tsx";
 import { linkFor, remember, setupCommands } from "./local.ts";
 
 /** What POST /api/diagrams answers. */
-type CreatedDiagram = { id: string; key: string; name: string; error?: string };
+type CreatedDiagram = { id: string; key: string; name: string } & ApiFailure;
 
 interface Diagram {
   id: string;
@@ -127,7 +128,7 @@ export function Home() {
         body: JSON.stringify({ name: name || "Untitled", template }),
       });
       const d = (await res.json()) as CreatedDiagram;
-      if (!res.ok) throw new Error(d.error);
+      if (!res.ok) throw new Error(apiErrorMessage(d, "Could not create the diagram."));
       remember({ id: d.id, key: d.key, name: d.name });
       location.href = linkFor(d.id, d.key);
     } catch (err) {
