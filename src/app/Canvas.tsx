@@ -605,7 +605,7 @@ export function Canvas({ id, k }: { id: string; k: string }) {
             <MainMenu.ItemLink href="/">All diagrams</MainMenu.ItemLink>
           </MainMenu.Group>
           <MainMenu.Separator />
-          <MainMenu.DefaultItems.CommandPalette />
+          <MainMenu.DefaultItems.CommandPalette className="highlighted" />
           <MainMenu.DefaultItems.SaveAsImage />
           <MainMenu.DefaultItems.Export />
           <MainMenu.DefaultItems.SearchMenu />
