@@ -1,13 +1,17 @@
 // Local oxlint rules for this repo (loaded via `jsPlugins` in .oxlintrc.json).
 
-type Node = { type: string; parent?: Node };
+type Node = { type: string; range: [number, number]; parent?: Node | null };
 type Context = { report: (d: { node: Node; message: string }) => void };
 
 const DECLARATIONS = new Set(["TSTypeAliasDeclaration", "TSInterfaceDeclaration"]);
 
 /** A declaration at module level: directly in the program, or exported from it. */
 const atModuleLevel = (decl: Node) => {
-  const up = decl.parent?.type === "ExportNamedDeclaration" ? decl.parent.parent : decl.parent;
+  const parent = decl.parent;
+  const up =
+    parent?.type === "ExportNamedDeclaration" || parent?.type === "ExportDefaultDeclaration"
+      ? parent.parent
+      : parent;
   return up?.type === "Program" || up?.type === "TSModuleBlock";
 };
 
@@ -19,7 +23,7 @@ const declarationOf = (node: Node) => {
 
 const noInlineTypes = {
   meta: {
-    type: "suggestion",
+    type: "suggestion" as const,
     docs: {
       description:
         "Declare object and tuple types as named module-level types instead of writing them inline",

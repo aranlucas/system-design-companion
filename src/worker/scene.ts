@@ -2038,10 +2038,10 @@ export class Scene {
   }
 }
 
-/** Compact graph for the agent (drops the internal raw edge list). */
 /** What the agent reads: `graph()` without the internal edge list, empty sections left out. */
 export type GraphView = Partial<Omit<ReturnType<Scene["graph"]>, "_edgesRaw">>;
 
+/** Compact graph for the agent (drops the internal raw edge list). */
 export function graphView(scene: Scene, selection?: Set<string>): GraphView {
   const { _edgesRaw, ...g } = scene.graph(selection);
   const out: Record<string, unknown> = {};
