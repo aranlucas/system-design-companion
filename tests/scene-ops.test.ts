@@ -300,6 +300,61 @@ describe("add_frame / add_note", () => {
   });
 });
 
+describe("text_color", () => {
+  const textOf = (s: Scene, id: string) =>
+    s.live().find((e) => e.type === "text" && (e.id === id || e.containerId === id));
+
+  it("colors node, arrow and note text by name or hex, and reports it", () => {
+    const s = fresh();
+    const [a, , arrow, note] = applyOk(s, [
+      { op: "add_node", ref: "a", label: "A", text_color: "red" },
+      { op: "add_node", ref: "b", label: "B" },
+      { op: "connect", from: "a", to: "b", label: "writes", text_color: "#123456" },
+      { op: "add_note", text: "Hot path", text_color: "blue" },
+    ]);
+    expect(textOf(s, a.id!)?.strokeColor).toBe("#e03131");
+    expect(textOf(s, arrow.id!)?.strokeColor).toBe("#123456");
+    expect(textOf(s, note.id!)?.strokeColor).toBe("#1971c2");
+    // Only the text changes, not the shape's outline.
+    expect(s.resolve("a").strokeColor).toBe(AGENT_STROKE);
+
+    const g = graph(s);
+    expect(g.nodes.find((n) => n.label === "A")?.text_color).toBe("red");
+    expect(g.nodes.find((n) => n.label === "B")).not.toHaveProperty("text_color");
+    expect(g.edges[0].text_color).toBe("#123456");
+    expect(g.notes[0]).toMatchObject({ text: "Hot path", text_color: "blue" });
+  });
+
+  it("recolors a component caption, a note and an arrow label with update", () => {
+    const s = fresh();
+    const [db, , , note] = applyOk(s, [
+      { op: "add_node", ref: "db", kind: "sql_db" },
+      { op: "add_node", ref: "api", label: "API" },
+      { op: "connect", from: "api", to: "db", label: "reads" },
+      { op: "add_note", ref: "n", text: "Note" },
+    ]);
+    applyOk(s, [
+      { op: "update", target: "db", text_color: "green" },
+      { op: "update", target: "n", text_color: "orange" },
+      { op: "update", target: db.id!, label: "Orders DB" },
+    ]);
+    const g = graph(s);
+    expect(g.nodes.find((n) => n.label === "Orders DB")?.text_color).toBe("green");
+    expect(textOf(s, note.id!)?.strokeColor).toBe("#e8590c");
+  });
+
+  it("fails when there is no text to color", () => {
+    const s = fresh();
+    applyOk(s, [
+      { op: "add_node", ref: "a", label: "A" },
+      { op: "add_node", ref: "b", label: "B" },
+    ]);
+    const [r] = s.apply([{ op: "connect", from: "a", to: "b", text_color: "red" }], "agent");
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch("text_color");
+  });
+});
+
 describe("target resolution", () => {
   it("resolves ids, refs and case-insensitive labels", () => {
     const s = fresh();

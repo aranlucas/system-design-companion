@@ -1,7 +1,7 @@
 # Improvements & research
 
 Companion to [design.md](design.md). Sources: the new `tests/` suite (`pnpm test`,
-143 tests), a review of `src/worker/*.ts`, and a survey of comparable projects (Sep 2026).
+149 tests), a review of `src/worker/*.ts`, and a survey of comparable projects (Sep 2026).
 
 ## 1. What the test suite covers
 

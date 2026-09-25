@@ -21,6 +21,27 @@ export const COLORS: Record<string, string> = {
 };
 const COLOR_NAMES = Object.fromEntries(Object.entries(COLORS).map(([k, v]) => [v, k]));
 
+/** Excalidraw's stroke palette: readable on white and on the fills above. */
+export const TEXT_COLORS: Record<string, string> = {
+  black: "#1e1e1e",
+  gray: "#868e96",
+  red: "#e03131",
+  pink: "#c2255c",
+  violet: "#6741d9",
+  blue: "#1971c2",
+  cyan: "#0c8599",
+  green: "#2f9e44",
+  yellow: "#f08c00",
+  orange: "#e8590c",
+};
+const TEXT_COLOR_NAMES = Object.fromEntries(Object.entries(TEXT_COLORS).map(([k, v]) => [v, k]));
+const textColor = (color: string) => TEXT_COLORS[color] ?? color;
+/** How graph() reports a text color: omitted when it is a default (black, or agent violet). */
+const reportTextColor = (text: El | undefined) =>
+  text && text.strokeColor !== TEXT_COLORS.black && text.strokeColor !== AGENT_STROKE
+    ? { text_color: TEXT_COLOR_NAMES[text.strokeColor] ?? text.strokeColor }
+    : {};
+
 export const SHAPES = ["rectangle", "ellipse", "diamond"] as const;
 export type Shape = (typeof SHAPES)[number];
 
@@ -42,6 +63,7 @@ export type Op =
       label?: string;
       shape?: Shape;
       color?: string;
+      text_color?: string;
       width?: number;
       height?: number;
       place?: Placement;
@@ -52,6 +74,7 @@ export type Op =
       from: string;
       to: string;
       label?: string;
+      text_color?: string;
       dashed?: boolean;
       bidirectional?: boolean;
     }
@@ -61,6 +84,7 @@ export type Op =
       target: string;
       label?: string;
       color?: string;
+      text_color?: string;
       shape?: Shape;
       dashed?: boolean;
       width?: number;
@@ -85,6 +109,7 @@ export type Op =
       place?: Placement;
       frame?: string;
       size?: "s" | "m" | "l";
+      text_color?: string;
     };
 
 export interface OpResult {
@@ -1084,6 +1109,13 @@ export class Scene {
     this.centerLabel(container);
   }
 
+  /** Color a note, or the label of a node or arrow. */
+  private setTextColor(el: El, color: string) {
+    const text = el.type === "text" ? el : this.boundText(el);
+    if (!text) throw new Error("text_color needs a label to color");
+    this.mutate(text, { strokeColor: textColor(color) });
+  }
+
   /** The invisible binding target covers only artwork, never its caption. */
   private fitIconBounds(node: El) {
     const bounds = unionBox(this.iconParts(node).map(boxOf));
@@ -1184,6 +1216,7 @@ export class Scene {
     }
     if (icon) this.fitIconBounds(node);
     this.setLabel(node, label, author);
+    if (o.text_color !== undefined) this.setTextColor(node, o.text_color);
     if (frame) this.fitFrame(frame);
     this.lastPlaced = node.id;
     this.setRef(o.ref, node.id);
@@ -1214,6 +1247,7 @@ export class Scene {
     this.addBound(b, { id: arrow.id, type: "arrow" });
     this.routeArrow(arrow);
     if (o.label) this.setLabel(arrow, o.label, author);
+    if (o.text_color !== undefined) this.setTextColor(arrow, o.text_color);
     return arrow;
   }
 
@@ -1245,6 +1279,7 @@ export class Scene {
         if (el.frameId) this.fitFrame(this.els.get(el.frameId)!);
       } else this.setLabel(el, o.label, author);
     }
+    if (o.text_color !== undefined) this.setTextColor(el, o.text_color);
     if (o.color !== undefined) {
       const color = COLORS[o.color] ?? o.color;
       if (el.customData?.icon) {
@@ -1360,7 +1395,12 @@ export class Scene {
     const m = measureText(text, fontSize);
     const box = this.place(o.place, m.width, m.height, frame);
     frame ??= this.frameAt(box);
-    const t = this.add(this.textEl(text, box, author, fontSize, { frameId: frame?.id ?? null }));
+    const t = this.add(
+      this.textEl(text, box, author, fontSize, {
+        frameId: frame?.id ?? null,
+        ...(o.text_color !== undefined ? { strokeColor: textColor(o.text_color) } : {}),
+      }),
+    );
     if (frame) this.fitFrame(frame);
     this.setRef(o.ref, t.id);
     return t;
@@ -1867,7 +1907,8 @@ export class Scene {
         inferred ||= !!to;
       }
       if (from && to && from.id !== to.id) {
-        const label = this.boundText(e)?.text;
+        const labelEl = this.boundText(e);
+        const label = labelEl?.text;
         edges.push({
           id: e.id,
           from: display(from),
@@ -1875,6 +1916,7 @@ export class Scene {
           fromId: from.id,
           toId: to.id,
           ...(label ? { label } : {}),
+          ...reportTextColor(labelEl),
           ...(e.strokeStyle !== "solid" ? { dashed: true as const } : {}),
           ...(e.startArrowhead && e.endArrowhead ? { both: true as const } : {}),
           ...(inferred ? { inferred: true as const } : {}),
@@ -1933,6 +1975,7 @@ export class Scene {
                 n.backgroundColor,
             }
           : {}),
+        ...reportTextColor(this.boundText(n)),
         ...(n.customData?.icon ? { icon: n.customData.icon } : {}),
         ...(n.customData?.kind ? { kind: n.customData.kind } : {}),
         ...(n.customData?.author === "agent" ? { by: "agent" } : {}),
@@ -1950,6 +1993,7 @@ export class Scene {
           x: Math.round(t.x),
           y: Math.round(t.y),
           ...(t.frameId ? { frame: frameName(t.frameId) } : {}),
+          ...reportTextColor(t),
           ...(t.customData?.author === "agent" ? { by: "agent" } : {}),
           ...(sel?.has(t.id) ? { selected: true } : {}),
         })),

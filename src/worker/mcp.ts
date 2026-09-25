@@ -45,6 +45,11 @@ const placement = z
 const color = z
   .string()
   .describe("fill: white gray red pink violet blue cyan green yellow orange, or a hex color");
+const textColor = z
+  .string()
+  .describe(
+    "color of the label or note text: black gray red pink violet blue cyan green yellow orange, or a hex color",
+  );
 
 const opSchema = z.discriminatedUnion("op", [
   z.object({
@@ -65,6 +70,7 @@ const opSchema = z.discriminatedUnion("op", [
       .optional()
       .describe("rectangle (default: services), ellipse (datastores/clients), diamond (decisions)"),
     color: color.optional(),
+    text_color: textColor.optional(),
     width: z.number().optional(),
     height: z.number().optional(),
     place: placement.optional(),
@@ -75,6 +81,7 @@ const opSchema = z.discriminatedUnion("op", [
     from: target,
     to: target,
     label: z.string().optional(),
+    text_color: textColor.optional(),
     dashed: z.boolean().optional().describe("async / optional / replication flows"),
     bidirectional: z.boolean().optional(),
   }),
@@ -84,6 +91,7 @@ const opSchema = z.discriminatedUnion("op", [
     target,
     label: z.string().optional().describe("new label (frame name / note text for those types)"),
     color: color.optional(),
+    text_color: textColor.optional(),
     shape: z.enum(SHAPES).optional(),
     dashed: z.boolean().optional(),
     width: z.number().optional(),
@@ -108,6 +116,7 @@ const opSchema = z.discriminatedUnion("op", [
     place: placement.optional(),
     frame: target.optional(),
     size: z.enum(["s", "m", "l"]).optional(),
+    text_color: textColor.optional(),
   }),
 ]);
 
