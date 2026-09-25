@@ -147,7 +147,9 @@ const diagramArg = z
 const text = (v: unknown) => ({
   content: [{ type: "text" as const, text: typeof v === "string" ? v : JSON.stringify(v) }],
 });
-const fail = (msg: string) => ({ content: [{ type: "text" as const, text: msg }], isError: true });
+const userMsg = (t: string) => ({
+  messages: [{ role: "user" as const, content: { type: "text" as const, text: t } }],
+});
 
 export function buildServer(env: Env, ctx: McpRequestContext) {
   const url = new URL(ctx.requestInfo?.url ?? "http://localhost/mcp");
@@ -184,19 +186,6 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
     return row;
   }
 
-  const guard =
-    <A>(fn: (a: A) => Promise<unknown>) =>
-    async (a: A) => {
-      try {
-        const out = await fn(a);
-        return out && typeof out === "object" && "content" in out
-          ? (out as ReturnType<typeof text>)
-          : text(out);
-      } catch (e) {
-        return fail((e as Error).message);
-      }
-    };
-
   // ---------- sessions ----------
 
   server.registerTool(
@@ -207,18 +196,18 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       inputSchema: z.object({ diagram: diagramArg }),
       annotations: { readOnlyHint: true },
     },
-    guard(async ({ diagram }: DiagramArgs) => {
+    async ({ diagram }: DiagramArgs) => {
       const row = await pick(diagram);
       const info = await room(env, row.id).info();
-      return {
+      return text({
         diagram: row.name,
         elements: info.elements,
         tabsOpen: info.tabs,
         note: info.tabs
           ? "The user has the canvas open."
           : "No canvas tab is open; screenshots and mermaid import need one.",
-      };
-    }),
+      });
+    },
   );
 
   server.registerTool(
@@ -231,15 +220,15 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
         template: z.string().optional().describe("template id from list_templates"),
       }),
     },
-    guard(async ({ name, template }: CreateDiagramArgs) => {
+    async ({ name, template }: CreateDiagramArgs) => {
       const d = await createDiagram(env, name, template);
       const link = shareLink(origin, d.id, d.key);
-      return {
+      return text({
         name: d.name,
         diagram: link,
         note: "Pass this link as `diagram` to other tools, and give it to the user to open.",
-      };
-    }),
+      });
+    },
   );
 
   // ---------- perception ----------
@@ -256,10 +245,10 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       inputSchema: z.object({ diagram: diagramArg, format: z.enum(["graph", "raw"]).optional() }),
       annotations: { readOnlyHint: true },
     },
-    guard(async ({ diagram, format }: GetSceneArgs) => {
+    async ({ diagram, format }: GetSceneArgs) => {
       const d = await pick(diagram);
-      return format === "raw" ? room(env, d.id).getRaw() : room(env, d.id).getGraph();
-    }),
+      return text(await (format === "raw" ? room(env, d.id).getRaw() : room(env, d.id).getGraph()));
+    },
   );
 
   registerAppTool(
@@ -271,14 +260,14 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       inputSchema: z.object({ diagram: diagramArg }),
       annotations: { readOnlyHint: true },
     },
-    guard(async ({ diagram }: DiagramArgs) => {
+    async ({ diagram }: DiagramArgs) => {
       const d = await pick(diagram);
       const elements = await room(env, d.id).getRaw();
       return {
         content: [{ type: "text" as const, text: `${elements.length} elements` }],
         structuredContent: { name: d.name, url: diagram, elements },
       };
-    }),
+    },
   );
 
   registerAppResource(
@@ -306,7 +295,8 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       inputSchema: z.object({ diagram: diagramArg }),
       annotations: { readOnlyHint: true },
     },
-    guard(async ({ diagram }: DiagramArgs) => room(env, (await pick(diagram)).id).getSelection()),
+    async ({ diagram }: DiagramArgs) =>
+      text(await room(env, (await pick(diagram)).id).getSelection()),
   );
 
   server.registerTool(
@@ -325,10 +315,10 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       }),
       annotations: { readOnlyHint: true },
     },
-    guard(async ({ diagram, element_ids }: ScreenshotArgs) => {
+    async ({ diagram, element_ids }: ScreenshotArgs) => {
       const shot = await room(env, (await pick(diagram)).id).screenshot(element_ids);
       return { content: [{ type: "image" as const, data: shot.base64, mimeType: shot.mimeType }] };
-    }),
+    },
   );
 
   // ---------- editing ----------
@@ -352,9 +342,8 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
           ),
       }),
     },
-    guard(async ({ diagram, ops, summary }: PatchArgs) =>
-      room(env, (await pick(diagram)).id).applyPatch(ops, "agent", summary),
-    ),
+    async ({ diagram, ops, summary }: PatchArgs) =>
+      text(await room(env, (await pick(diagram)).id).applyPatch(ops, "agent", summary)),
   );
 
   server.registerTool(
@@ -367,7 +356,8 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
         frame: z.string().optional().describe("only tidy this frame; default: whole diagram"),
       }),
     },
-    guard(async ({ diagram, frame }: FrameArgs) => room(env, (await pick(diagram)).id).tidy(frame)),
+    async ({ diagram, frame }: FrameArgs) =>
+      text(await room(env, (await pick(diagram)).id).tidy(frame)),
   );
 
   server.registerTool(
@@ -384,9 +374,8 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
           .describe("only lay out this frame's nodes; default: all nodes not in a frame"),
       }),
     },
-    guard(async ({ diagram, direction, frame }: LayoutArgs) =>
-      room(env, (await pick(diagram)).id).layout(direction ?? "LR", frame),
-    ),
+    async ({ diagram, direction, frame }: LayoutArgs) =>
+      text(await room(env, (await pick(diagram)).id).layout(direction ?? "LR", frame)),
   );
 
   server.registerTool(
@@ -396,9 +385,8 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
         "Draw a Mermaid flowchart/sequence diagram onto free canvas space (rendered by the user's tab). Good for sketching many nodes at once.",
       inputSchema: z.object({ diagram: diagramArg, source: z.string() }),
     },
-    guard(async ({ diagram, source }: MermaidArgs) =>
-      room(env, (await pick(diagram)).id).importMermaid(source),
-    ),
+    async ({ diagram, source }: MermaidArgs) =>
+      text(await room(env, (await pick(diagram)).id).importMermaid(source)),
   );
 
   // ---------- versions & templates ----------
@@ -409,9 +397,8 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       description: "Save a named version of the diagram.",
       inputSchema: z.object({ diagram: diagramArg, name: z.string() }),
     },
-    guard(async ({ diagram, name }: NameArgs) =>
-      room(env, (await pick(diagram)).id).snapshot(name, "named"),
-    ),
+    async ({ diagram, name }: NameArgs) =>
+      text(await room(env, (await pick(diagram)).id).snapshot(name, "named")),
   );
 
   server.registerTool(
@@ -421,7 +408,8 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       inputSchema: z.object({ diagram: diagramArg }),
       annotations: { readOnlyHint: true },
     },
-    guard(async ({ diagram }: DiagramArgs) => room(env, (await pick(diagram)).id).listSnapshots()),
+    async ({ diagram }: DiagramArgs) =>
+      text(await room(env, (await pick(diagram)).id).listSnapshots()),
   );
 
   server.registerTool(
@@ -431,9 +419,8 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
         "Restore the diagram to a snapshot (itself snapshotted first, so restore is undoable).",
       inputSchema: z.object({ diagram: diagramArg, snapshot_id: z.string() }),
     },
-    guard(async ({ diagram, snapshot_id }: RestoreArgs) =>
-      room(env, (await pick(diagram)).id).restore(snapshot_id),
-    ),
+    async ({ diagram, snapshot_id }: RestoreArgs) =>
+      text(await room(env, (await pick(diagram)).id).restore(snapshot_id)),
   );
 
   server.registerTool(
@@ -443,7 +430,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       inputSchema: z.object({}),
       annotations: { readOnlyHint: true },
     },
-    guard(async () => listTemplates(env)),
+    async () => text(await listTemplates(env)),
   );
 
   server.registerTool(
@@ -456,9 +443,8 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
         description: z.string().optional(),
       }),
     },
-    guard(async ({ diagram, name, description }: TemplateArgs) =>
-      saveAsTemplate(env, (await pick(diagram)).id, name, description),
-    ),
+    async ({ diagram, name, description }: TemplateArgs) =>
+      text(await saveAsTemplate(env, (await pick(diagram)).id, name, description)),
   );
 
   server.registerTool(
@@ -478,9 +464,8 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
           ),
       }),
     },
-    guard(async ({ diagram, targets, mode, gesture }: FocusArgs) =>
-      room(env, (await pick(diagram)).id).focusView(targets, mode, gesture),
-    ),
+    async ({ diagram, targets, mode, gesture }: FocusArgs) =>
+      text(await room(env, (await pick(diagram)).id).focusView(targets, mode, gesture)),
   );
 
   // ---------- review support ----------
@@ -516,10 +501,6 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       contents: [{ uri: uri.href, mimeType: "text/markdown", text: RUBRIC }],
     }),
   );
-
-  const userMsg = (t: string) => ({
-    messages: [{ role: "user" as const, content: { type: "text" as const, text: t } }],
-  });
 
   server.registerPrompt(
     "review_design",

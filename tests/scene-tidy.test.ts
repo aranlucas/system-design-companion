@@ -54,6 +54,70 @@ const idempotent = (s: Scene) => {
   return again.changedElements().length;
 };
 
+// Move a node the way Excalidraw drags it: its label comes along.
+const drag = (s: Scene, id: string, to: DragTarget) => {
+  const node = s.resolve(id);
+  const dx = to.x - node.x;
+  const dy = (to.y ?? node.y) - node.y;
+  for (const e of [node, s.boundText(node)!]) s.mutate(e, { x: e.x + dx, y: e.y + dy });
+};
+
+function grownFrame() {
+  const s = new Scene([]);
+  const ops: Op[] = [
+    { op: "add_frame", ref: "f", name: "F", place: { at: { x: 0, y: 0 } } },
+    { op: "add_node", ref: "n", label: "N", frame: "f", place: { at: { x: 1200, y: 100 } } },
+  ];
+  expect(s.apply(ops, "agent").every((r) => r.ok)).toBe(true);
+  const f = s.resolve("f");
+  expect(f.width).toBeGreaterThan(800); // grew to hold N
+  return { s, f, n: s.resolve("n") };
+}
+
+// B overlaps A by 30px vertically and 60px sideways, so the cheaper axis is vertical.
+const pair = () => new Scene([rect("A", 0, 0), rect("B", 100, 40)]);
+
+const pos = (s: Scene, id: string) => ({ x: s.resolve(id).x, y: s.resolve(id).y });
+
+// "Dispatch architecture" from a practice diagram: before orthogonal routing, its arrows
+// crossed each other, cut through captions and ran at angles, and two labels collided.
+const fixture = () => new Scene(DISPATCH_ARCHITECTURE);
+
+// A seeded messy diagram: four frames of jittered nodes with random links, bent routes and
+// frames that have to move. It reproduced a second pass rerouting bent arrows.
+function messy(n: number) {
+  let r = 7;
+  const rand = () => (r = (r * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+  const ops: Op[] = [];
+  for (let f = 0; f < 4; f++) ops.push({ op: "add_frame", ref: `f${f}`, name: `F${f}` });
+  for (let i = 0; i < n; i++)
+    ops.push({
+      op: "add_node",
+      ref: `n${i}`,
+      label: `Node ${i}`,
+      frame: `f${i % 4}`,
+      place: { at: { x: (i % 4) * 3000 + (i % 10) * 200, y: Math.floor(i / 10) * 150 } },
+    });
+  for (let i = 0; i < n * 1.5; i++) {
+    const a = Math.floor(rand() * n);
+    const b = Math.floor(rand() * n);
+    if (a !== b && a % 4 === b % 4) ops.push({ op: "connect", from: `n${a}`, to: `n${b}` });
+  }
+  const s = new Scene([]);
+  expect(s.apply(ops, "template").every((x) => x.ok)).toBe(true);
+  return new Scene(
+    s.live().map((e) =>
+      s.isNode(e)
+        ? {
+            ...e,
+            x: e.x + Math.round(rand() * 120 - 60),
+            y: e.y + Math.round(rand() * 80 - 40),
+          }
+        : e,
+    ),
+  );
+}
+
 describe("tidy: binding loose arrow ends", () => {
   it("binds each end to the closest node, not the first one listed", () => {
     // The end at (80, 76) is 14px from B's top and 6px from A's bottom; B is listed first.
@@ -87,26 +151,6 @@ describe("tidy: binding loose arrow ends", () => {
 });
 
 describe("tidy: frame fitting", () => {
-  // Move a node the way Excalidraw drags it: its label comes along.
-  const drag = (s: Scene, id: string, to: DragTarget) => {
-    const node = s.resolve(id);
-    const dx = to.x - node.x;
-    const dy = (to.y ?? node.y) - node.y;
-    for (const e of [node, s.boundText(node)!]) s.mutate(e, { x: e.x + dx, y: e.y + dy });
-  };
-
-  function grownFrame() {
-    const s = new Scene([]);
-    const ops: Op[] = [
-      { op: "add_frame", ref: "f", name: "F", place: { at: { x: 0, y: 0 } } },
-      { op: "add_node", ref: "n", label: "N", frame: "f", place: { at: { x: 1200, y: 100 } } },
-    ];
-    expect(s.apply(ops, "agent").every((r) => r.ok)).toBe(true);
-    const f = s.resolve("f");
-    expect(f.width).toBeGreaterThan(800); // grew to hold N
-    return { s, f, n: s.resolve("n") };
-  }
-
   it("shrinks a frame it grew back to the chosen size once the content moves in", () => {
     const { s, f, n } = grownFrame();
     const moved = new Scene(s.live());
@@ -190,10 +234,6 @@ describe("tidy: even spacing", () => {
 });
 
 describe("tidy: overlap removal", () => {
-  // B overlaps A by 30px vertically and 60px sideways, so the cheaper axis is vertical.
-  const pair = () => new Scene([rect("A", 0, 0), rect("B", 100, 40)]);
-  const pos = (s: Scene, id: string) => ({ x: s.resolve(id).x, y: s.resolve(id).y });
-
   it("splits the shortest push between both blocks, keeping their order", () => {
     const s = pair();
     expect(s.tidy().separated).toBe(2);
@@ -223,10 +263,6 @@ describe("tidy: overlap removal", () => {
 });
 
 describe("tidy: a real architecture frame", () => {
-  // "Dispatch architecture" from a practice diagram: before orthogonal routing, its arrows
-  // crossed each other, cut through captions and ran at angles, and two labels collided.
-  const fixture = () => new Scene(DISPATCH_ARCHITECTURE);
-
   it("routes every connection at right angles, clear of captions, with readable labels", () => {
     const s = fixture();
     const before = layoutReport(s);
@@ -247,41 +283,6 @@ describe("tidy: a real architecture frame", () => {
 });
 
 describe("tidy: no regressions", () => {
-  // A seeded messy diagram: four frames of jittered nodes with random links, bent routes and
-  // frames that have to move. It reproduced a second pass rerouting bent arrows.
-  function messy(n: number) {
-    let r = 7;
-    const rand = () => (r = (r * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
-    const ops: Op[] = [];
-    for (let f = 0; f < 4; f++) ops.push({ op: "add_frame", ref: `f${f}`, name: `F${f}` });
-    for (let i = 0; i < n; i++)
-      ops.push({
-        op: "add_node",
-        ref: `n${i}`,
-        label: `Node ${i}`,
-        frame: `f${i % 4}`,
-        place: { at: { x: (i % 4) * 3000 + (i % 10) * 200, y: Math.floor(i / 10) * 150 } },
-      });
-    for (let i = 0; i < n * 1.5; i++) {
-      const a = Math.floor(rand() * n);
-      const b = Math.floor(rand() * n);
-      if (a !== b && a % 4 === b % 4) ops.push({ op: "connect", from: `n${a}`, to: `n${b}` });
-    }
-    const s = new Scene([]);
-    expect(s.apply(ops, "template").every((x) => x.ok)).toBe(true);
-    return new Scene(
-      s.live().map((e) =>
-        s.isNode(e)
-          ? {
-              ...e,
-              x: e.x + Math.round(rand() * 120 - 60),
-              y: e.y + Math.round(rand() * 80 - 40),
-            }
-          : e,
-      ),
-    );
-  }
-
   const cases: Case[] = [
     ["messy 60", () => messy(60)],
     ["messy 120", () => messy(120)],

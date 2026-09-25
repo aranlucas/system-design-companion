@@ -41,6 +41,12 @@ async function create(env: TestEnv, name: string, template?: string) {
   return (await body(res)) as Created;
 }
 
+const put = (env: TestEnv, path: string, bytes: BodyInit, type = "image/png") =>
+  worker.fetch(
+    req(path, { method: "PUT", headers: { "Content-Type": type }, body: bytes }),
+    env.env,
+  );
+
 describe("diagrams API", () => {
   it("lists existing and agent-created diagrams without browser history, preserving old links", async () => {
     const env = makeEnv();
@@ -292,11 +298,6 @@ describe("snapshots API", () => {
 
 describe("files API", () => {
   const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
-  const put = (env: TestEnv, path: string, bytes: BodyInit, type = "image/png") =>
-    worker.fetch(
-      req(path, { method: "PUT", headers: { "Content-Type": type }, body: bytes }),
-      env.env,
-    );
 
   it("stores an image in R2 and serves it back to key holders only", async () => {
     const env = makeEnv();

@@ -18,6 +18,9 @@ function graph(s: Scene) {
   return s.graph();
 }
 
+const textOf = (s: Scene, id: string) =>
+  s.live().find((e) => e.type === "text" && (e.id === id || e.containerId === id));
+
 describe("add_node", () => {
   it("creates a labelled rectangle with defaults", () => {
     const s = fresh();
@@ -344,9 +347,6 @@ describe("add_frame / add_note", () => {
 });
 
 describe("text_color", () => {
-  const textOf = (s: Scene, id: string) =>
-    s.live().find((e) => e.type === "text" && (e.id === id || e.containerId === id));
-
   it("colors node, arrow and note text by name or hex, and reports it", () => {
     const s = fresh();
     const [a, , arrow, note] = applyOk(s, [

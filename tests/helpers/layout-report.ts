@@ -40,6 +40,13 @@ const passesThrough = (p: Pt, q: Pt, e: El) => {
   return false;
 };
 
+const path = (a: El): Pt[] => a.points.map(([x, y]: Pt) => [a.x + x, a.y + y]);
+
+const segs = (a: El) => {
+  const pts = path(a);
+  return pts.slice(1).map((p, i): Segment => [pts[i], p]);
+};
+
 export function layoutReport(s: Scene) {
   const live = s.live();
   const byId = new Map(live.map((e) => [e.id, e]));
@@ -47,7 +54,6 @@ export function layoutReport(s: Scene) {
   const frames = live.filter((e) => e.type === "frame");
   const arrows = live.filter((e) => e.type === "arrow");
   const nodes = live.filter((e) => s.isNode(e));
-  const path = (a: El): Pt[] => a.points.map(([x, y]: Pt) => [a.x + x, a.y + y]);
 
   const outsideFrame = blocks.filter((e) => {
     const f = e.frameId ? byId.get(e.frameId) : undefined;
@@ -83,10 +89,7 @@ export function layoutReport(s: Scene) {
   // What a reader sees as clutter: bound arrows crossing each other, running through a caption or
   // note, drawn at an angle, and labels landing on shapes, captions, notes or each other.
   const bound = arrows.filter((a) => a.startBinding && a.endBinding);
-  const segs = (a: El) => {
-    const pts = path(a);
-    return pts.slice(1).map((p, i): Segment => [pts[i], p]);
-  };
+
   let arrowCrossings = 0;
   for (let i = 0; i < bound.length; i++)
     for (let j = i + 1; j < bound.length; j++)

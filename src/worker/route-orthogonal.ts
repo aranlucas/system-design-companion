@@ -261,6 +261,13 @@ export function pointAt(pts: Pt[], t: number): Pt {
   return pts[0];
 }
 
+const routeDistance = (r: RouteRequest) =>
+  Math.abs(r.from.x + r.from.w / 2 - r.to.x - r.to.w / 2) +
+  Math.abs(r.from.y + r.from.h / 2 - r.to.y - r.to.h / 2);
+
+// Channel centres: routes through a gap between shapes run down its middle.
+const mids = (vs: number[]) => vs.slice(1).map((v, i) => Math.round((v + vs[i]) / 2));
+
 export function routeOrthogonal(
   requests: RouteRequest[],
   obstacles: Box[],
@@ -281,12 +288,9 @@ export function routeOrthogonal(
       p.y >= bounds.y &&
       p.y <= bounds.y + bounds.h);
 
-  const order = requests.toSorted((a, b) => {
-    const d = (r: RouteRequest) =>
-      Math.abs(r.from.x + r.from.w / 2 - r.to.x - r.to.w / 2) +
-      Math.abs(r.from.y + r.from.h / 2 - r.to.y - r.to.h / 2);
-    return d(a) - d(b) || (a.id < b.id ? -1 : 1);
-  });
+  const order = requests.toSorted(
+    (a, b) => routeDistance(a) - routeDistance(b) || (a.id < b.id ? -1 : 1),
+  );
 
   const grids = new Map<string, Uint8Array>();
   const state = new Map<string, Found>();
@@ -434,8 +438,6 @@ export function routeOrthogonal(
       ...ends.map((e) => leadOut(e.p, e.dir).y),
       ...(bounds ? [bounds.y, bounds.y + bounds.h] : []),
     ]);
-    // Channel centres: routes through a gap between shapes run down its middle.
-    const mids = (vs: number[]) => vs.slice(1).map((v, i) => Math.round((v + vs[i]) / 2));
     const gx = uniq([...xs, ...mids(xs)]);
     const gy = uniq([...ys, ...mids(ys)]);
     const xi = new Map(gx.map((v, i) => [v, i]));

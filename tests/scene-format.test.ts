@@ -14,6 +14,31 @@ function labels(s: Scene): string[] {
   return (graphView(s).nodes ?? []).map((n) => n.label);
 }
 
+const runsOn = (p: number[], q: number[], u: number[], v: number[]) =>
+  p[1] === q[1] &&
+  u[1] === v[1] &&
+  Math.abs(p[1] - u[1]) <= 4 &&
+  Math.min(Math.max(p[0], q[0]), Math.max(u[0], v[0])) >
+    Math.max(Math.min(p[0], q[0]), Math.min(u[0], v[0]));
+
+const overlaps = (s: Scene) => {
+  const blocks = s.live().filter((e) => s.isNode(e) || (e.type === "text" && !e.containerId));
+  let n = 0;
+  for (let i = 0; i < blocks.length; i++)
+    for (let j = i + 1; j < blocks.length; j++) {
+      const a = blocks[i];
+      const b = blocks[j];
+      if (
+        a.x < b.x + b.width &&
+        b.x < a.x + a.width &&
+        a.y < b.y + b.height &&
+        b.y < a.y + a.height
+      )
+        n++;
+    }
+  return n;
+};
+
 describe("wrapText / measureText", () => {
   it("leaves short text alone", () => {
     expect(wrapText("hello")).toBe("hello");
@@ -93,12 +118,6 @@ describe("tidy", () => {
       expect(path[i][0] === path[i - 1][0] || path[i][1] === path[i - 1][1]).toBe(true);
     const other = s.live().find((e) => e.type === "arrow" && e.strokeStyle !== "dashed")!;
     const otherPath = other.points.map(([x, y]: number[]) => [other.x + x, other.y + y]);
-    const runsOn = (p: number[], q: number[], u: number[], v: number[]) =>
-      p[1] === q[1] &&
-      u[1] === v[1] &&
-      Math.abs(p[1] - u[1]) <= 4 &&
-      Math.min(Math.max(p[0], q[0]), Math.max(u[0], v[0])) >
-        Math.max(Math.min(p[0], q[0]), Math.min(u[0], v[0]));
     for (let i = 1; i < path.length; i++)
       for (let j = 1; j < otherPath.length; j++)
         expect(runsOn(path[i - 1], path[i], otherPath[j - 1], otherPath[j])).toBe(false);
@@ -230,24 +249,6 @@ describe("tidy", () => {
       arrow,
     ]);
   }
-
-  const overlaps = (s: Scene) => {
-    const blocks = s.live().filter((e) => s.isNode(e) || (e.type === "text" && !e.containerId));
-    let n = 0;
-    for (let i = 0; i < blocks.length; i++)
-      for (let j = i + 1; j < blocks.length; j++) {
-        const a = blocks[i];
-        const b = blocks[j];
-        if (
-          a.x < b.x + b.width &&
-          b.x < a.x + a.width &&
-          a.y < b.y + b.height &&
-          b.y < a.y + a.height
-        )
-          n++;
-      }
-    return n;
-  };
 
   it("separates overlaps and adopts loose blocks into their frame", () => {
     const s = cluttered();
