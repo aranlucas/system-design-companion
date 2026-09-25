@@ -148,6 +148,15 @@ body,
 .canvas-wrap .excalidraw .Toast {
   bottom: calc(var(--lg-button-size) + 1.75rem);
 }
+/* Excalidraw ships no style for a highlighted menu item; excalidraw.com adds
+   this in its own app to make the Command palette item stand out. */
+.canvas-wrap .excalidraw .dropdown-menu-item.highlighted {
+  color: var(--color-promo);
+  font-weight: 700;
+}
+.canvas-wrap .excalidraw .dropdown-menu-item.highlighted .dropdown-menu-item__icon g {
+  stroke-width: 2;
+}
 /* FooterCenter has no leading margin; match .undo-redo-buttons' 0.6em. */
 .footbar {
   display: flex;
