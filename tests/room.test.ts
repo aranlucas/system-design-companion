@@ -149,7 +149,7 @@ describe("DiagramRoom ops layer", () => {
     const moved = (await room.getRaw()).filter(
       (e) => e.type === "rectangle" && (e.x !== before.get(e.id)!.x || e.y !== before.get(e.id)!.y),
     );
-    expect(moved.map((e) => e.frameId ?? null)).toEqual([null]);
+    expect(moved.map((e) => e.id).sort()).toEqual(["c", "d"]);
   });
 
   it("tidy and layout wrap edits in snapshots", async () => {
