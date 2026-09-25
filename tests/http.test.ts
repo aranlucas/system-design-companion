@@ -1,17 +1,16 @@
 // Worker HTTP routes with real DiagramRooms on fake D1/R2.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { apiErrorMessage, type ApiFailure } from "../src/app/api-error.ts";
 import worker from "../src/worker/index.ts";
 import { createDiagram, parseLink } from "../src/worker/store.ts";
 import type { Author } from "../src/worker/scene.ts";
 import { makeEnv, type TestEnv } from "./helpers/fakes.ts";
 
-type WorkerRequest = Parameters<typeof worker.fetch>[0];
-
-function req(path: string, init?: RequestInit): WorkerRequest {
-  return new Request(`http://localhost${path}`, init) as unknown as WorkerRequest;
+function req(path: string, init?: RequestInit): Request {
+  return new Request(`http://localhost${path}`, init);
 }
 
-function post(env: TestEnv, path: string, payload: unknown) {
+async function post(env: TestEnv, path: string, payload: unknown) {
   return worker.fetch(
     req(path, {
       method: "POST",
@@ -30,6 +29,25 @@ type WithId = { id: string };
 type ErrorBody = { error: string };
 type TemplateInfo = { id: string; name: string };
 type SnapshotInfo = { id: string; name: string };
+type InvalidBodyCase = [route: string, payload: unknown];
+
+const invalidBodies: InvalidBodyCase[] = [
+  ["/api/diagrams", { name: 42 }],
+  ["/api/diagrams", { name: "x".repeat(121) }],
+  ["/api/diagrams", { template: 42 }],
+  ["/api/diagrams", null],
+  ["/api/diagrams", []],
+  ["/snapshots", { name: [] }],
+  ["/restore", {}],
+  ["/restore", { snapshotId: "" }],
+  ["/restore", { snapshotId: 42 }],
+  ["/tidy", { frames: "frame1" }],
+  ["/tidy", { frames: [42] }],
+  ["/tidy", { frames: [""] }],
+  ["/template", {}],
+  ["/template", { name: "  " }],
+  ["/template", { name: "Valid", description: 42 }],
+];
 
 async function body(res: Response) {
   return (await res.json()) as Record<string, unknown>;
@@ -62,7 +80,7 @@ describe("diagrams API", () => {
     const listed = page.items;
     expect(listed.map((d) => d.id)).toEqual([agent.id, old.id]);
     const opened = await Promise.all(
-      listed.map((d) => worker.fetch(req(`/api/d/${d.id}?k=${d.key}`), env.env)),
+      listed.map(async (d) => worker.fetch(req(`/api/d/${d.id}?k=${d.key}`), env.env)),
     );
     expect(opened.map((result) => result.status)).toEqual([200, 200]);
     expect((await worker.fetch(req(`/api/d/${old.id}?k=${old.key}`), env.env)).status).toBe(200);
@@ -141,7 +159,7 @@ describe("diagrams API", () => {
       `cursor=${btoa(JSON.stringify({ createdAt: -1, id: "abcdefgh" }))}`,
     ];
     const results = await Promise.all(
-      params.map((param) => worker.fetch(req(`/api/diagrams?${param}`), env.env)),
+      params.map(async (param) => worker.fetch(req(`/api/diagrams?${param}`), env.env)),
     );
     expect(results.every((res) => res.status === 400)).toBe(true);
   });
@@ -168,7 +186,7 @@ describe("diagrams API", () => {
     ).json()) as typeof page;
     expect(result.items.map((d) => d.id)).toEqual([keep.id]);
     const blocked = await Promise.all(
-      [target.key, libraryKey].map((key) =>
+      [target.key, libraryKey].map(async (key) =>
         worker.fetch(req(`/api/d/${target.id}?k=${key}`), env.env),
       ),
     );
@@ -191,7 +209,7 @@ describe("diagrams API", () => {
     const env = makeEnv();
     const d = await create(env, "HLD");
     const paths = [`/api/d/${d.id}`, `/api/d/${d.id}?k=wrong`, `/api/d/unknown-id?k=${d.key}`];
-    const results = await Promise.all(paths.map((path) => worker.fetch(req(path), env.env)));
+    const results = await Promise.all(paths.map(async (path) => worker.fetch(req(path), env.env)));
     for (const res of results) expect(res.status).toBe(403);
   });
 
@@ -358,7 +376,150 @@ describe("files API", () => {
   });
 });
 
+describe("request validation", () => {
+  it.each(invalidBodies)("rejects invalid JSON fields on %s: %j", async (route, payload) => {
+    const env = makeEnv();
+    const d = await create(env, "Validation");
+    const path = route.startsWith("/api/") ? route : `/api/d/${d.id}${route}?k=${d.key}`;
+    const response = await post(env, path, payload);
+    expect(response.status).toBe(400);
+    const failure = (await response.json()) as ApiFailure;
+    expect(failure).toMatchObject({
+      success: false,
+      error: { name: "ZodError", message: expect.any(String) },
+    });
+    expect(apiErrorMessage(failure, "fallback")).not.toBe("fallback");
+    expect(env.db.diagrams.size).toBe(1);
+    expect(env.db.snapshots).toHaveLength(0);
+  });
+
+  it("rejects malformed JSON instead of treating it as an empty tidy request", async () => {
+    const env = makeEnv();
+    const d = await create(env, "Validation");
+    const response = await worker.fetch(
+      req(`/api/d/${d.id}/tidy?k=${d.key}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{",
+      }),
+      env.env,
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Malformed JSON in request body" });
+    expect(env.db.snapshots).toHaveLength(0);
+  });
+
+  it("keeps name defaults, trims names, and accepts JSON media types", async () => {
+    const env = makeEnv();
+    const response = await post(env, "/api/diagrams", {});
+    expect(response.status).toBe(200);
+    const d = (await response.json()) as Created;
+    expect(d.name).toBe("Untitled");
+    const renamed = await worker.fetch(
+      req(`/api/d/${d.id}/rename?k=${d.key}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/vnd.example+json; charset=utf-8" },
+        body: JSON.stringify({ name: "  Trimmed  " }),
+      }),
+      env.env,
+    );
+    expect(await renamed.json()).toEqual({ ok: true, name: "Trimmed" });
+    const snapshot = await post(env, `/api/d/${d.id}/snapshots?k=${d.key}`, {});
+    expect(snapshot.status).toBe(200);
+    expect(await snapshot.json()).toMatchObject({ name: "manual" });
+    const tidy = await worker.fetch(
+      req(`/api/d/${d.id}/tidy?k=${d.key}`, { method: "POST" }),
+      env.env,
+    );
+    expect(tidy.status).toBe(200);
+  });
+
+  it("checks authorization before parsing protected request bodies", async () => {
+    const env = makeEnv();
+    const d = await create(env, "Validation");
+    const response = await post(env, `/api/d/${d.id}/rename?k=wrong`, { name: 42 });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "invalid link" });
+  });
+});
+
 describe("routing", () => {
+  it("authorizes diagram and WebSocket subpaths before dispatching", async () => {
+    const env = makeEnv();
+    const d = await create(env, "Protected");
+    const paths = [
+      `/api/d/${d.id}/rename`,
+      `/api/d/${d.id}/files/file1`,
+      `/api/d/${d.id}/unknown`,
+      `/ws/${d.id}`,
+      `/ws/${d.id}/extra`,
+    ];
+    const responses = await Promise.all(
+      paths.map(async (path) => worker.fetch(req(`${path}?k=wrong`), env.env)),
+    );
+    expect(responses.map((response) => response.status)).toEqual(paths.map(() => 403));
+    expect(await Promise.all(responses.map((response) => response.json()))).toEqual(
+      paths.map(() => ({ error: "invalid link" })),
+    );
+    const unknown = await worker.fetch(req(`/api/d/${d.id}/unknown?k=${d.key}`), env.env);
+    expect(unknown.status).toBe(404);
+    expect(await unknown.json()).toEqual({ error: "not found" });
+  });
+
+  it("forwards the original WebSocket request and response to the authorized room", async () => {
+    const env = makeEnv();
+    const d = await create(env, "Socket");
+    const response = new Response("room response", { headers: { "X-Room": d.id } });
+    const fetch = vi.spyOn(env.rooms.get(d.id)!, "fetch").mockResolvedValue(response);
+    const request = req(`/ws/${d.id}?k=${d.key}`, { headers: { Upgrade: "websocket" } });
+    expect(await worker.fetch(request, env.env)).toBe(response);
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(request);
+  });
+
+  it("keeps file ID restrictions and strict paths", async () => {
+    const env = makeEnv();
+    const d = await create(env, "Paths");
+    const paths = [
+      `/api/d/${d.id}/files/bad.id?k=${d.key}`,
+      `/api/d/${d.id}/files/${"x".repeat(129)}?k=${d.key}`,
+      `/api/d/${d.id}/?k=${d.key}`,
+      "/api/d/bad.id?k=wrong",
+      "/api/diagrams/",
+    ];
+    const responses = await Promise.all(
+      paths.map(async (path) => worker.fetch(req(path), env.env)),
+    );
+    expect(responses.map((response) => response.status)).toEqual(paths.map(() => 404));
+  });
+
+  it("initializes MCP through the lazy-loaded handler", async () => {
+    const env = makeEnv();
+    const response = await worker.fetch(
+      req("/mcp", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-11-25",
+            capabilities: {},
+            clientInfo: { name: "bundle-test", version: "1" },
+          },
+        }),
+      }),
+      env.env,
+    );
+    expect(response.status).toBe(200);
+    const result = await response.text();
+    expect(result).toContain('"protocolVersion":"2025-11-25"');
+    expect(result).toContain('"name":"system-design"');
+  });
+
   it("returns 404 for unknown routes and reaches the MCP handler", async () => {
     const env = makeEnv();
     const missing = await worker.fetch(req("/nope"), env.env);

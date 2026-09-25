@@ -3,7 +3,7 @@ import {
   registerAppResource,
   registerAppTool,
 } from "@modelcontextprotocol/ext-apps/server";
-import { McpServer, type McpRequestContext } from "@modelcontextprotocol/server";
+import { createMcpHandler, McpServer, type McpRequestContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { COMPONENT_KINDS, COMPONENTS } from "../shared/components.ts";
 import { SHAPES, type Op } from "./scene.ts";
@@ -18,6 +18,11 @@ import {
   verifyKey,
 } from "./store.ts";
 import { VIEW_URI, viewHtml } from "./view.ts";
+
+export function handleMcp(request: Request, env: Env) {
+  const handler = createMcpHandler((ctx) => buildServer(env, ctx));
+  return handler.fetch(request);
+}
 
 /** Tool and prompt arguments, as their input schemas validate them. */
 type DiagramArgs = { diagram: string };

@@ -36,8 +36,8 @@ import {
   type ScreenshotParams,
   type ServerMessage,
 } from "../shared/protocol.ts";
+import { apiErrorMessage, type ApiFailure } from "./api-error.ts";
 import { CopyRow } from "./copy-row.tsx";
-import { componentLibrary } from "./library.ts";
 import { displayName, linkFor, remember, setDisplayName, setupCommands } from "./local.ts";
 
 interface CanvasProps {
@@ -48,7 +48,7 @@ interface CanvasProps {
 /** The heart gesture being drawn: where, and when it started (it fades out). */
 type Heart = { x: number; y: number; startedAt: number };
 type RpcMessage = Extract<ServerMessage, { type: "rpc" }>;
-type RenameResult = { name: string; error?: string };
+type RenameResult = { name: string } & ApiFailure;
 
 interface SharePanelProps {
   link: string;
@@ -134,6 +134,7 @@ export function Canvas({ id, k }: CanvasProps) {
   const synced = useRef(new Map<string, number>()); // element id → last version exchanged with the room
   const pendingSend = useRef<number | null>(null);
   const uploadedFiles = useRef(new Set<string>()); // file ids the room already has
+  const libraryRequested = useRef(false);
   const fetchingFiles = useRef(new Set<string>());
   const lastPresence = useRef("");
   const lastPointer = useRef(0);
@@ -153,6 +154,21 @@ export function Canvas({ id, k }: CanvasProps) {
   }, [api]);
 
   const flash = (message: string) => apiRef.current?.setToast({ message, duration: 2500 });
+  const loadLibrary = async () => {
+    const currentApi = apiRef.current;
+    if (!currentApi || libraryRequested.current) return;
+    libraryRequested.current = true;
+    try {
+      await currentApi.updateLibrary({
+        libraryItems: import("./library.ts").then(({ componentLibrary }) => componentLibrary()),
+        merge: true,
+        defaultStatus: "published",
+      });
+    } catch {
+      libraryRequested.current = false;
+      flash("Could not load components. Close and reopen the library to retry.");
+    }
+  };
   // Share and Versions are tabs in Excalidraw's default sidebar, next to the library.
   const open = (tab: "share" | "versions" | "library") =>
     apiRef.current?.toggleSidebar({ name: "default", tab, force: true });
@@ -586,6 +602,7 @@ export function Canvas({ id, k }: CanvasProps) {
     ];
     const r = await fetch(`/api/d/${id}/tidy?k=${encodeURIComponent(k)}`, {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ frames }),
     });
     const d = (await r.json()) as TidyResult;
@@ -595,7 +612,7 @@ export function Canvas({ id, k }: CanvasProps) {
         ? d.changed
           ? `${where} tidied: ${tidySummary(d)}. Undo in Versions.`
           : `${where} is already tidy`
-        : `Tidy failed: ${d.error}`,
+        : `Tidy failed: ${apiErrorMessage(d, "Could not tidy the diagram.")}`,
     );
   };
 
@@ -624,7 +641,6 @@ export function Canvas({ id, k }: CanvasProps) {
       )}
       <Excalidraw
         onExcalidrawAPI={setApi}
-        initialData={{ libraryItems: componentLibrary() }}
         name={name}
         isCollaborating={peers > 1}
         UIOptions={{
@@ -761,7 +777,11 @@ export function Canvas({ id, k }: CanvasProps) {
             }}
           />
         </Sidebar>
-        <DefaultSidebar>
+        <DefaultSidebar
+          onStateChange={(state) => {
+            if (state && (state.tab ?? "library") === "library") void loadLibrary();
+          }}
+        >
           <DefaultSidebar.TabTriggers>
             <Sidebar.TabTrigger tab="versions" title="Versions">
               {historyIcon}
@@ -847,7 +867,8 @@ function RenamePanel({ name, id, diagramKey, onRenamed }: RenamePanelProps) {
             body: JSON.stringify({ name: draft.trim() }),
           });
           const result = (await response.json()) as RenameResult;
-          if (!response.ok) throw new Error(result.error || "Could not rename the diagram.");
+          if (!response.ok)
+            throw new Error(apiErrorMessage(result, "Could not rename the diagram."));
           onRenamed(result.name);
         } catch (err) {
           setError((err as Error).message);
@@ -873,9 +894,8 @@ function RenamePanel({ name, id, diagramKey, onRenamed }: RenamePanelProps) {
   );
 }
 
-type TidyResult = { changed?: number; error?: string } & Partial<
-  Record<keyof typeof TIDY_WORDS, number>
->;
+type TidyResult = { changed?: number } & ApiFailure &
+  Partial<Record<keyof typeof TIDY_WORDS, number>>;
 
 const TIDY_WORDS = {
   aligned: "aligned",
