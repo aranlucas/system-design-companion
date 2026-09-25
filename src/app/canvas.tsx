@@ -148,38 +148,41 @@ export function Canvas({ id, k }: CanvasProps) {
   const openRename = () => apiRef.current?.toggleSidebar({ name: "rename", force: true });
 
   /** Excalidraw draws each collaborator's cursor, selection outline and avatar. */
-  const setCollaborator = (peer: SocketId, patch: Partial<Collaborator> | null) => {
+  const setCollaborator = useCallback((peer: SocketId, patch: Partial<Collaborator> | null) => {
     const map = collaborators.current;
     if (patch) map.set(peer, { ...map.get(peer), id: peer, socketId: peer, ...patch });
     else map.delete(peer);
     apiRef.current?.updateScene({ collaborators: new Map(map) });
-  };
-
-  const send = (m: ClientMessage) => {
-    if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify(m));
-  };
-
-  const sendPresence = useCallback((force = false) => {
-    const a = apiRef.current;
-    if (!a) return;
-    const st = a.getAppState();
-    const selection = Object.keys(st.selectedElementIds).filter(
-      (key) => st.selectedElementIds[key],
-    );
-    const viewport = {
-      x: Math.round(-st.scrollX),
-      y: Math.round(-st.scrollY),
-      width: Math.round(st.width / st.zoom.value),
-      height: Math.round(st.height / st.zoom.value),
-      zoom: st.zoom.value,
-    };
-    const focused = document.hasFocus();
-    const username = displayName() || undefined;
-    const sig = JSON.stringify([selection, focused, username]);
-    if (!force && sig === lastPresence.current) return;
-    lastPresence.current = sig;
-    send({ type: "presence", selection, viewport, focused, username });
   }, []);
+
+  const send = useCallback((m: ClientMessage) => {
+    if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify(m));
+  }, []);
+
+  const sendPresence = useCallback(
+    (force = false) => {
+      const a = apiRef.current;
+      if (!a) return;
+      const st = a.getAppState();
+      const selection = Object.keys(st.selectedElementIds).filter(
+        (key) => st.selectedElementIds[key],
+      );
+      const viewport = {
+        x: Math.round(-st.scrollX),
+        y: Math.round(-st.scrollY),
+        width: Math.round(st.width / st.zoom.value),
+        height: Math.round(st.height / st.zoom.value),
+        zoom: st.zoom.value,
+      };
+      const focused = document.hasFocus();
+      const username = displayName() || undefined;
+      const sig = JSON.stringify([selection, focused, username]);
+      if (!force && sig === lastPresence.current) return;
+      lastPresence.current = sig;
+      send({ type: "presence", selection, viewport, focused, username });
+    },
+    [send],
+  );
 
   const showFocus = useCallback(
     async (
@@ -230,73 +233,76 @@ export function Canvas({ id, k }: CanvasProps) {
       }
       return visible;
     },
-    [],
+    [setCollaborator],
   );
 
   // ---------- tab RPC (screenshot, mermaid) ----------
 
-  const handleRpc = useCallback(async (msg: RpcMessage) => {
-    const a = apiRef.current;
-    try {
-      if (!a) throw new Error("canvas not ready");
-      if (msg.method === "screenshot") {
-        const { elementIds } = msg.params as ScreenshotParams;
-        let elements = a.getSceneElements();
-        if (elementIds?.length) {
-          const want = new Set(elementIds);
-          elements = elements.filter(
-            (e) =>
-              want.has(e.id) ||
-              (e.frameId && want.has(e.frameId)) ||
-              ("containerId" in e && e.containerId && want.has(e.containerId)),
-          );
+  const handleRpc = useCallback(
+    async (msg: RpcMessage) => {
+      const a = apiRef.current;
+      try {
+        if (!a) throw new Error("canvas not ready");
+        if (msg.method === "screenshot") {
+          const { elementIds } = msg.params as ScreenshotParams;
+          let elements = a.getSceneElements();
+          if (elementIds?.length) {
+            const want = new Set(elementIds);
+            elements = elements.filter(
+              (e) =>
+                want.has(e.id) ||
+                (e.frameId && want.has(e.frameId)) ||
+                ("containerId" in e && e.containerId && want.has(e.containerId)),
+            );
+          }
+          if (!elements.length) throw new Error("nothing to render");
+          const blob = await exportToBlob({
+            elements,
+            appState: {
+              ...a.getAppState(),
+              exportBackground: true,
+              exportWithDarkMode: false,
+              viewBackgroundColor: "#ffffff",
+            },
+            files: a.getFiles(),
+            mimeType: "image/png",
+            maxWidthOrHeight: 1600,
+            exportPadding: 24,
+          });
+          send({
+            type: "rpc_result",
+            reqId: msg.reqId,
+            ok: true,
+            data: { base64: await blobToBase64(blob), mimeType: "image/png" },
+          });
+        } else if (msg.method === "focus_view") {
+          const { elementIds, mode, gesture } = msg.params as FocusViewParams;
+          const ids = new Set(elementIds);
+          const elements = a.getSceneElements().filter((e) => ids.has(e.id));
+          if (!elements.length) throw new Error("Target no longer exists in this tab");
+          const visible = await showFocus(elements, mode, gesture);
+          send({
+            type: "rpc_result",
+            reqId: msg.reqId,
+            ok: true,
+            data: { mode, visible, elementIds: elements.map((e) => e.id) },
+          });
+        } else if (msg.method === "mermaid") {
+          const { source } = msg.params as MermaidParams;
+          const { parseMermaidToExcalidraw } = await import("@excalidraw/mermaid-to-excalidraw");
+          const { elements, files } = await parseMermaidToExcalidraw(source);
+          // Diagram types Excalidraw can't draw natively come back as an image; keep its bytes
+          // here so this tab uploads them once the room adds the element.
+          if (files) apiRef.current?.addFiles(Object.values(files));
+          const converted = convertToExcalidrawElements(elements, { regenerateIds: true });
+          send({ type: "rpc_result", reqId: msg.reqId, ok: true, data: { elements: converted } });
         }
-        if (!elements.length) throw new Error("nothing to render");
-        const blob = await exportToBlob({
-          elements,
-          appState: {
-            ...a.getAppState(),
-            exportBackground: true,
-            exportWithDarkMode: false,
-            viewBackgroundColor: "#ffffff",
-          },
-          files: a.getFiles(),
-          mimeType: "image/png",
-          maxWidthOrHeight: 1600,
-          exportPadding: 24,
-        });
-        send({
-          type: "rpc_result",
-          reqId: msg.reqId,
-          ok: true,
-          data: { base64: await blobToBase64(blob), mimeType: "image/png" },
-        });
-      } else if (msg.method === "focus_view") {
-        const { elementIds, mode, gesture } = msg.params as FocusViewParams;
-        const ids = new Set(elementIds);
-        const elements = a.getSceneElements().filter((e) => ids.has(e.id));
-        if (!elements.length) throw new Error("Target no longer exists in this tab");
-        const visible = await showFocus(elements, mode, gesture);
-        send({
-          type: "rpc_result",
-          reqId: msg.reqId,
-          ok: true,
-          data: { mode, visible, elementIds: elements.map((e) => e.id) },
-        });
-      } else if (msg.method === "mermaid") {
-        const { source } = msg.params as MermaidParams;
-        const { parseMermaidToExcalidraw } = await import("@excalidraw/mermaid-to-excalidraw");
-        const { elements, files } = await parseMermaidToExcalidraw(source);
-        // Diagram types Excalidraw can't draw natively come back as an image; keep its bytes
-        // here so this tab uploads them once the room adds the element.
-        if (files) apiRef.current?.addFiles(Object.values(files));
-        const converted = convertToExcalidrawElements(elements, { regenerateIds: true });
-        send({ type: "rpc_result", reqId: msg.reqId, ok: true, data: { elements: converted } });
+      } catch (e) {
+        send({ type: "rpc_result", reqId: msg.reqId, ok: false, error: (e as Error).message });
       }
-    } catch (e) {
-      send({ type: "rpc_result", reqId: msg.reqId, ok: false, error: (e as Error).message });
-    }
-  }, []);
+    },
+    [send, showFocus],
+  );
 
   // ---------- connection ----------
 
@@ -884,13 +890,16 @@ function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
   const [label, setLabel] = useState("");
   const q = `?k=${encodeURIComponent(k)}`;
 
-  const load = () =>
-    fetch(`/api/d/${id}/snapshots${q}`)
-      .then((r) => r.json())
-      .then(setSnaps);
+  const load = useCallback(
+    () =>
+      fetch(`/api/d/${id}/snapshots${q}`)
+        .then((r) => r.json())
+        .then(setSnaps),
+    [id, q],
+  );
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   const post = (path: string, body: unknown) =>
     fetch(`/api/d/${id}${path}${q}`, {
