@@ -3,8 +3,10 @@ import { buildServer } from "./mcp.ts";
 import {
   createDiagram,
   deleteDiagram,
+  getFile,
   listDiagrams,
   parseDiagramCursor,
+  putFile,
   listTemplates,
   room,
   saveAsTemplate,
@@ -67,6 +69,9 @@ export default {
 
         if (path.startsWith("/ws/")) return stub.fetch(request);
         if (sub === "" && request.method === "GET") return json({ id: row.id, name: row.name });
+        const file = sub.match(/^\/files\/([A-Za-z0-9_-]{1,128})$/);
+        if (file && request.method === "PUT") return await putFile(env, id, file[1], request);
+        if (file && request.method === "GET") return await getFile(env, id, file[1]);
         if (sub === "/rename" && request.method === "POST") {
           const body = (await request.json()) as { name?: unknown };
           const name = typeof body.name === "string" ? body.name.trim() : "";

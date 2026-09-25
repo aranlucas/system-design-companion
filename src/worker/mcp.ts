@@ -6,7 +6,6 @@ import {
 import { McpServer, type McpRequestContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { COMPONENT_KINDS, COMPONENTS } from "../shared/components.ts";
-import type { El } from "../shared/protocol.ts";
 import { SHAPES, type Op } from "./scene.ts";
 import { RUBRIC } from "./rubric.ts";
 import {
@@ -46,6 +45,11 @@ const placement = z
 const color = z
   .string()
   .describe("fill: white gray red pink violet blue cyan green yellow orange, or a hex color");
+const textColor = z
+  .string()
+  .describe(
+    "color of the label or note text: black gray red pink violet blue cyan green yellow orange, or a hex color",
+  );
 
 const opSchema = z.discriminatedUnion("op", [
   z.object({
@@ -66,6 +70,7 @@ const opSchema = z.discriminatedUnion("op", [
       .optional()
       .describe("rectangle (default: services), ellipse (datastores/clients), diamond (decisions)"),
     color: color.optional(),
+    text_color: textColor.optional(),
     width: z.number().optional(),
     height: z.number().optional(),
     place: placement.optional(),
@@ -76,6 +81,7 @@ const opSchema = z.discriminatedUnion("op", [
     from: target,
     to: target,
     label: z.string().optional(),
+    text_color: textColor.optional(),
     dashed: z.boolean().optional().describe("async / optional / replication flows"),
     bidirectional: z.boolean().optional(),
   }),
@@ -85,6 +91,7 @@ const opSchema = z.discriminatedUnion("op", [
     target,
     label: z.string().optional().describe("new label (frame name / note text for those types)"),
     color: color.optional(),
+    text_color: textColor.optional(),
     shape: z.enum(SHAPES).optional(),
     dashed: z.boolean().optional(),
     width: z.number().optional(),
@@ -109,6 +116,7 @@ const opSchema = z.discriminatedUnion("op", [
     place: placement.optional(),
     frame: target.optional(),
     size: z.enum(["s", "m", "l"]).optional(),
+    text_color: textColor.optional(),
   }),
 ]);
 
@@ -245,10 +253,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
     },
     guard(async ({ diagram }: { diagram: string }) => {
       const d = await pick(diagram);
-      const raw = (await room(env, d.id).getRaw()) as unknown as El[];
-      const elements = raw.sort((a, b) =>
-        (a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0,
-      );
+      const elements = await room(env, d.id).getRaw();
       return {
         content: [{ type: "text" as const, text: `${elements.length} elements` }],
         structuredContent: { name: d.name, url: diagram, elements },

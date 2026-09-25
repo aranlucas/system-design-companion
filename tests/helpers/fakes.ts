@@ -189,31 +189,64 @@ export class FakeD1 {
   }
 }
 
-/** Minimal R2 stand-in: put/get JSON blobs by key. */
+/** Minimal R2 stand-in: JSON blobs and binary objects by key. */
 export class FakeR2 {
-  objects = new Map<string, string>();
+  objects = new Map<string, { bytes: Uint8Array; httpMetadata?: { contentType?: string } }>();
 
-  async put(key: string, value: string): Promise<void> {
-    this.objects.set(key, value);
+  async put(
+    key: string,
+    value: string | ArrayBuffer | ReadableStream,
+    options?: { httpMetadata?: { contentType?: string } },
+  ): Promise<void> {
+    const bytes =
+      typeof value === "string"
+        ? new TextEncoder().encode(value)
+        : new Uint8Array(await new Response(value).arrayBuffer());
+    this.objects.set(key, { bytes, httpMetadata: options?.httpMetadata });
   }
 
-  async get(key: string): Promise<{ json: () => Promise<unknown> } | null> {
+  async head(key: string) {
+    return this.objects.has(key) ? {} : null;
+  }
+
+  async get(key: string) {
     const v = this.objects.get(key);
-    if (v === undefined) return null;
-    return { json: async () => JSON.parse(v) as unknown };
+    if (!v) return null;
+    return {
+      httpMetadata: v.httpMetadata,
+      get body() {
+        return new Response(v.bytes).body!;
+      },
+      json: async () => JSON.parse(new TextDecoder().decode(v.bytes)) as unknown,
+    };
   }
 }
 
-/** Minimal DO SQLite stand-in covering the elements/meta statements room.ts uses. */
+/** Minimal DO SQLite stand-in covering the elements/meta/tombstones statements room.ts uses. */
 export class FakeDOSql {
   elements = new Map<string, string>();
   meta = new Map<string, string>();
+  tombstones = new Map<string, number>();
 
-  exec(query: string, ...params: unknown[]): Array<Record<string, string>> {
+  exec(query: string, ...params: unknown[]): Array<Record<string, string | number>> {
     const q = query.trim();
     if (q.startsWith("CREATE TABLE")) return [];
     if (q.startsWith("SELECT json FROM elements"))
       return [...this.elements.values()].map((json) => ({ json }));
+    if (q.startsWith("SELECT id, deleted_at FROM tombstones"))
+      return [...this.tombstones].map(([id, at]) => ({ id, deleted_at: at }));
+    if (q.startsWith("INSERT OR REPLACE INTO tombstones")) {
+      this.tombstones.set(params[0] as string, params[1] as number);
+      return [];
+    }
+    if (q.startsWith("DELETE FROM tombstones WHERE id = ?")) {
+      this.tombstones.delete(params[0] as string);
+      return [];
+    }
+    if (q.startsWith("DELETE FROM elements WHERE id = ?")) {
+      this.elements.delete(params[0] as string);
+      return [];
+    }
     if (q.startsWith("SELECT k, v FROM meta"))
       return [...this.meta.entries()].map(([k, v]) => ({ k, v }));
     if (q.startsWith("INSERT OR REPLACE INTO meta")) {
@@ -239,11 +272,13 @@ export function makeRoomCtx() {
         transactionSync: <T>(fn: () => T): T => {
           const elements = new Map(sql.elements);
           const meta = new Map(sql.meta);
+          const tombstones = new Map(sql.tombstones);
           try {
             return fn();
           } catch (error) {
             sql.elements = elements;
             sql.meta = meta;
+            sql.tombstones = tombstones;
             throw error;
           }
         },
