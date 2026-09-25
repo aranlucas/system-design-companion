@@ -1,6 +1,28 @@
-# System Design
+<p align="center">
+  <img src="public/icons/system-design-128.png" alt="" width="96" height="96" />
+</p>
 
-A live Excalidraw canvas that you, your interviewer, and Claude Code edit together. See [docs/design.md](docs/design.md).
+<h1 align="center">System Design Companion</h1>
+
+<p align="center">
+  A live Excalidraw canvas that you, your interviewer, and your coding agent edit together.
+</p>
+
+<p align="center">
+  <a href="#run-locally">Run locally</a> ·
+  <a href="#deploy-cloudflare">Deploy</a> ·
+  <a href="#using-it-in-the-interview">Features</a> ·
+  <a href="docs/design.md">Design</a>
+</p>
+
+## How it works
+
+- **One shared canvas.** Everyone with the link draws on the same Excalidraw board in real time, with live cursors and presence.
+- **The agent joins over MCP.** Claude Code or Codex reads the diagram as a graph, edits it with semantic operations (`add_node`, `connect`, …), and can point at things on your screen.
+- **Nothing is lost.** Every agent edit is snapshotted first, so one click in **Versions** undoes it.
+- **It stays readable.** Agent edits are tidied as they land: no overlaps, aligned rows, connections kept inside their frames.
+
+The stack: a Cloudflare Worker with one Durable Object per diagram, D1 for the diagram index, and R2 for snapshots. See [docs/design.md](docs/design.md) for the architecture.
 
 ## Run locally
 
@@ -27,6 +49,13 @@ pnpm deploy
 
 Then `claude mcp add --transport http system-design https://<your-worker>.workers.dev/mcp` (or `codex mcp add system-design --url …/mcp`).
 
+Git-connected Workers Builds deploy `main` and build a Preview for every other branch. Previews get their own Durable Object storage automatically but need separate D1 and R2 resources, set in the `previews` block of `wrangler.jsonc`:
+
+```sh
+npx wrangler d1 create system-design-companion-preview        # paste its database_id into previews.d1_databases
+npx wrangler r2 bucket create system-design-companion-preview
+```
+
 ## Using it in the interview
 
 - **Share / Agent**: copies the edit link for the interviewer, plus the Claude setup command and join prompt.
@@ -43,9 +72,10 @@ Then `claude mcp add --transport http system-design https://<your-worker>.worker
 
 ```sh
 pnpm check                    # typecheck, Oxlint, Oxfmt
-pnpm test                     # vitest: scene engine, rooms, HTTP routes (99 tests)
+pnpm test                     # vitest: scene engine, tidy, rooms, HTTP routes
 pnpm format                   # apply Oxfmt
-node scripts/scene-smoke.ts      # scene engine smoke test
+node scripts/scene-smoke.ts   # scene engine smoke test
+node scripts/tidy-check.ts <raw.json>   # layout problems before/after tidy on a real export
 ```
 
 See [docs/improvements.md](docs/improvements.md) for test coverage, findings, and
