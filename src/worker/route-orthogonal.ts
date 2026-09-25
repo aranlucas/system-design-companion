@@ -201,6 +201,30 @@ class Heap<T> {
   }
 }
 
+/** Index of the first value strictly greater than `v` in an ascending list. */
+function firstAbove(vs: number[], v: number) {
+  let lo = 0,
+    hi = vs.length;
+  while (lo < hi) {
+    const m = (lo + hi) >> 1;
+    if (vs[m] <= v) lo = m + 1;
+    else hi = m;
+  }
+  return lo;
+}
+
+/** Index of the first value at or above `v` in an ascending list. */
+function firstAtOrAbove(vs: number[], v: number) {
+  let lo = 0,
+    hi = vs.length;
+  while (lo < hi) {
+    const m = (lo + hi) >> 1;
+    if (vs[m] < v) lo = m + 1;
+    else hi = m;
+  }
+  return lo;
+}
+
 const uniq = (xs: number[]) => [...new Set(xs.map(Math.round))].sort((a, b) => a - b);
 
 /** Remove points that don't turn, so every point is an end or a bend. */
@@ -305,15 +329,25 @@ export function routeOrthogonal(
 
   // Route shortest first, then rip up and reroute each against all the others until stable:
   // the first pass lets early routes take paths that later ones must then cross.
-  for (const req of order) state.set(req.id, route(req));
+  // A route depends only on the others, so one routed since the last change elsewhere would come
+  // out the same: skip it. `changes` counts route changes; `seen` is the count each route last saw.
+  let changes = 0;
+  const seen = new Map<string, number>();
+  for (const req of order) {
+    state.set(req.id, route(req));
+    seen.set(req.id, ++changes);
+  }
   for (let round = 0; round < 3; round++) {
     let moved = false;
     for (const req of order) {
+      if (seen.get(req.id) === changes) continue;
       const next = route(req);
       if (JSON.stringify(next.points) !== JSON.stringify(state.get(req.id)!.points)) {
         state.set(req.id, next);
+        changes++;
         moved = true;
       }
+      seen.set(req.id, changes);
     }
     if (!moved) break;
   }
@@ -411,28 +445,28 @@ export function routeOrthogonal(
     // not on the other routes, so they're computed once and reused across reroute rounds.
     const W0 = gx.length;
     const H0 = gy.length;
+    // Every obstacle edge is a grid line and so is the middle of every gap, so each obstacle has a
+    // line strictly inside it: a step between neighbouring points is clear exactly when both are
+    // free. Free points are found by blanking the cells each obstacle covers.
     const gridKey = `${req.id}:${reach}`;
-    let open = grids.get(gridKey);
-    if (!open) {
-      const freeV = new Uint8Array(W0 * H0);
-      for (let j = 0; j < H0; j++)
-        for (let i = 0; i < W0; i++) freeV[j * W0 + i] = free({ x: gx[i], y: gy[j] }) ? 1 : 0;
-      open = new Uint8Array(W0 * H0 * 4);
+    let freeV = grids.get(gridKey);
+    if (!freeV) {
+      freeV = new Uint8Array(W0 * H0);
       for (let j = 0; j < H0; j++)
         for (let i = 0; i < W0; i++) {
-          if (!freeV[j * W0 + i]) continue;
-          const a = { x: gx[i], y: gy[j] };
-          for (let d = 0; d < 4; d++) {
-            const ii = i + DIRS[d].x,
-              jj = j + DIRS[d].y;
-            if (ii < 0 || jj < 0 || ii >= W0 || jj >= H0 || !freeV[jj * W0 + ii]) continue;
-            const b = { x: gx[ii], y: gy[jj] };
-            if (!edges.some((o) => segmentBlocked(a, b, o))) open[(j * W0 + i) * 4 + d] = 1;
-          }
+          const p = { x: gx[i], y: gy[j] };
+          freeV[j * W0 + i] = inBounds(p) && within(p) ? 1 : 0;
         }
-      grids.set(gridKey, open);
+      for (const o of edges) {
+        const i0 = firstAbove(gx, o.x),
+          i1 = firstAtOrAbove(gx, o.x + o.w);
+        const j0 = firstAbove(gy, o.y),
+          j1 = firstAtOrAbove(gy, o.y + o.h);
+        for (let j = j0; j < j1; j++) freeV.fill(0, j * W0 + i0, j * W0 + i1);
+      }
+      grids.set(gridKey, freeV);
     }
-    const grid = open;
+    const grid = freeV;
     // The stub between a side and its lead-out point crosses its own shape's clearance by design.
     const stubClear = (a: Pt, b: Pt) => !others.some((o) => segmentBlocked(a, b, o));
 
@@ -445,16 +479,34 @@ export function routeOrthogonal(
       // Arriving means travelling opposite to the side's outward direction.
       goal.set(id(q.x, q.y) * 4 + ((e.dir + 2) % 4), e);
     }
-    const hs = routed.filter((t) => t.a.y === t.b.y);
-    const vs = routed.filter((t) => t.a.x === t.b.x && t.a.y !== t.b.y);
+    // Other routes, horizontal ones sorted by y and vertical ones by x, so a step only looks at
+    // the few that lie in its own band.
+    const hs = routed.filter((t) => t.a.y === t.b.y).sort((u, v) => u.a.y - v.a.y);
+    const vs = routed
+      .filter((t) => t.a.x === t.b.x && t.a.y !== t.b.y)
+      .sort((u, v) => u.a.x - v.a.x);
+    const hKeys = hs.map((t) => t.a.y);
+    const vKeys = vs.map((t) => t.a.x);
     const segCost = (a: Pt, b: Pt) => {
       const s = { a, b };
       let c = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
-      const [across, along] = a.y === b.y ? [vs, hs] : [hs, vs];
-      for (const t of across) if (crosses(s, t)) c += CROSS;
-      for (const t of along) c += shared(s, t) * SHARE;
+      const horizontal = a.y === b.y;
+      const [across, acrossKeys, lo, hi] = horizontal
+        ? [vs, vKeys, Math.min(a.x, b.x), Math.max(a.x, b.x)]
+        : [hs, hKeys, Math.min(a.y, b.y), Math.max(a.y, b.y)];
+      for (let k = firstAbove(acrossKeys, lo); k < across.length && acrossKeys[k] < hi; k++)
+        if (crosses(s, across[k])) c += CROSS;
+      const [along, alongKeys, at] = horizontal ? [hs, hKeys, a.y] : [vs, vKeys, a.x];
+      for (
+        let k = firstAtOrAbove(alongKeys, at - 4);
+        k < along.length && alongKeys[k] <= at + 4;
+        k++
+      )
+        c += shared(s, along[k]) * SHARE;
       return c;
     };
+    // A step's cost doesn't change during one search, and it's reached from several directions.
+    const stepCost = new Float64Array(gx.length * gy.length * 4).fill(-1);
 
     const heap = new Heap<SearchNode>();
     const best = new Float64Array(gx.length * gy.length * 4).fill(Infinity);
@@ -483,11 +535,13 @@ export function routeOrthogonal(
       }
       for (let d = 0; d < 4; d++) {
         if (d === (n.dir + 2) % 4) continue; // no U-turns
-        if (!grid[n.v * 4 + d]) continue;
         const i = (n.v % W) + DIRS[d].x;
         const j = Math.floor(n.v / W) + DIRS[d].y;
+        if (i < 0 || j < 0 || i >= W || j >= gy.length || !grid[j * W + i]) continue;
         const q = { x: gx[i], y: gy[j] };
-        const g = n.g + segCost(n.p, q) + (d === n.dir ? 0 : BEND);
+        const step = n.v * 4 + d;
+        if (stepCost[step] < 0) stepCost[step] = segCost(n.p, q);
+        const g = n.g + stepCost[step] + (d === n.dir ? 0 : BEND);
         const next: SearchNode = {
           v: id(q.x, q.y),
           dir: d,
