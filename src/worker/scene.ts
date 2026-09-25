@@ -4,6 +4,7 @@ import { generateKeyBetween } from "fractional-indexing";
 import { iconElements } from "../shared/icons.ts";
 import { componentByKind } from "../shared/components.ts";
 import { AGENT_STROKE, type El } from "../shared/protocol.ts";
+import { solveLayout } from "./solve-layout.ts";
 
 export type Author = "agent" | "human" | "template";
 
@@ -1540,6 +1541,8 @@ export class Scene {
    * scope: frames (null = top level) to tidy; undefined = everything.
    */
   tidy(scope?: Set<string | null>): TidyStats {
+    // What this batch added or edited gives way first; the rest is where someone put it.
+    const fresh = new Set(this.changed);
     const stats: TidyStats = {
       bound: 0,
       rerouted: 0,
@@ -1615,71 +1618,34 @@ export class Scene {
 
     const byFrame = this.tidyBlocks(inScope);
 
-    // Steps 3-4 repeat until stable: a separation can unblock a snap that was refused before.
-    for (let outer = 0; outer < 4; outer++) {
-      const before = stats.aligned + stats.spaced + stats.separated;
-      for (const blocks of byFrame.values()) {
-        const others = (e: El) => blocks.filter((b) => b.node !== e).map((b) => b.box());
-        // 3. Snap nodes whose centres are nearly in a row / column onto the cluster's largest box
-        //    (a fixed anchor, so repeated runs converge). Never snap into a collision.
+    // 3-4. Per frame, one weighted least-squares solve lines nodes up into rows and columns and
+    //      keeps every block 24px clear of the others, moving things as little as possible in
+    //      total and never swapping their order. Then even out the gaps along each aligned row.
+    //      Repeated until stable: a solve can bring a node within snapping range of a row.
+    for (const blocks of byFrame.values()) {
+      for (let round = 0; round < 4; round++) {
+        let changed = 0;
+        const moves = solveLayout(
+          blocks.map((b) => ({
+            box: b.box(),
+            alignable: !!b.node,
+            weight: b.ids.some((id) => fresh.has(id)) ? 1 : 10,
+          })),
+          { gap: 24, alignTolerance: 16 },
+        );
+        moves.forEach((m, i) => {
+          if (!m.dx && !m.dy) return;
+          blocks[i].move(m.dx, m.dy);
+          if (m.aligned) stats.aligned++;
+          else stats.separated++;
+          changed++;
+        });
         const nodes = blocks.flatMap((b) => (b.node ? [b.node] : []));
-        for (let round = 0; round < 4; round++) {
-          let snapped = 0;
-          for (const axis of ["y", "x"] as const) {
-            const size = axis === "y" ? "height" : "width";
-            const mid = (e: El) => e[axis] + e[size] / 2;
-            for (const cluster of clusters(nodes, mid, 16)) {
-              const anchor = cluster.reduce((m, e) =>
-                e.width * e.height > m.width * m.height ? e : m,
-              );
-              for (const e of cluster) {
-                const d = mid(anchor) - mid(e);
-                if (e === anchor || Math.abs(d) < 1) continue;
-                const box = { ...boxOf(e), [axis]: Math.round(e[axis] + d) } as Box;
-                if (others(e).some((o) => overlaps(box, o, 23))) continue;
-                this.moveNode(e, box);
-                snapped++;
-              }
-            }
-          }
-          stats.aligned += snapped;
-          if (!snapped) break;
-        }
-
-        // 3b. Even out the gaps along each aligned row / column.
-        stats.spaced += this.spaceEvenly(nodes, others);
-
-        // 4. Separate overlapping blocks with the smallest push; the later one (reading order)
-        //    moves. When pushing sideways or down cost about the same, prefer fewer arrow crossings.
-        const M = 24;
-        for (let pass = 0; pass < 40; pass++) {
-          let moved = false;
-          const order = [...blocks].sort((a, b) => a.box().y - b.box().y || a.box().x - b.box().x);
-          for (let i = 0; i < order.length; i++) {
-            for (let j = i + 1; j < order.length; j++) {
-              const a = order[i].box();
-              const b = order[j].box();
-              if (!overlaps(a, b, M - 1)) continue;
-              const px = Math.round(Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x) + M);
-              const py = Math.round(Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y) + M);
-              const sideways = { dx: center(b).x >= center(a).x ? px : -px, dy: 0 };
-              const down = { dx: 0, dy: py };
-              let push = px < py ? sideways : down;
-              const node = order[j].node;
-              if (node && Math.abs(px - py) <= 48) {
-                const cx = this.crossingsIf(node, sideways.dx, 0);
-                const cy = this.crossingsIf(node, 0, down.dy);
-                if (cx !== cy) push = cx < cy ? sideways : down;
-              }
-              order[j].move(push.dx, push.dy);
-              stats.separated++;
-              moved = true;
-            }
-          }
-          if (!moved) break;
-        }
+        const others = (e: El) => blocks.filter((b) => b.node !== e).map((b) => b.box());
+        const spaced = this.spaceEvenly(nodes, others);
+        stats.spaced += spaced;
+        if (!changed && !spaced) break;
       }
-      if (stats.aligned + stats.spaced + stats.separated === before) break;
     }
 
     // 5. Fit frames around their contents, then 6. pull overlapping frames apart.
@@ -1724,7 +1690,12 @@ export class Scene {
    * single rigid block, so grouped artwork stays intact. Icons are groups of parts but act as nodes.
    */
   private tidyBlocks(inScope: (fid: string | null | undefined) => boolean) {
-    type Block = { node?: El; box: () => Box; move: (dx: number, dy: number) => void };
+    type Block = {
+      node?: El;
+      ids: string[];
+      box: () => Box;
+      move: (dx: number, dy: number) => void;
+    };
     const out = new Map<string | null, Block[]>();
     const add = (fid: string | null | undefined, b: Block) =>
       out.set(fid ?? null, [...(out.get(fid ?? null) ?? []), b]);
@@ -1741,6 +1712,7 @@ export class Scene {
         if (!isBlock(e)) continue;
         add(e.frameId, {
           node: this.isNode(e) ? e : undefined,
+          ids: [e.id],
           box: () => boxOf(e),
           move: (dx, dy) =>
             this.isNode(e) || e.type === "stickynote"
@@ -1759,6 +1731,7 @@ export class Scene {
         return t && !ids.has(t.id) ? [t] : [];
       });
       add(e.frameId, {
+        ids: [...ids],
         box: () => unionBox(members.map(boxOf))!,
         move: (dx, dy) => {
           for (const m of [...members, ...labels]) this.mutate(m, { x: m.x + dx, y: m.y + dy });
@@ -1813,32 +1786,6 @@ export class Scene {
       }
     }
     return moved;
-  }
-
-  /** Arrow crossings a node's connections would have after moving it by (dx, dy), as straight legs. */
-  private crossingsIf(node: El, dx: number, dy: number): number {
-    const c = center(boxOf(node));
-    const from = { x: c.x + dx, y: c.y + dy };
-    const mine = this.arrowsBoundTo(node.id);
-    const legs = mine.flatMap((a) => {
-      const other = this.els.get(
-        a.startBinding?.elementId === node.id ? a.endBinding?.elementId : a.startBinding?.elementId,
-      );
-      return other && !other.isDeleted ? [center(boxOf(other))] : [];
-    });
-    if (!legs.length) return 0;
-    const ids = new Set(mine.map((a) => a.id));
-    let n = 0;
-    for (const a of this.live()) {
-      if (a.type !== "arrow" || ids.has(a.id)) continue;
-      const pts = (a.points as [number, number][]).map(([px, py]) => ({
-        x: a.x + px,
-        y: a.y + py,
-      }));
-      for (let i = 1; i < pts.length; i++)
-        for (const to of legs) if (segmentsCross(from, to, pts[i - 1], pts[i])) n++;
-    }
-    return n;
   }
 
   // ---------- bulk ----------

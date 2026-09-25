@@ -26,6 +26,7 @@
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "roughjs": "^4.6.6",
+    "webcola": "^3.4.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
