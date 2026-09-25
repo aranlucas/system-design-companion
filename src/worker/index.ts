@@ -16,6 +16,15 @@ import {
 
 export { DiagramRoom } from "./room.ts";
 
+/** Request bodies, as the routes below read them. */
+type CreateBody = { name?: string; template?: string };
+type RenameBody = { name?: unknown };
+type SnapshotBody = { name: string };
+type RestoreBody = { snapshotId: string };
+/** `null` in `frames` is the top level. */
+type TidyBody = { frames?: (string | null)[] };
+type TemplateBody = { name: string; description?: string };
+
 const json = (v: unknown, status = 200) => Response.json(v, { status });
 
 export default {
@@ -45,7 +54,7 @@ export default {
       }
 
       if (path === "/api/diagrams" && request.method === "POST") {
-        const body = (await request.json()) as { name?: string; template?: string };
+        const body = (await request.json()) as CreateBody;
         const d = await createDiagram(
           env,
           body.name?.trim() || "Untitled",
@@ -73,7 +82,7 @@ export default {
         if (file && request.method === "PUT") return await putFile(env, id, file[1], request);
         if (file && request.method === "GET") return await getFile(env, id, file[1]);
         if (sub === "/rename" && request.method === "POST") {
-          const body = (await request.json()) as { name?: unknown };
+          const body = (await request.json()) as RenameBody;
           const name = typeof body.name === "string" ? body.name.trim() : "";
           if (!name || name.length > 120)
             return json({ error: "Use a name between 1 and 120 characters." }, 400);
@@ -86,25 +95,20 @@ export default {
         if (sub === "/snapshots" && request.method === "GET")
           return json(await stub.listSnapshots());
         if (sub === "/snapshots" && request.method === "POST") {
-          const { name } = (await request.json()) as { name: string };
+          const { name } = (await request.json()) as SnapshotBody;
           return json(await stub.snapshot(name || "manual", "named"));
         }
         if (sub === "/restore" && request.method === "POST") {
-          const { snapshotId } = (await request.json()) as { snapshotId: string };
+          const { snapshotId } = (await request.json()) as RestoreBody;
           return json(await stub.restore(snapshotId));
         }
         if (sub === "/tidy" && request.method === "POST") {
           // Optional { frames: [id | null] }; null is the top level. Default: whole diagram.
-          const { frames } = (await request.json().catch(() => ({}))) as {
-            frames?: (string | null)[];
-          };
+          const { frames } = (await request.json().catch(() => ({}))) as TidyBody;
           return json(await stub.tidy(frames?.length ? frames : undefined, "system"));
         }
         if (sub === "/template" && request.method === "POST") {
-          const { name, description } = (await request.json()) as {
-            name: string;
-            description?: string;
-          };
+          const { name, description } = (await request.json()) as TemplateBody;
           return json(await saveAsTemplate(env, id, name, description));
         }
       }

@@ -47,6 +47,15 @@ export const room = (env: Env, id: string) => env.ROOM.get(env.ROOM.idFromName(i
 
 export const shareLink = (origin: string, id: string, key: string) => `${origin}/d/${id}?k=${key}`;
 
+/** Row shapes read from D1. */
+type KeyedDiagramRow = DiagramRow & { key_hash: string };
+type AccessKeyRow = { access_key: string };
+type TemplateRow = { id: string; name: string; description: string | null };
+type LibraryRow = { id: string; name: string; key: string | null; createdAt: number };
+type LinkedLibraryRow = LibraryRow & { key: string };
+/** A share link's parts. */
+export type DiagramLink = { id: string; key: string };
+
 export interface DiagramRow {
   id: string;
   name: string;
@@ -66,18 +75,18 @@ export async function verifyKey(
      AND NOT EXISTS (SELECT 1 FROM deleted_diagrams WHERE diagram_id = diagrams.id)`,
   )
     .bind(id)
-    .first<DiagramRow & { key_hash: string }>();
+    .first<KeyedDiagramRow>();
   if (!row) return null;
   if (row.key_hash === (await sha256(key))) return row;
   if (row.is_template) return null;
   const entry = await env.DB.prepare("SELECT access_key FROM diagram_library WHERE diagram_id = ?")
     .bind(id)
-    .first<{ access_key: string }>();
+    .first<AccessKeyRow>();
   return entry?.access_key === key ? row : null;
 }
 
 /** Parse a share link (full URL, path, or "id?k=key"). */
-export function parseLink(link: string): { id: string; key: string } | null {
+export function parseLink(link: string): DiagramLink | null {
   const m = link.match(/(?:\/d\/)?([A-Za-z0-9_-]{8,})\?(?:.*&)?k=([A-Za-z0-9_-]+)/);
   return m ? { id: m[1], key: m[2] } : null;
 }
@@ -86,7 +95,7 @@ export async function listTemplates(env: Env) {
   await ensureSchema(env);
   const { results } = await env.DB.prepare(
     "SELECT id, name, description FROM diagrams WHERE is_template = 1 ORDER BY created_at DESC",
-  ).all<{ id: string; name: string; description: string | null }>();
+  ).all<TemplateRow>();
   return [
     ...BUILTIN_TEMPLATES.map(({ id, name, description }) => ({ id, name, description })),
     ...results.map((r) => ({
@@ -135,10 +144,10 @@ export async function listDiagrams(env: Env, limit = 50, cursor?: DiagramCursor)
      ORDER BY d.created_at DESC, d.id DESC LIMIT ?`,
   )
     .bind(...params)
-    .all<{ id: string; name: string; key: string | null; createdAt: number }>();
+    .all<LibraryRow>();
   const items = await Promise.all(
     results.slice(0, limit).map(async (item) => {
-      if (item.key) return item as typeof item & { key: string };
+      if (item.key) return item as LinkedLibraryRow;
       // Backfill only this page, preserving old share links and concurrent-reader safety.
       await env.DB.prepare(
         "INSERT OR IGNORE INTO diagram_library (diagram_id, access_key) VALUES (?, ?)",
@@ -149,7 +158,7 @@ export async function listDiagrams(env: Env, limit = 50, cursor?: DiagramCursor)
         "SELECT access_key FROM diagram_library WHERE diagram_id = ?",
       )
         .bind(item.id)
-        .first<{ access_key: string }>();
+        .first<AccessKeyRow>();
       if (!entry) throw new Error("Could not create diagram library link");
       return { ...item, key: entry.access_key };
     }),

@@ -15,12 +15,7 @@ function applyOk(s: Scene, ops: Op[], author: Author = "agent") {
 }
 
 function graph(s: Scene) {
-  return s.graph() as {
-    nodes: Array<{ id: string; label: string; [k: string]: unknown }>;
-    edges: Array<{ id: string; from: string; to: string; [k: string]: unknown }>;
-    frames: Array<{ id: string; name: string }>;
-    notes: Array<{ id: string; text: string; frame?: string }>;
-  };
+  return s.graph();
 }
 
 describe("add_node", () => {

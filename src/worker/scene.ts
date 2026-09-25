@@ -3,7 +3,7 @@ import dagre from "@dagrejs/dagre";
 import { generateKeyBetween } from "fractional-indexing";
 import { iconElements } from "../shared/icons.ts";
 import { componentByKind } from "../shared/components.ts";
-import { AGENT_STROKE, type El } from "../shared/protocol.ts";
+import { AGENT_STROKE, type El, type Point } from "../shared/protocol.ts";
 import { solveLayout } from "./solve-layout.ts";
 
 export type Author = "agent" | "human" | "template";
@@ -131,6 +131,45 @@ const PAD = 40;
 const SHAPE_TYPES = new Set(["rectangle", "ellipse", "diamond", "image", "embeddable", "iframe"]);
 
 type Box = { x: number; y: number; w: number; h: number };
+type Pt = { x: number; y: number };
+/** Two ends of a straight stretch of an arrow. */
+type Leg = [Pt, Pt];
+/** A detour's bends and what it costs. */
+type Candidate = { bends: Pt[]; cost: number };
+/** An entry in an element's `boundElements`. */
+type BoundRef = { id: string; type: string };
+/** Where tidy last fitted a frame, so a later manual resize can be told apart. */
+type AutoFit = { dx: number; dy: number; w: number; h: number; fw: number; fh: number };
+/** What tidy may move as one piece: a node, a note, or a user group. */
+type Block = { node?: El; ids: string[]; box: () => Box; move: (dx: number, dy: number) => void };
+type GraphEdge = {
+  id: string;
+  from?: string;
+  to?: string;
+  fromId?: string;
+  toId?: string;
+  label?: string;
+  dashed?: true;
+  both?: true;
+  inferred?: true;
+  text_color?: string;
+};
+type Sketch = {
+  id: string;
+  type: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  frame?: string;
+};
+type AddNodeOp = Extract<Op, { op: "add_node" }>;
+type ConnectOp = Extract<Op, { op: "connect" }>;
+type DisconnectOp = Extract<Op, { op: "disconnect" }>;
+type UpdateOp = Extract<Op, { op: "update" }>;
+type RemoveOp = Extract<Op, { op: "remove" }>;
+type AddFrameOp = Extract<Op, { op: "add_frame" }>;
+type AddNoteOp = Extract<Op, { op: "add_note" }>;
 
 const rnd = () => Math.floor(Math.random() * 2 ** 31);
 const ID_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-";
@@ -233,7 +272,7 @@ const unionBox = (bs: Box[]): Box | null => {
 
 /** Point on the border of `b` in the direction of `toward`, pushed out by `gap`. */
 /** Point on the outline of a shape (rect, ellipse or diamond) toward `toward`, pushed out by `gap`. */
-function borderPoint(b: Box, toward: { x: number; y: number }, gap: number, shape = "rectangle") {
+function borderPoint(b: Box, toward: Pt, gap: number, shape = "rectangle") {
   const c = center(b);
   const dx = toward.x - c.x;
   const dy = toward.y - c.y;
@@ -247,8 +286,6 @@ function borderPoint(b: Box, toward: { x: number; y: number }, gap: number, shap
     t = Math.min(dx !== 0 ? a / Math.abs(dx) : Infinity, dy !== 0 ? bb / Math.abs(dy) : Infinity);
   return { x: c.x + dx * t, y: c.y + dy * t };
 }
-
-type Pt = { x: number; y: number };
 
 /** Groups of 2+ items whose `key` lies within `tol` of the group's first item. */
 function clusters<T>(items: T[], key: (t: T) => number, tol: number): T[][] {
@@ -655,9 +692,7 @@ export class Scene {
       .map(boxOf);
     const u = unionBox(kids);
     if (!u) return false;
-    const auto = frame.customData?.autoFit as
-      | { dx: number; dy: number; w: number; h: number; fw: number; fh: number }
-      | undefined;
+    const auto = frame.customData?.autoFit as AutoFit | undefined;
     const current = { x: frame.x, y: frame.y, w: frame.width, h: frame.height };
     // A resize since the last fit means someone chose this size: it becomes the new floor.
     const chosen =
@@ -779,7 +814,7 @@ export class Scene {
     const t = this.boundText(container);
     if (!t) return;
     if (container.type === "arrow") {
-      const pts = container.points as [number, number][];
+      const pts = container.points as Point[];
       const mid = (pts.length - 1) / 2;
       const a = pts[Math.floor(mid)];
       const b = pts[Math.ceil(mid)];
@@ -830,7 +865,7 @@ export class Scene {
    * straightens our bend again once the straight path is clear. Returns true if it changed.
    */
   private detour(arrow: El): boolean {
-    const pts = arrow.points as [number, number][];
+    const pts = arrow.points as Point[];
     const ours = arrow.customData?.autoBend === true;
     const source = this.els.get(arrow.startBinding?.elementId);
     const target = this.els.get(arrow.endBinding?.elementId);
@@ -874,13 +909,12 @@ export class Scene {
         (p, i) => i === 0 || !near.some((o) => segmentHitsBox(path[i - 1], p, o, 10)),
       );
     };
-    const abs = (a: El) =>
-      (a.points as [number, number][]).map(([px, py]) => ({ x: a.x + px, y: a.y + py }));
+    const abs = (a: El) => (a.points as Point[]).map(([px, py]) => ({ x: a.x + px, y: a.y + py }));
     const setPath = (bends: Pt[]) => {
       const cur = abs(arrow);
       const s0 = cur[0];
       const e0 = cur.at(-1)!;
-      const rel = (pt: Pt): [number, number] => [Math.round(pt.x - s0.x), Math.round(pt.y - s0.y)];
+      const rel = (pt: Pt): Point => [Math.round(pt.x - s0.x), Math.round(pt.y - s0.y)];
       const points = [rel(s0), ...bends.map(rel), rel(e0)];
       this.mutate(arrow, {
         points,
@@ -925,7 +959,7 @@ export class Scene {
     const ny = (q.x - p.x) / len;
     const mid = { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 };
     // Other arrows' segments: crossing them costs as much as a 150px longer detour.
-    const others: [Pt, Pt][] = [];
+    const others: Leg[] = [];
     for (const o of this.live()) {
       if (o.type !== "arrow" || o.id === arrow.id) continue;
       const op = abs(o);
@@ -977,7 +1011,7 @@ export class Scene {
     // Keep a valid existing route unless the replacement is materially shorter.
     // This also prevents rounding or small neighbouring edits from causing jitter.
     const currentCost = pts.length > 2 && clear(current) ? cost(current) : Infinity;
-    let best: { bends: Pt[]; cost: number } | undefined;
+    let best: Candidate | undefined;
     for (const candidate of candidates) {
       const bends = candidate.map(pixel);
       const path = aimed(bends);
@@ -1010,7 +1044,7 @@ export class Scene {
 
   /** Re-derive a bound arrow's geometry from the shapes it is bound to (bends are kept). */
   private routeArrow(arrow: El, shiftBends = true) {
-    const pts = arrow.points as [number, number][];
+    const pts = arrow.points as Point[];
     const absStart = { x: arrow.x + pts[0][0], y: arrow.y + pts[0][1] };
     const absEnd = { x: arrow.x + pts[pts.length - 1][0], y: arrow.y + pts[pts.length - 1][1] };
     const s = arrow.startBinding ? this.els.get(arrow.startBinding.elementId) : undefined;
@@ -1048,7 +1082,7 @@ export class Scene {
     ];
     const x0 = Math.round(start.x);
     const y0 = Math.round(start.y);
-    const points = abs.map((p) => [Math.round(p.x - x0), Math.round(p.y - y0)] as [number, number]);
+    const points = abs.map((p): Point => [Math.round(p.x - x0), Math.round(p.y - y0)]);
     const xs = points.map((p) => p[0]);
     const ys = points.map((p) => p[1]);
     const patch = {
@@ -1088,7 +1122,7 @@ export class Scene {
     for (const a of this.arrowsBoundTo(el.id)) this.routeArrow(a);
   }
 
-  private addBound(container: El, ref: { id: string; type: string }) {
+  private addBound(container: El, ref: BoundRef) {
     const list = (container.boundElements ?? []).filter((b: any) => b.id !== ref.id);
     this.mutate(container, { boundElements: [...list, ref] });
   }
@@ -1193,7 +1227,7 @@ export class Scene {
     if (ref) this.refs.set(ref, id);
   }
 
-  addNode(o: Extract<Op, { op: "add_node" }>, author: Author): El {
+  addNode(o: AddNodeOp, author: Author): El {
     const comp = o.kind ? componentByKind.get(o.kind) : undefined;
     if (o.kind && !comp) throw new Error(`unknown kind "${o.kind}" (see the components resource)`);
     const label = o.label ?? comp?.label;
@@ -1262,7 +1296,7 @@ export class Scene {
     return node;
   }
 
-  connect(o: Extract<Op, { op: "connect" }>, author: Author): El {
+  connect(o: ConnectOp, author: Author): El {
     const a = this.resolve(o.from);
     const b = this.resolve(o.to);
     if (a.id === b.id) throw new Error("cannot connect an element to itself");
@@ -1290,7 +1324,7 @@ export class Scene {
     return arrow;
   }
 
-  disconnect(o: Extract<Op, { op: "disconnect" }>): number {
+  disconnect(o: DisconnectOp): number {
     const a = this.resolve(o.from);
     const b = this.resolve(o.to);
     const between = this.arrowsBoundTo(a.id).filter((e) => {
@@ -1302,7 +1336,7 @@ export class Scene {
     return between.length;
   }
 
-  update(o: Extract<Op, { op: "update" }>, author: Author): El {
+  update(o: UpdateOp, author: Author): El {
     const el = this.resolve(o.target);
     if (o.label !== undefined) {
       if (el.type === "frame") this.mutate(el, { name: o.label });
@@ -1398,14 +1432,14 @@ export class Scene {
     }
   }
 
-  remove(o: Extract<Op, { op: "remove" }>) {
+  remove(o: RemoveOp) {
     const el = this.resolve(o.target);
     if (this.isNode(el)) for (const a of this.arrowsBoundTo(el.id)) this.deleteEl(a);
     this.deleteEl(el);
     return el;
   }
 
-  addFrame(o: Extract<Op, { op: "add_frame" }>, author: Author): El {
+  addFrame(o: AddFrameOp, author: Author): El {
     const kids = (o.contains ?? []).map((t) => this.resolve(t));
     let box: Box;
     if (kids.length) {
@@ -1428,7 +1462,7 @@ export class Scene {
     return frame;
   }
 
-  addNote(o: Extract<Op, { op: "add_note" }>, author: Author): El {
+  addNote(o: AddNoteOp, author: Author): El {
     let frame = this.impliedFrame(o.frame, o.place);
     const fontSize = { s: 16, m: 20, l: 28 }[o.size ?? "m"];
     const ink =
@@ -1562,8 +1596,8 @@ export class Scene {
     const nodes0 = this.live().filter((e) => this.isNode(e));
     for (const a of this.live()) {
       if (a.type !== "arrow" || !inScope(a.frameId) || (a.startBinding && a.endBinding)) continue;
-      const pts = a.points as [number, number][];
-      const end = (p: [number, number]) => this.nodeAt({ x: a.x + p[0], y: a.y + p[1] }, nodes0);
+      const pts = a.points as Point[];
+      const end = (p: Point) => this.nodeAt({ x: a.x + p[0], y: a.y + p[1] }, nodes0);
       const from = a.startBinding ? this.els.get(a.startBinding.elementId) : end(pts[0]);
       const to = a.endBinding ? this.els.get(a.endBinding.elementId) : end(pts[pts.length - 1]);
       if (!from || !to || from.id === to.id) continue;
@@ -1690,12 +1724,6 @@ export class Scene {
    * single rigid block, so grouped artwork stays intact. Icons are groups of parts but act as nodes.
    */
   private tidyBlocks(inScope: (fid: string | null | undefined) => boolean) {
-    type Block = {
-      node?: El;
-      ids: string[];
-      box: () => Box;
-      move: (dx: number, dy: number) => void;
-    };
     const out = new Map<string | null, Block[]>();
     const add = (fid: string | null | undefined, b: Block) =>
       out.set(fid ?? null, [...(out.get(fid ?? null) ?? []), b]);
@@ -1889,30 +1917,12 @@ export class Scene {
     };
     const hit = (p: Pt) => this.nodeAt(p, nodes);
 
-    const edges: {
-      id: string;
-      from?: string;
-      to?: string;
-      fromId?: string;
-      toId?: string;
-      label?: string;
-      dashed?: true;
-      both?: true;
-      inferred?: true;
-    }[] = [];
-    const sketches: {
-      id: string;
-      type: string;
-      x: number;
-      y: number;
-      w: number;
-      h: number;
-      frame?: string;
-    }[] = [];
+    const edges: GraphEdge[] = [];
+    const sketches: Sketch[] = [];
 
     for (const e of live) {
       if (e.type !== "arrow" && e.type !== "line") continue;
-      const pts = e.points as [number, number][];
+      const pts = e.points as Point[];
       let from = e.startBinding ? this.els.get(e.startBinding.elementId) : undefined;
       let to = e.endBinding ? this.els.get(e.endBinding.elementId) : undefined;
       let inferred = false;
@@ -2028,10 +2038,13 @@ export class Scene {
   }
 }
 
+/** What the agent reads: `graph()` without the internal edge list, empty sections left out. */
+export type GraphView = Partial<Omit<ReturnType<Scene["graph"]>, "_edgesRaw">>;
+
 /** Compact graph for the agent (drops the internal raw edge list). */
-export function graphView(scene: Scene, selection?: Set<string>) {
+export function graphView(scene: Scene, selection?: Set<string>): GraphView {
   const { _edgesRaw, ...g } = scene.graph(selection);
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(g)) if ((v as unknown[]).length) out[k] = v;
-  return out;
+  for (const [k, v] of Object.entries(g)) if (v.length) out[k] = v;
+  return out as GraphView;
 }

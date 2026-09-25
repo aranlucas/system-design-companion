@@ -267,5 +267,8 @@ export const COMPONENTS: Component[] = [
   { kind: "decision", label: "Decision?", shape: "diamond", fill: "transparent", group: "Compute" },
 ];
 
-export const COMPONENT_KINDS = COMPONENTS.map((c) => c.kind) as [string, ...string[]];
+/** At least one string, as zod's `z.enum` requires. */
+type NonEmptyStrings = [string, ...string[]];
+
+export const COMPONENT_KINDS = COMPONENTS.map((c) => c.kind) as NonEmptyStrings;
 export const componentByKind = new Map(COMPONENTS.map((c) => [c.kind, c]));

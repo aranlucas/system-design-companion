@@ -3,6 +3,8 @@ import type { El } from "../../src/shared/protocol.ts";
 import type { Scene } from "../../src/worker/scene.ts";
 
 type Pt = [number, number];
+/** A bound shape (if it still exists) and the arrow end drawn at it. */
+type BoundEnd = [El | undefined, Pt];
 
 const overlap = (a: El, b: El) =>
   a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
@@ -52,7 +54,7 @@ export function layoutReport(s: Scene) {
   // Bound arrows whose drawn ends are detached (>20px) from the shapes they are bound to.
   const brokenArrows = arrows.filter((a) => {
     const pts = path(a);
-    const ends: [El | undefined, Pt][] = [
+    const ends: BoundEnd[] = [
       [a.startBinding && byId.get(a.startBinding.elementId), pts[0]],
       [a.endBinding && byId.get(a.endBinding.elementId), pts[pts.length - 1]],
     ];

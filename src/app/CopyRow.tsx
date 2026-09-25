@@ -1,6 +1,11 @@
 import { useState } from "react";
 
-export function CopyRow({ label, text }: { label?: string; text: string }) {
+interface CopyRowProps {
+  label?: string;
+  text: string;
+}
+
+export function CopyRow({ label, text }: CopyRowProps) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="row">

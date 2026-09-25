@@ -1,10 +1,15 @@
 // Tidy behaviours: arrow binding, frame fitting, groups, spacing, push direction, and regressions
 // measured with the same layout report scripts/tidy-check.ts prints.
 import { describe, expect, it } from "vitest";
-import type { El } from "../src/shared/protocol.ts";
+import type { El, Point } from "../src/shared/protocol.ts";
 import { Scene, graphView, type Op } from "../src/worker/scene.ts";
 import { BUILTIN_TEMPLATES } from "../src/worker/templates.ts";
 import { layoutReport } from "./helpers/layout-report.ts";
+
+/** Where a test drags a node; y defaults to where it is. */
+type DragTarget = { x: number; y?: number };
+/** A named scene for the table-driven regression checks. */
+type Case = [name: string, make: () => Scene];
 
 let seq = 0;
 const el = (
@@ -32,7 +37,7 @@ const el = (
 });
 const rect = (id: string, x: number, y: number, extra: Partial<El> = {}) =>
   el(id, "rectangle", x, y, 160, 70, extra);
-const arrow = (id: string, from: [number, number], to: [number, number], extra: Partial<El> = {}) =>
+const arrow = (id: string, from: Point, to: Point, extra: Partial<El> = {}) =>
   el(id, "arrow", from[0], from[1], Math.abs(to[0] - from[0]), Math.abs(to[1] - from[1]), {
     points: [
       [0, 0],
@@ -66,7 +71,7 @@ describe("tidy: binding loose arrow ends", () => {
     const s = new Scene([rect("A", 0, 0), arrow("x", [80, 76], [400, 400])]);
     expect(s.tidy().bound).toBe(0);
     expect(s.resolve("x").startBinding).toBeUndefined();
-    expect((graphView(s) as { edges?: unknown[] }).edges ?? []).toHaveLength(0);
+    expect(graphView(s).edges ?? []).toHaveLength(0);
   });
 
   it("binds the free end of a half-bound arrow when it lands on a node", () => {
@@ -82,7 +87,7 @@ describe("tidy: binding loose arrow ends", () => {
 
 describe("tidy: frame fitting", () => {
   // Move a node the way Excalidraw drags it: its label comes along.
-  const drag = (s: Scene, id: string, to: { x: number; y?: number }) => {
+  const drag = (s: Scene, id: string, to: DragTarget) => {
     const node = s.resolve(id);
     const dx = to.x - node.x;
     const dy = (to.y ?? node.y) - node.y;
@@ -252,10 +257,10 @@ describe("tidy: no regressions", () => {
     );
   }
 
-  const cases: [string, () => Scene][] = [
+  const cases: Case[] = [
     ["messy 60", () => messy(60)],
     ["messy 120", () => messy(120)],
-    ...BUILTIN_TEMPLATES.map((t): [string, () => Scene] => [
+    ...BUILTIN_TEMPLATES.map((t): Case => [
       `template ${t.id}`,
       () => {
         const s = new Scene([]);

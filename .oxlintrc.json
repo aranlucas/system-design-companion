@@ -26,11 +26,13 @@
     "import/no-unassigned-import": "off",
     "import/no-named-as-default-member": "off",
     "oxc/no-map-spread": "off",
-    "eslint/no-underscore-dangle": "off"
+    "eslint/no-underscore-dangle": "off",
+    "local/no-inline-types": "error"
   },
   "options": {
     "typeAware": true,
     "maxWarnings": 0
   },
-  "ignorePatterns": ["worker-configuration.d.ts", "public/mcp-view.html"]
+  "ignorePatterns": ["worker-configuration.d.ts", "public/mcp-view.html"],
+  "jsPlugins": ["./lint/types-plugin.ts"]
 }

@@ -21,6 +21,42 @@ export interface SnapshotRow {
   element_count: number;
 }
 
+/** What `.all()` resolves to. */
+type D1Results<T> = { results: T[] };
+/** Bound parameters of each statement the fakes handle, in order. */
+type LibraryInsertParams = [id: string, key: string];
+type DiagramInsertParams = [
+  id: string,
+  name: string,
+  key_hash: string,
+  description: string | null,
+  created_at: number,
+  updated_at: number,
+];
+type LegacyDiagramInsertParams = [
+  id: string,
+  name: string,
+  key_hash: string,
+  created_at: number,
+  updated_at: number,
+];
+type SnapshotInsertParams = [
+  id: string,
+  diagram_id: string,
+  name: string,
+  kind: string,
+  created_at: number,
+  element_count: number,
+];
+type RenameParams = [name: string, updated_at: number, id: string];
+type CursorParams = [time: number, id: string];
+type SnapshotListParams = [diagramId: string, limit: number];
+type HttpMetadata = { contentType?: string };
+type StoredObject = { bytes: Uint8Array; httpMetadata?: HttpMetadata };
+type PutOptions = { httpMetadata?: HttpMetadata };
+/** The env binding the fake wires up after creating the env. */
+type RoomBinding = { ROOM: unknown };
+
 /** Minimal D1 stand-in covering exactly the statements store.ts / room.ts use. */
 export class FakeD1 {
   diagrams = new Map<string, DiagramRow>();
@@ -42,7 +78,7 @@ export class FakeD1 {
         return this.first(sql, []) as T | null;
       },
       // oxlint-disable-next-line no-unnecessary-type-parameters
-      all: async <T>(): Promise<{ results: T[] }> => {
+      all: async <T>(): Promise<D1Results<T>> => {
         return { results: this.all(sql, []) as T[] };
       },
     };
@@ -58,7 +94,7 @@ export class FakeD1 {
             return this.first(sql, params) as T | null;
           },
           // oxlint-disable-next-line no-unnecessary-type-parameters
-          all: async <T>(): Promise<{ results: T[] }> => {
+          all: async <T>(): Promise<D1Results<T>> => {
             return { results: this.all(sql, params) as T[] };
           },
         };
@@ -72,20 +108,13 @@ export class FakeD1 {
       return;
     }
     if (sql.includes("INSERT OR IGNORE INTO diagram_library")) {
-      const [id, key] = p as [string, string];
+      const [id, key] = p as LibraryInsertParams;
       if (!this.library.has(id)) this.library.set(id, key);
       return;
     }
     if (sql.includes("INSERT INTO diagrams")) {
       if (sql.includes("description")) {
-        const [id, name, key_hash, description, created_at, updated_at] = p as [
-          string,
-          string,
-          string,
-          string | null,
-          number,
-          number,
-        ];
+        const [id, name, key_hash, description, created_at, updated_at] = p as DiagramInsertParams;
         this.diagrams.set(id, {
           id,
           name,
@@ -96,13 +125,7 @@ export class FakeD1 {
           updated_at,
         });
       } else {
-        const [id, name, key_hash, created_at, updated_at] = p as [
-          string,
-          string,
-          string,
-          number,
-          number,
-        ];
+        const [id, name, key_hash, created_at, updated_at] = p as LegacyDiagramInsertParams;
         this.diagrams.set(id, {
           id,
           name,
@@ -116,19 +139,12 @@ export class FakeD1 {
       return;
     }
     if (sql.includes("INSERT INTO snapshots")) {
-      const [id, diagram_id, name, kind, created_at, element_count] = p as [
-        string,
-        string,
-        string,
-        string,
-        number,
-        number,
-      ];
+      const [id, diagram_id, name, kind, created_at, element_count] = p as SnapshotInsertParams;
       this.snapshots.push({ id, diagram_id, name, kind, created_at, element_count });
       return;
     }
     if (sql.includes("UPDATE diagrams SET name")) {
-      const [name, updated_at, id] = p as [string, number, string];
+      const [name, updated_at, id] = p as RenameParams;
       const row = this.diagrams.get(id);
       if (row) {
         row.name = name;
@@ -152,7 +168,7 @@ export class FakeD1 {
   private all(sql: string, p: unknown[]): unknown[] {
     if (sql.includes("FROM diagrams d LEFT JOIN diagram_library")) {
       const hasCursor = sql.includes("(d.created_at, d.id) <");
-      const [time, id] = p as [number, string];
+      const [time, id] = p as CursorParams;
       const limit = p.at(-1) as number;
       return [...this.diagrams.values()]
         .filter((d) => !d.is_template && !this.deleted.has(d.id))
@@ -172,7 +188,7 @@ export class FakeD1 {
         .map((r) => ({ id: r.id, name: r.name, description: r.description }));
     }
     if (sql.includes("FROM snapshots WHERE diagram_id = ?")) {
-      const [diagramId, limit] = p as [string, number];
+      const [diagramId, limit] = p as SnapshotListParams;
       return this.snapshots
         .filter((s) => s.diagram_id === diagramId)
         .sort((a, b) => b.created_at - a.created_at)
@@ -191,12 +207,12 @@ export class FakeD1 {
 
 /** Minimal R2 stand-in: JSON blobs and binary objects by key. */
 export class FakeR2 {
-  objects = new Map<string, { bytes: Uint8Array; httpMetadata?: { contentType?: string } }>();
+  objects = new Map<string, StoredObject>();
 
   async put(
     key: string,
     value: string | ArrayBuffer | ReadableStream,
-    options?: { httpMetadata?: { contentType?: string } },
+    options?: PutOptions,
   ): Promise<void> {
     const bytes =
       typeof value === "string"
@@ -327,7 +343,7 @@ export function makeEnv(): TestEnv {
   const bucket = new FakeR2();
   const rooms = new Map<string, DiagramRoom>();
   const env = { DB: db, BUCKET: bucket, ROOM: null } as unknown as Env;
-  (env as unknown as { ROOM: unknown }).ROOM = {
+  (env as unknown as RoomBinding).ROOM = {
     idFromName: (id: string) => id,
     get: (id: string) => {
       let r = rooms.get(id);

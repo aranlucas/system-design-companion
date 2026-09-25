@@ -12,6 +12,15 @@ import { Scene, graphView, type Author, type Op } from "./scene.ts";
 import { patchSnapshotName } from "./patch-name.ts";
 import { copyFiles } from "./store.ts";
 
+/** A tab RPC waiting for its reply. */
+type PendingCall = { resolve: (v: unknown) => void; reject: (e: Error) => void };
+/** An open tab and what it last told us. */
+type Tab = { ws: WebSocket; state: TabState };
+type ElementRow = { json: string };
+type TombstoneRow = { id: string; deleted_at: number };
+type MetaRow = { k: string; v: string };
+type FocusResult = { mode: string; visible: boolean; elementIds: string[] };
+
 interface TabState {
   /** Stable per-socket id, used as the Excalidraw collaborator id. */
   sid: string;
@@ -51,10 +60,7 @@ export class DiagramRoom extends DurableObject<Env> {
   private deletedAt = new Map<string, number>();
   private diagramId = "";
   private name = "Untitled";
-  private pending = new Map<
-    string,
-    { resolve: (v: unknown) => void; reject: (e: Error) => void }
-  >();
+  private pending = new Map<string, PendingCall>();
   private lastFocusAt = 0;
   private deleted = false;
 
@@ -67,20 +73,18 @@ export class DiagramRoom extends DurableObject<Env> {
       sql.exec(
         "CREATE TABLE IF NOT EXISTS tombstones (id TEXT PRIMARY KEY, deleted_at INTEGER NOT NULL)",
       );
-      for (const row of sql.exec<{ json: string }>("SELECT json FROM elements")) {
+      for (const row of sql.exec<ElementRow>("SELECT json FROM elements")) {
         const el = JSON.parse(row.json) as El;
         this.els.set(el.id, el);
       }
-      for (const row of sql.exec<{ id: string; deleted_at: number }>(
-        "SELECT id, deleted_at FROM tombstones",
-      ))
+      for (const row of sql.exec<TombstoneRow>("SELECT id, deleted_at FROM tombstones"))
         this.deletedAt.set(row.id, row.deleted_at);
       // Tombstones written before this table existed start their TTL now.
       const untracked = [...this.els.values()].filter(
         (e) => e.isDeleted && !this.deletedAt.has(e.id),
       );
       if (untracked.length) this.trackTombstones(untracked);
-      for (const row of sql.exec<{ k: string; v: string }>("SELECT k, v FROM meta")) {
+      for (const row of sql.exec<MetaRow>("SELECT k, v FROM meta")) {
         if (row.k === "deleted") this.deleted = row.v === "true";
         if (row.k === "id") this.diagramId = row.v;
         if (row.k === "name") this.name = row.v;
@@ -313,8 +317,8 @@ export class DiagramRoom extends DurableObject<Env> {
   }
 
   /** Most recently focused open tab — the "human's" tab. */
-  private primaryTab(): { ws: WebSocket; state: TabState } | null {
-    let best: { ws: WebSocket; state: TabState } | null = null;
+  private primaryTab(): Tab | null {
+    let best: Tab | null = null;
     for (const ws of this.ctx.getWebSockets()) {
       const state = ws.deserializeAttachment() as TabState;
       if (!best || state.focusedAt > best.state.focusedAt) best = { ws, state };
@@ -452,7 +456,7 @@ export class DiagramRoom extends DurableObject<Env> {
   ) {
     const scene = new Scene(this.els.values());
     const elementIds = targets.map((target) => scene.resolve(target).id);
-    return this.callTab<{ mode: string; visible: boolean; elementIds: string[] }>("focus_view", {
+    return this.callTab<FocusResult>("focus_view", {
       elementIds,
       mode,
       gesture,

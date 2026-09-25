@@ -19,6 +19,26 @@ import {
 } from "./store.ts";
 import { VIEW_URI, viewHtml } from "./view.ts";
 
+/** Tool and prompt arguments, as their input schemas validate them. */
+type DiagramArgs = { diagram: string };
+type CreateDiagramArgs = { name: string; template?: string };
+type GetSceneArgs = DiagramArgs & { format?: "graph" | "raw" };
+type ScreenshotArgs = DiagramArgs & { element_ids?: string[] };
+type PatchArgs = DiagramArgs & { ops: Op[]; summary?: string };
+type FrameArgs = DiagramArgs & { frame?: string };
+type LayoutArgs = FrameArgs & { direction?: "LR" | "TB" };
+type MermaidArgs = DiagramArgs & { source: string };
+type NameArgs = DiagramArgs & { name: string };
+type RestoreArgs = DiagramArgs & { snapshot_id: string };
+type TemplateArgs = NameArgs & { description?: string };
+type FocusArgs = DiagramArgs & {
+  targets: string[];
+  mode: "focus" | "point";
+  gesture: "dot" | "heart";
+};
+type ReviewArgs = { focus?: string };
+type EstimateArgs = { dau?: string; notes?: string };
+
 const INSTRUCTIONS = `Collaborative Excalidraw canvas for system design. A human (and possibly an interviewer) edits the same canvas live in a browser tab.
 Workflow:
 1. Every diagram tool takes \`diagram\`: the canvas share link (…/d/<id>?k=<key>). If you don't have one, ask the user for it, or call create_diagram. Call join_session once to validate it and get an overview, then keep passing the same link.
@@ -187,7 +207,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       inputSchema: z.object({ diagram: diagramArg }),
       annotations: { readOnlyHint: true },
     },
-    guard(async ({ diagram }: { diagram: string }) => {
+    guard(async ({ diagram }: DiagramArgs) => {
       const row = await pick(diagram);
       const info = await room(env, row.id).info();
       return {
@@ -211,7 +231,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
         template: z.string().optional().describe("template id from list_templates"),
       }),
     },
-    guard(async ({ name, template }: { name: string; template?: string }) => {
+    guard(async ({ name, template }: CreateDiagramArgs) => {
       const d = await createDiagram(env, name, template);
       const link = shareLink(origin, d.id, d.key);
       return {
@@ -236,7 +256,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       inputSchema: z.object({ diagram: diagramArg, format: z.enum(["graph", "raw"]).optional() }),
       annotations: { readOnlyHint: true },
     },
-    guard(async ({ diagram, format }: { diagram: string; format?: "graph" | "raw" }) => {
+    guard(async ({ diagram, format }: GetSceneArgs) => {
       const d = await pick(diagram);
       return format === "raw" ? room(env, d.id).getRaw() : room(env, d.id).getGraph();
     }),
@@ -251,7 +271,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       inputSchema: z.object({ diagram: diagramArg }),
       annotations: { readOnlyHint: true },
     },
-    guard(async ({ diagram }: { diagram: string }) => {
+    guard(async ({ diagram }: DiagramArgs) => {
       const d = await pick(diagram);
       const elements = await room(env, d.id).getRaw();
       return {
@@ -286,9 +306,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       inputSchema: z.object({ diagram: diagramArg }),
       annotations: { readOnlyHint: true },
     },
-    guard(async ({ diagram }: { diagram: string }) =>
-      room(env, (await pick(diagram)).id).getSelection(),
-    ),
+    guard(async ({ diagram }: DiagramArgs) => room(env, (await pick(diagram)).id).getSelection()),
   );
 
   server.registerTool(
@@ -307,7 +325,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       }),
       annotations: { readOnlyHint: true },
     },
-    guard(async ({ diagram, element_ids }: { diagram: string; element_ids?: string[] }) => {
+    guard(async ({ diagram, element_ids }: ScreenshotArgs) => {
       const shot = await room(env, (await pick(diagram)).id).screenshot(element_ids);
       return { content: [{ type: "image" as const, data: shot.base64, mimeType: shot.mimeType }] };
     }),
@@ -334,7 +352,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
           ),
       }),
     },
-    guard(async ({ diagram, ops, summary }: { diagram: string; ops: Op[]; summary?: string }) =>
+    guard(async ({ diagram, ops, summary }: PatchArgs) =>
       room(env, (await pick(diagram)).id).applyPatch(ops, "agent", summary),
     ),
   );
@@ -349,9 +367,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
         frame: z.string().optional().describe("only tidy this frame; default: whole diagram"),
       }),
     },
-    guard(async ({ diagram, frame }: { diagram: string; frame?: string }) =>
-      room(env, (await pick(diagram)).id).tidy(frame),
-    ),
+    guard(async ({ diagram, frame }: FrameArgs) => room(env, (await pick(diagram)).id).tidy(frame)),
   );
 
   server.registerTool(
@@ -368,16 +384,8 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
           .describe("only lay out this frame's nodes; default: all nodes not in a frame"),
       }),
     },
-    guard(
-      async ({
-        diagram,
-        direction,
-        frame,
-      }: {
-        diagram: string;
-        direction?: "LR" | "TB";
-        frame?: string;
-      }) => room(env, (await pick(diagram)).id).layout(direction ?? "LR", frame),
+    guard(async ({ diagram, direction, frame }: LayoutArgs) =>
+      room(env, (await pick(diagram)).id).layout(direction ?? "LR", frame),
     ),
   );
 
@@ -388,7 +396,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
         "Draw a Mermaid flowchart/sequence diagram onto free canvas space (rendered by the user's tab). Good for sketching many nodes at once.",
       inputSchema: z.object({ diagram: diagramArg, source: z.string() }),
     },
-    guard(async ({ diagram, source }: { diagram: string; source: string }) =>
+    guard(async ({ diagram, source }: MermaidArgs) =>
       room(env, (await pick(diagram)).id).importMermaid(source),
     ),
   );
@@ -401,7 +409,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       description: "Save a named version of the diagram.",
       inputSchema: z.object({ diagram: diagramArg, name: z.string() }),
     },
-    guard(async ({ diagram, name }: { diagram: string; name: string }) =>
+    guard(async ({ diagram, name }: NameArgs) =>
       room(env, (await pick(diagram)).id).snapshot(name, "named"),
     ),
   );
@@ -413,9 +421,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
       inputSchema: z.object({ diagram: diagramArg }),
       annotations: { readOnlyHint: true },
     },
-    guard(async ({ diagram }: { diagram: string }) =>
-      room(env, (await pick(diagram)).id).listSnapshots(),
-    ),
+    guard(async ({ diagram }: DiagramArgs) => room(env, (await pick(diagram)).id).listSnapshots()),
   );
 
   server.registerTool(
@@ -425,7 +431,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
         "Restore the diagram to a snapshot (itself snapshotted first, so restore is undoable).",
       inputSchema: z.object({ diagram: diagramArg, snapshot_id: z.string() }),
     },
-    guard(async ({ diagram, snapshot_id }: { diagram: string; snapshot_id: string }) =>
+    guard(async ({ diagram, snapshot_id }: RestoreArgs) =>
       room(env, (await pick(diagram)).id).restore(snapshot_id),
     ),
   );
@@ -450,16 +456,8 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
         description: z.string().optional(),
       }),
     },
-    guard(
-      async ({
-        diagram,
-        name,
-        description,
-      }: {
-        diagram: string;
-        name: string;
-        description?: string;
-      }) => saveAsTemplate(env, (await pick(diagram)).id, name, description),
+    guard(async ({ diagram, name, description }: TemplateArgs) =>
+      saveAsTemplate(env, (await pick(diagram)).id, name, description),
     ),
   );
 
@@ -480,18 +478,8 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
           ),
       }),
     },
-    guard(
-      async ({
-        diagram,
-        targets,
-        mode,
-        gesture,
-      }: {
-        diagram: string;
-        targets: string[];
-        mode: "focus" | "point";
-        gesture: "dot" | "heart";
-      }) => room(env, (await pick(diagram)).id).focusView(targets, mode, gesture),
+    guard(async ({ diagram, targets, mode, gesture }: FocusArgs) =>
+      room(env, (await pick(diagram)).id).focusView(targets, mode, gesture),
     ),
   );
 
@@ -541,7 +529,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
         focus: z.string().optional().describe("e.g. 'scaling the write path'"),
       }),
     },
-    ({ focus }: { focus?: string }) =>
+    ({ focus }: ReviewArgs) =>
       userMsg(`Review my system design on the shared canvas${focus ? `, focusing on: ${focus}` : ""}.
 1. Call get_scene, and get_screenshot if there are sketches or the layout matters.
 2. Judge it against this rubric:\n\n${RUBRIC}
@@ -570,7 +558,7 @@ Do not edit the canvas unless I ask.`),
         notes: z.string().optional().describe("read/write ratio, payload sizes, retention, …"),
       }),
     },
-    ({ dau, notes }: { dau?: string; notes?: string }) =>
+    ({ dau, notes }: EstimateArgs) =>
       userMsg(`Do back-of-envelope estimates for the system on the canvas (read it with get_scene first).
 Inputs: DAU=${dau ?? "infer a reasonable number and say so"}; ${notes ?? "infer other inputs and state assumptions"}.
 Compute: read QPS and write QPS (avg and peak ~2-3x), storage per year, bandwidth, cache size (hot 20%), and the number of servers/shards implied. Use round numbers and show the arithmetic in one line each.

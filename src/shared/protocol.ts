@@ -1,5 +1,8 @@
 // Wire protocol between canvas tabs and the DiagramRoom Durable Object.
 
+/** A point of a linear element, relative to the element's x/y. */
+export type Point = [number, number];
+
 /** Minimal structural view of an Excalidraw element; everything else is passed through untouched. */
 export interface El {
   id: string;

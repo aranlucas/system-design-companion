@@ -58,7 +58,7 @@ describe("diagram lifecycle (store.ts + real rooms on fake bindings)", () => {
   it("creates from a builtin template through the room", async () => {
     const { env, rooms } = makeEnv();
     const d = await createDiagram(env, "Web", "builtin:web-baseline");
-    const g = (await rooms.get(d.id)!.getGraph()) as { nodes?: unknown[]; edges?: unknown[] };
+    const g = await rooms.get(d.id)!.getGraph();
     expect(g.nodes).toHaveLength(9);
     expect(g.edges).toHaveLength(8);
   });
@@ -78,7 +78,7 @@ describe("diagram lifecycle (store.ts + real rooms on fake bindings)", () => {
     expect(listed.some((t) => t.id === "builtin:interview")).toBe(true);
 
     const d2 = await createDiagram(env, "Copy", tpl.id);
-    const g = (await rooms.get(d2.id)!.getGraph()) as { nodes?: unknown[]; edges?: unknown[] };
+    const g = await rooms.get(d2.id)!.getGraph();
     expect(g.nodes).toHaveLength(6);
     expect(g.edges).toHaveLength(5);
   });

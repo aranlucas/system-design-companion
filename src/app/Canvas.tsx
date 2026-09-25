@@ -40,6 +40,35 @@ import { CopyRow } from "./CopyRow.tsx";
 import { componentLibrary } from "./library.ts";
 import { displayName, linkFor, remember, setDisplayName, setupCommands } from "./local.ts";
 
+interface CanvasProps {
+  id: string;
+  k: string;
+}
+
+/** The heart gesture being drawn: where, and when it started (it fades out). */
+type Heart = { x: number; y: number; startedAt: number };
+type RpcMessage = Extract<ServerMessage, { type: "rpc" }>;
+type RenameResult = { name: string; error?: string };
+
+interface SharePanelProps {
+  link: string;
+  copy: (text: string, what: string) => void;
+  onName: () => void;
+}
+
+interface RenamePanelProps {
+  name: string;
+  id: string;
+  diagramKey: string;
+  onRenamed: (name: string) => void;
+}
+
+interface VersionsPanelProps {
+  id: string;
+  k: string;
+  flash: (m: string) => void;
+}
+
 interface Snapshot {
   id: string;
   name: string;
@@ -80,14 +109,14 @@ const blobToBase64 = (b: Blob) =>
     r.readAsDataURL(b);
   });
 
-export function Canvas({ id, k }: { id: string; k: string }) {
+export function Canvas({ id, k }: CanvasProps) {
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [name, setName] = useState("…");
   const [peers, setPeers] = useState(1);
   const [loaded, setLoaded] = useState(false);
   // The heart has no Excalidraw equivalent; the plain "point" gesture is drawn as the
   // agent's collaborator cursor instead.
-  const [heart, setHeart] = useState<{ x: number; y: number; startedAt: number } | null>(null);
+  const [heart, setHeart] = useState<Heart | null>(null);
   const gestureTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -203,7 +232,7 @@ export function Canvas({ id, k }: { id: string; k: string }) {
 
   // ---------- tab RPC (screenshot, mermaid) ----------
 
-  const handleRpc = useCallback(async (msg: Extract<ServerMessage, { type: "rpc" }>) => {
+  const handleRpc = useCallback(async (msg: RpcMessage) => {
     const a = apiRef.current;
     try {
       if (!a) throw new Error("canvas not ready");
@@ -729,15 +758,7 @@ export function Canvas({ id, k }: { id: string; k: string }) {
   );
 }
 
-function SharePanel({
-  link,
-  copy,
-  onName,
-}: {
-  link: string;
-  copy: (text: string, what: string) => void;
-  onName: () => void;
-}) {
+function SharePanel({ link, copy, onName }: SharePanelProps) {
   const [me, setMe] = useState(displayName);
   return (
     <div className="sd-panel">
@@ -777,17 +798,7 @@ function SharePanel({
   );
 }
 
-function RenamePanel({
-  name,
-  id,
-  diagramKey,
-  onRenamed,
-}: {
-  name: string;
-  id: string;
-  diagramKey: string;
-  onRenamed: (name: string) => void;
-}) {
+function RenamePanel({ name, id, diagramKey, onRenamed }: RenamePanelProps) {
   const [draft, setDraft] = useState(name);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -811,7 +822,7 @@ function RenamePanel({
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ name: draft.trim() }),
           });
-          const result = (await response.json()) as { name: string; error?: string };
+          const result = (await response.json()) as RenameResult;
           if (!response.ok) throw new Error(result.error || "Could not rename the diagram.");
           onRenamed(result.name);
         } catch (err) {
@@ -862,7 +873,7 @@ function tidySummary(d: TidyResult) {
   return parts.join(" · ") || `${d.changed} changes`;
 }
 
-function VersionsPanel({ id, k, flash }: { id: string; k: string; flash: (m: string) => void }) {
+function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
   const [snaps, setSnaps] = useState<Snapshot[] | null>(null);
   const [label, setLabel] = useState("");
   const q = `?k=${encodeURIComponent(k)}`;
