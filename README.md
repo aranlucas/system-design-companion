@@ -5,7 +5,11 @@
 <h1 align="center">System Design Companion</h1>
 
 <p align="center">
-  A shared whiteboard for system design interviews, where your AI agent draws alongside you.
+  Draw the system. Explain the trade-offs. Let your AI agent keep up.
+</p>
+
+<p align="center">
+  <a href="https://github.com/aranlucas/system-design-companion/actions/workflows/check.yml"><img src="https://github.com/aranlucas/system-design-companion/actions/workflows/check.yml/badge.svg" alt="Checks" /></a>
 </p>
 
 <p align="center">
@@ -19,6 +23,10 @@ You, your interviewer and Claude Code (or Codex) work on the same Excalidraw can
 real time. The agent sees the diagram as components and connections, not pixels. It can
 add to it, rearrange it, point at parts of it and review it, while everyone watches the
 changes land.
+
+> **Try the interview moment:** say “add a cache in front of the database,” then
+> point at the write path and ask “what breaks at 10× traffic?” The canvas and
+> the conversation move together.
 
 The browser link is the capability: anyone who has a diagram's share link can
 edit that board. There are no user accounts, and a deployment is a shared
