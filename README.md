@@ -20,6 +20,10 @@ real time. The agent sees the diagram as components and connections, not pixels.
 add to it, rearrange it, point at parts of it and review it, while everyone watches the
 changes land.
 
+The browser link is the capability: anyone who has a diagram's share link can
+edit that board. There are no user accounts, and a deployment is a shared
+workspace unless you put it behind access controls.
+
 ## A session
 
 1. **Start a diagram**, blank or from a template: an interview framework (requirements,
@@ -88,3 +92,45 @@ each: see [docs/setup.md](docs/setup.md).
 
 How it's built (a Cloudflare Worker with one Durable Object per diagram) is in
 [docs/design.md](docs/design.md).
+
+## Architecture at a glance
+
+```mermaid
+flowchart LR
+  Tabs[Candidate + interviewer tabs] -- WebSocket --> Worker[Cloudflare Worker]
+  Agent[MCP client] -- Streamable HTTP --> Worker
+  Worker --> Room[One DiagramRoom Durable Object per board]
+  Room --> Scene[Pure scene engine]
+  Room --> DOSQL[(Durable Object SQLite)]
+  Worker --> D1[(D1 index + metadata)]
+  Room --> R2[(R2 snapshots + templates)]
+```
+
+`DiagramRoom` owns the live scene, presence, semantic operations, snapshots,
+and tab RPCs. The pure scene engine applies patches, tidy, and layout without
+I/O, which is why most behavior is covered by unit tests. The MCP endpoint and
+HTTP routes are thin adapters over the same room operations, so a human edit
+and an agent edit converge on the same state and persistence rules.
+
+## Source map
+
+- `src/app/` — Vite/React shell, Excalidraw canvas, home page, and WebSocket
+  client.
+- `src/worker/index.ts` — Worker routes, static assets, and Durable Object
+  bindings.
+- `src/worker/room.ts` — live room state, collaboration, snapshots, and RPC.
+- `src/worker/scene.ts` — pure semantic scene operations and layout helpers.
+- `src/worker/mcp.ts` — MCP tools and prompts, including the MCP Apps view.
+- `src/shared/` — wire protocol and reusable component definitions.
+- `src/view/` plus `scripts/build-view.ts` — the inline MCP Apps canvas view.
+- `docs/setup.md` — local/deployment setup and MCP client commands.
+- `docs/design.md` — detailed data flow, storage, auth, and operation contracts.
+
+## Status and limits
+
+The project is deployable to Cloudflare Workers with D1, R2, and Durable
+Objects. It is intentionally a capability-link collaboration tool: links are
+permissions, deletion is logical, and shared boards should be protected at the
+deployment or network layer when they contain sensitive interview material.
+Agent operations snapshot before changing the board, but this is a recovery
+mechanism rather than an access-control system.
