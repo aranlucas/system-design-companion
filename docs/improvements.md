@@ -1,24 +1,65 @@
 # Improvements & research
 
 Companion to [design.md](design.md). Sources: the new `tests/` suite (`pnpm test`,
-149 tests), a review of `src/worker/*.ts`, and a survey of comparable projects (Sep 2026).
+232 tests), a review of `src/worker/*.ts`, and a survey of comparable projects (Sep 2026).
 
 ## 1. What the test suite covers
 
-| File                            | Covers                                                                                                                                                                                                                                       |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/scene-ops.test.ts`       | Every `apply_patch` op, ref/label/id resolution, ambiguity errors, partial-batch semantics, agent vs human authorship (`customData.author` / `editedBy`), violet stroke, z-order invariants                                                  |
-| `tests/scene-placement.test.ts` | All placement hints, gaps, overlap nudging, chained placement, frame inference/attach/grow, frame moves carrying children                                                                                                                    |
-| `tests/scene-graph.test.ts`     | `graph()` / `graphView()`, duplicate-label `#id` display, inferred edges, sketches, selection marking, `_edgesRaw` hiding                                                                                                                    |
-| `tests/scene-format.test.ts`    | `wrapText` / `measureText`, `tidy` (separation, adoption, wrapping, idempotence, never changes connections/labels/colours/count), `layout`, `addForeign`, `restoreTo`, JSON round-trip (the R2 snapshot path)                                |
-| `tests/scene-tidy.test.ts`      | `tidy` binding, frame fit/shrink, groups, even spacing, push direction; no-regression metrics on templates and seeded messy diagrams                                                                                                         |
-| `tests/scene-templates.test.ts` | All builtin templates apply cleanly with expected node/edge counts; tidy-stability                                                                                                                                                           |
-| `tests/store-meta.test.ts`      | `parseLink` / `shareLink`, `createDiagram` → `verifyKey` round-trip, builtin + saved templates, component catalog, rubric shape                                                                                                              |
-| `tests/room.test.ts`            | `DiagramRoom` on fake storage: ops layer + auto-snapshots, `tidy` / `layout`, snapshot/restore/undo, `seed`, tombstone hiding, the version/nonce merge rule, tab broadcast, presence/selection, no-tab RPC errors, end-to-end interview flow |
-| `tests/http.test.ts`            | Worker routes with real rooms: create/get/rename, 403s, builtin + saved templates, snapshots/restore/tidy over HTTP, 404s, `/mcp` reachability                                                                                               |
-| `tests/helpers/fakes.ts`        | In-memory D1 / R2 / DO-SQL / sockets; `cloudflare:workers` stubbed via `vitest.config.ts` alias                                                                                                                                              |
+| File                            | Covers                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/scene-ops.test.ts`       | Every `apply_patch` op, ref/label/id resolution, ambiguity errors, partial-batch semantics, agent vs human authorship (`customData.author` / `editedBy`), violet stroke, z-order invariants                                                                                                                                                                    |
+| `tests/scene-placement.test.ts` | All placement hints, gaps, overlap nudging, chained placement, frame inference/attach/grow, frame moves carrying children                                                                                                                                                                                                                                      |
+| `tests/scene-graph.test.ts`     | `graph()` / `graphView()`, duplicate-label `#id` display, inferred edges, sketches, selection marking, `_edgesRaw` hiding                                                                                                                                                                                                                                      |
+| `tests/scene-format.test.ts`    | `wrapText` / `measureText`, `tidy` (separation, adoption, wrapping, idempotence, never changes connections/labels/colours/count), `layout`, `addForeign`, `restoreTo`, JSON round-trip (the R2 snapshot path)                                                                                                                                                  |
+| `tests/scene-tidy.test.ts`      | `tidy` binding, frame fit/shrink, groups, even spacing, push direction; no-regression metrics on templates and seeded messy diagrams                                                                                                                                                                                                                           |
+| `tests/scene-templates.test.ts` | All builtin templates apply cleanly with expected node/edge counts; tidy-stability                                                                                                                                                                                                                                                                             |
+| `tests/store-meta.test.ts`      | `parseLink` / `shareLink`, `createDiagram` → `verifyKey` round-trip, builtin + saved templates, component catalog, rubric shape                                                                                                                                                                                                                                |
+| `tests/room.test.ts`            | `DiagramRoom` on fake storage: ops layer + auto-snapshots, `tidy` / `layout`, snapshot/restore/undo, `seed`, tombstone hiding, the version/nonce merge rule, tab broadcast, presence/selection, no-tab RPC errors, end-to-end interview flow                                                                                                                   |
+| `tests/http.test.ts`            | Worker routes with real rooms: create/get/rename, 403s, builtin + saved templates, snapshots/restore/tidy over HTTP, 404s, the `/mcp` token challenge, RFC 9728 metadata, unconfigured-sign-in 503                                                                                                                                                             |
+| `tests/mcp-events.test.ts`      | `events/list` catalog and schemas; subscribe validation (secret, https, unauthorized link, unknown name), the verification challenge and its caching, idempotent refresh, unsubscribe; signed delivery of human edits, renames and named checkpoints, agent-origin withholding and opt-in, 410 no-retry, and the share key staying out of storage and payloads |
+| `tests/helpers/fakes.ts`        | In-memory D1 / R2 / DO-SQL / sockets; `cloudflare:workers` stubbed via `vitest.config.ts` alias                                                                                                                                                                                                                                                                |
 
 Run: `pnpm test`. The suite is typechecked, linted, and formatted by `pnpm check`; CI runs it with `pnpm test`.
+
+## 1a. Findings from the OAuth + events work (Sep 29, 2026)
+
+Verified in code, not inferred.
+
+- **The MCP SDK has no events support.** `@modelcontextprotocol/server` 2.1.0 and 2.2.0
+  both lack `events/list`, `events/subscribe`, `events/unsubscribe`. The three methods are
+  registered by hand via `server.server.setRequestHandler`, and `capabilities.events` is
+  set on `McpServer` even though it is not in the `ServerCapabilities` type — `server/discover`
+  spreads capabilities verbatim, so the untyped key does reach the wire. Re-check for SDK
+  support before extending the hand-rolled surface.
+- **`createMcpHandler` does no token verification.** `authInfo` is strictly pass-through.
+  Every authenticated property is the caller's claim, so the OAuth provider must be the
+  only thing that constructs it. The API handler checks the read scope and the SDK
+  challenges write tools before execution.
+- **The spec's principal requirement is real.** The draft requires an authenticated
+  principal for webhook subscriptions specifically, because the subscription key includes
+  it — without one, anyone could unsubscribe or rotate another tenant's secret. That is why
+  this needed real OAuth rather than treating the diagram capability key as identity.
+- **Agent-origin filtering is a correctness requirement, not a nicety.** `apply_patch`
+  commits through the same `commit()` as a human edit. Without filtering on `origin`, every
+  patch comes back as an event and the agent reacts to its own work in a loop.
+- **Webhook delivery must be off the critical path.** The room emits inside `waitUntil`;
+  an edit cannot be allowed to wait on, or fail because of, a third party's callback.
+- **ChatGPT only speaks webhook delivery.** The draft's `events/poll` and `events/stream`
+  are not implemented, which is why every event type advertises `["webhook"]` only.
+- **This changes the threat model of the deployment.** `/mcp` was public; it now requires
+  a token, so a deployment that relied on network-layer access alone has a second,
+  identity-bearing layer in front of the agent surface. The canvas is unchanged.
+- **OAuth subjects cannot contain a colon.** `completeAuthorization()` rejects it
+  because token parts use colon separators. GitHub subjects use `encodeURIComponent`;
+  the full sign-in and exchange test catches this contract.
+- **Subscription authorization lasts beyond the request.** An opaque grant identity
+  and capability hash let delivery recheck access without persisting bearer tokens.
+  D1 stores access metadata separately so older subscription rows fail closed.
+- **Workers fetch does not expose pinned-address TLS.** Trusted receiver hostnames are
+  required, both address families are checked for public addresses before each POST,
+  and redirects are refused. A DNS lookup alone is not a rebinding defense.
+- **Non-interactive clients cannot sign in.** OAuth needs a browser, so CI or a cron agent
+  has no path to a token. Documented in setup.md rather than papered over.
 
 ## 2. Findings from writing the tests (all verified in code)
 

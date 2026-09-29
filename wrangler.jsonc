@@ -3,14 +3,24 @@
   "name": "system-design-companion",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-09-01",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   // Cloudflare's git builds run a bare `wrangler deploy`, so build the client, view and worker here.
   "build": { "command": "pnpm build:view && vite build" },
   "assets": {
     "directory": "./dist/client",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/ws/*", "/mcp"],
+    // Everything the OAuth provider owns must reach the Worker, or the SPA
+    // fallback would answer index.html to a token request.
+    "run_worker_first": [
+      "/api/*",
+      "/ws/*",
+      "/mcp",
+      "/authorize",
+      "/github/*",
+      "/oauth/*",
+      "/.well-known/oauth-*",
+    ],
   },
   "durable_objects": {
     "bindings": [{ "name": "ROOM", "class_name": "DiagramRoom" }],
@@ -24,6 +34,14 @@
     },
   ],
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "system-design-companion" }],
+  // Tokens and codes for the OAuth provider. Create it once per environment with
+  // `wrangler kv namespace create OAUTH_KV` and paste the id it prints.
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "e4b1c2a95f0d4f7ea38c6b1902d7e5f43",
+    },
+  ],
   "observability": { "enabled": true },
   // Branch builds run `wrangler preview`. Each Preview gets its own Durable Object storage;
   // D1 and R2 point at shared preview resources so previews never touch production data.
@@ -37,5 +55,6 @@
       },
     ],
     "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "system-design-companion-preview" }],
+    "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "b7d3e90c14f24a8ea5b6c1d82f0a3947" }],
   },
 }

@@ -1,5 +1,6 @@
 // In-memory fakes for Cloudflare bindings (D1, R2, Durable Object storage/sockets)
 // so worker logic can be exercised under vitest without workerd.
+import type { McpPrincipal } from "../../src/worker/principal.ts";
 import { DiagramRoom } from "../../src/worker/room.ts";
 
 export interface DiagramRow {
@@ -21,10 +22,88 @@ export interface SnapshotRow {
   element_count: number;
 }
 
+export interface EventSubscriptionRow {
+  id: string;
+  user_id: string;
+  event_name: string;
+  diagram_id: string;
+  callback_url: string;
+  secret: string;
+  include_agent: number;
+  expires_at: number;
+  created_at: number;
+}
+
+export interface EventAccessRow {
+  id: string;
+  authorization_id: string;
+  resource: string;
+  key_hash: string;
+  previous_secret: string | null;
+  previous_secret_until: number;
+}
+type EventAccessParams = [string, string, string, string, string | null, number];
+type FakeStatement = { run: () => Promise<unknown> };
+type KvReadOptions = { type?: "text" | "json" };
+type KvWriteOptions = { expirationTtl?: number; expiration?: number };
+type KvListOptions = { prefix?: string; cursor?: string; limit?: number };
+type KvEntry = { value: string; expiration?: number };
+
+/** KV persistence shared by real OAuthProvider instances in integration tests. */
+export class FakeKV {
+  readonly values = new Map<string, KvEntry>();
+  async get(key: string, options?: KvReadOptions | "json" | "text"): Promise<unknown> {
+    const entry = this.values.get(key);
+    if (!entry || (entry.expiration && entry.expiration <= Date.now() / 1000)) return null;
+    const type = typeof options === "string" ? options : options?.type;
+    return type === "json" ? (JSON.parse(entry.value) as unknown) : entry.value;
+  }
+  async put(key: string, value: string, options?: KvWriteOptions): Promise<void> {
+    this.values.set(key, {
+      value,
+      expiration:
+        options?.expiration ??
+        (options?.expirationTtl ? Date.now() / 1000 + options.expirationTtl : undefined),
+    });
+  }
+  async delete(key: string): Promise<void> {
+    this.values.delete(key);
+  }
+  async list(options: KvListOptions = {}) {
+    const names = [...this.values.keys()]
+      .filter((name) => name.startsWith(options.prefix ?? ""))
+      .filter(
+        (name) =>
+          !this.values.get(name)!.expiration ||
+          this.values.get(name)!.expiration! > Date.now() / 1000,
+      )
+      .toSorted();
+    const offset = Number(options.cursor ?? 0);
+    const limit = options.limit ?? 1000;
+    return {
+      keys: names.slice(offset, offset + limit).map((name) => ({ name })),
+      list_complete: offset + limit >= names.length,
+      cursor: offset + limit >= names.length ? "" : String(offset + limit),
+    };
+  }
+}
+
 /** What `.all()` resolves to. */
 type D1Results<T> = { results: T[] };
 /** Bound parameters of each statement the fakes handle, in order. */
 type LibraryInsertParams = [id: string, key: string];
+type EventSubscriptionParams = [
+  id: string,
+  user_id: string,
+  event_name: string,
+  diagram_id: string,
+  callback_url: string,
+  secret: string,
+  include_agent: number,
+  expires_at: number,
+  created_at: number,
+];
+type EventSubscriptionFilter = [diagram_id: string, event_name: string, now: number];
 type DiagramInsertParams = [
   id: string,
   name: string,
@@ -63,9 +142,11 @@ export class FakeD1 {
   snapshots: SnapshotRow[] = [];
   library = new Map<string, string>();
   deleted = new Set<string>();
+  event_subscriptions = new Map<string, EventSubscriptionRow>();
+  event_access = new Map<string, EventAccessRow>();
 
-  async batch(_stmts: unknown[]): Promise<unknown[]> {
-    return []; // ensureSchema() DDL: no-op
+  async batch(stmts: FakeStatement[]): Promise<unknown[]> {
+    return Promise.all(stmts.map((stmt) => stmt.run()));
   }
 
   prepare(sql: string) {
@@ -101,6 +182,24 @@ export class FakeD1 {
   }
 
   private run(sql: string, p: unknown[]): void {
+    if (sql.startsWith("CREATE ")) return;
+    if (sql.includes("INSERT INTO event_subscription_access")) {
+      const [id, authorization_id, resource, key_hash, previous_secret, previous_secret_until] =
+        p as EventAccessParams;
+      this.event_access.set(id, {
+        id,
+        authorization_id,
+        resource,
+        key_hash,
+        previous_secret,
+        previous_secret_until,
+      });
+      return;
+    }
+    if (sql.includes("DELETE FROM event_subscription_access")) {
+      this.event_access.delete(p[0] as string);
+      return;
+    }
     if (sql.includes("INSERT OR IGNORE INTO deleted_diagrams")) {
       this.deleted.add(p[0] as string);
       return;
@@ -150,10 +249,45 @@ export class FakeD1 {
       }
       return;
     }
+    if (sql.includes("INSERT INTO event_subscriptions")) {
+      const [
+        id,
+        user_id,
+        event_name,
+        diagram_id,
+        callback_url,
+        secret,
+        include,
+        expires_at,
+        created_at,
+      ] = p as EventSubscriptionParams;
+      // ON CONFLICT(id) DO UPDATE: a refresh keeps the row and moves the grant.
+      this.event_subscriptions.set(id, {
+        id,
+        user_id,
+        event_name,
+        diagram_id,
+        callback_url,
+        secret,
+        include_agent: include,
+        expires_at,
+        created_at,
+      });
+      return;
+    }
+    if (sql.includes("DELETE FROM event_subscriptions")) {
+      this.event_subscriptions.delete(p[0] as string);
+      return;
+    }
     throw new Error(`FakeD1.run: unsupported SQL: ${sql}`);
   }
 
   private first(sql: string, p: unknown[]): unknown {
+    if (sql.includes("FROM event_subscriptions")) {
+      const subscription = this.event_subscriptions.get(p[0] as string);
+      const access = this.event_access.get(p[0] as string);
+      return subscription && access ? { ...subscription, ...access } : null;
+    }
     if (sql.includes("FROM diagram_library WHERE diagram_id = ?")) {
       const access_key = this.library.get(p[0] as string);
       return access_key ? { access_key } : null;
@@ -198,6 +332,18 @@ export class FakeD1 {
           createdAt: s.created_at,
           elements: s.element_count,
         }));
+    }
+    if (sql.includes("FROM event_subscriptions")) {
+      const [diagram_id, event_name, now] = p as EventSubscriptionFilter;
+      return [...this.event_subscriptions.values()]
+        .filter(
+          (s) =>
+            s.diagram_id === diagram_id &&
+            s.event_name === event_name &&
+            s.expires_at > now &&
+            this.event_access.has(s.id),
+        )
+        .map((s) => ({ ...s, ...this.event_access.get(s.id) }));
     }
     throw new Error(`FakeD1.all: unsupported SQL: ${sql}`);
   }
@@ -278,8 +424,11 @@ export class FakeDOSql {
 export function makeRoomCtx() {
   const sql = new FakeDOSql();
   const sockets = new Set<unknown>();
+  const pending: Promise<unknown>[] = [];
   return {
     sql,
+    /** Settle everything routed through waitUntil, so event delivery is observable. */
+    drain: () => Promise.all(pending),
     ctx: {
       storage: {
         sql,
@@ -303,6 +452,9 @@ export function makeRoomCtx() {
       },
       blockConcurrencyWhile: async (fn: () => Promise<unknown>) => {
         await fn();
+      },
+      waitUntil: (promise: Promise<unknown>) => {
+        pending.push(promise);
       },
     },
     addWs: (ws: unknown) => {
@@ -333,6 +485,7 @@ export interface TestEnv {
   db: FakeD1;
   bucket: FakeR2;
   rooms: Map<string, DiagramRoom>;
+  kv: FakeKV;
 }
 
 /** Env whose ROOM binding serves REAL DiagramRoom instances on fake storage. */
@@ -340,7 +493,25 @@ export function makeEnv(): TestEnv {
   const db = new FakeD1();
   const bucket = new FakeR2();
   const rooms = new Map<string, DiagramRoom>();
-  const env = { DB: db, BUCKET: bucket, ROOM: null } as unknown as Env;
+  const kv = new FakeKV();
+  kv.values.set("grant:github%3A1:test-grant", {
+    value: JSON.stringify({
+      id: "test-grant",
+      userId: "github%3A1",
+      clientId: "test-client",
+      scope: ["mcp:read", "mcp:write"],
+      resource: "https://design.example/mcp",
+      metadata: { authorizationId: "test-authorization" },
+      createdAt: Date.now() / 1000,
+    }),
+  });
+  const env = {
+    DB: db,
+    BUCKET: bucket,
+    ROOM: null,
+    OAUTH_KV: kv,
+    MCP_EVENT_CALLBACK_HOSTS: "receiver.example.com",
+  } as unknown as Env;
   (env as unknown as RoomBinding).ROOM = {
     idFromName: (id: string) => id,
     get: (id: string) => {
@@ -352,7 +523,29 @@ export function makeEnv(): TestEnv {
       return r;
     },
   };
-  return { env, db, bucket, rooms };
+  return { env, db, bucket, rooms, kv };
+}
+
+/** The execution context Cloudflare passes every Worker fetch. */
+export function testCtx(): ExecutionContext {
+  return {
+    waitUntil: () => {},
+    passThroughOnException: () => {},
+  } as unknown as ExecutionContext;
+}
+
+/** The principal the OAuth provider hands the MCP handler once a token is verified. */
+export function testPrincipal(overrides: Partial<McpPrincipal> = {}): McpPrincipal {
+  return {
+    userId: "github%3A1",
+    authorizationId: "test-authorization",
+    resource: "https://design.example/mcp",
+    clientId: "test-client",
+    scopes: ["mcp:read", "mcp:write"],
+    login: "tester",
+    name: "Tester",
+    ...overrides,
+  };
 }
 
 /** A live room on throwaway storage (for room-level tests that bypass HTTP). */

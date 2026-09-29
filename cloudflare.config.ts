@@ -1,5 +1,20 @@
 import { bindings, defineConfig, exports } from "cf/config";
 
+// The OAuth provider owns /mcp, its discovery documents, and its token and
+// registration endpoints, so those paths must reach the Worker rather than the
+// SPA fallback. This file and wrangler.jsonc have to stay in sync.
+const RUN_WORKER_FIRST = [
+  "/api/*",
+  "/ws/*",
+  "/mcp",
+  "/authorize",
+  "/github/*",
+  "/oauth/*",
+  "/.well-known/oauth-*",
+];
+
+const COMPATIBILITY_FLAGS = ["nodejs_compat", "global_fetch_strictly_public"];
+
 export default defineConfig((ctx) => {
   if (ctx.isPreview) {
     return {
@@ -9,14 +24,14 @@ export default defineConfig((ctx) => {
         },
         name: "system-design-companion",
         compatibilityDate: "2026-09-01",
-        compatibilityFlags: ["nodejs_compat"],
+        compatibilityFlags: COMPATIBILITY_FLAGS,
         entrypoint: "src/worker/index.ts",
         observability: {
           enabled: true,
         },
         assets: {
           notFoundHandling: "single-page-application",
-          runWorkerFirst: ["/api/*", "/ws/*", "/mcp"],
+          runWorkerFirst: RUN_WORKER_FIRST,
         },
         env: {
           DB: bindings.d1({
@@ -26,6 +41,8 @@ export default defineConfig((ctx) => {
           BUCKET: bindings.r2({
             name: "system-design-companion-preview",
           }),
+          // bindings.kv takes only the id; wrangler.jsonc is where the name lives.
+          OAUTH_KV: bindings.kv({ id: "b7d3e90c14f24a8ea5b6c1d82f0a3947" }),
           ROOM: bindings.durableObject({
             worker: "system-design-companion",
             exportName: "DiagramRoom",
@@ -42,14 +59,14 @@ export default defineConfig((ctx) => {
       },
       name: "system-design-companion",
       compatibilityDate: "2026-09-01",
-      compatibilityFlags: ["nodejs_compat"],
+      compatibilityFlags: COMPATIBILITY_FLAGS,
       entrypoint: "src/worker/index.ts",
       observability: {
         enabled: true,
       },
       assets: {
         notFoundHandling: "single-page-application",
-        runWorkerFirst: ["/api/*", "/ws/*", "/mcp"],
+        runWorkerFirst: RUN_WORKER_FIRST,
       },
       env: {
         DB: bindings.d1({
@@ -59,6 +76,8 @@ export default defineConfig((ctx) => {
         BUCKET: bindings.r2({
           name: "system-design-companion",
         }),
+        // bindings.kv takes only the id; wrangler.jsonc is where the name lives.
+        OAUTH_KV: bindings.kv({ id: "e4b1c2a95f0d4f7ea38c6b1902d7e5f43" }),
         ROOM: bindings.durableObject({
           worker: "system-design-companion",
           exportName: "DiagramRoom",

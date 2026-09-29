@@ -4,20 +4,25 @@ import { apiErrorMessage, type ApiFailure } from "../src/app/api-error.ts";
 import worker from "../src/worker/index.ts";
 import { createDiagram, parseLink } from "../src/worker/store.ts";
 import type { Author } from "../src/worker/scene.ts";
-import { makeEnv, type TestEnv } from "./helpers/fakes.ts";
+import { makeEnv, testCtx, type TestEnv } from "./helpers/fakes.ts";
 
 function req(path: string, init?: RequestInit): Request {
   return new Request(`http://localhost${path}`, init);
 }
 
+/** The Worker's default export, with the execution context the runtime always passes. */
+function call(env: TestEnv, request: Request) {
+  return worker.fetch(request, env.env, testCtx());
+}
+
 async function post(env: TestEnv, path: string, payload: unknown) {
-  return worker.fetch(
+  return call(
+    env,
     req(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     }),
-    env.env,
   );
 }
 
@@ -30,6 +35,8 @@ type ErrorBody = { error: string };
 type TemplateInfo = { id: string; name: string };
 type SnapshotInfo = { id: string; name: string };
 type InvalidBodyCase = [route: string, payload: unknown];
+/** The RFC 9728 document the OAuth provider serves for the MCP endpoint. */
+type ProtectedResource = { resource: string; authorization_servers: string[] };
 
 const invalidBodies: InvalidBodyCase[] = [
   ["/api/diagrams", { name: 42 }],
@@ -60,10 +67,7 @@ async function create(env: TestEnv, name: string, template?: string) {
 }
 
 const put = (env: TestEnv, path: string, bytes: BodyInit, type = "image/png") =>
-  worker.fetch(
-    req(path, { method: "PUT", headers: { "Content-Type": type }, body: bytes }),
-    env.env,
-  );
+  call(env, req(path, { method: "PUT", headers: { "Content-Type": type }, body: bytes }));
 
 describe("diagrams API", () => {
   it("lists existing and agent-created diagrams without browser history, preserving old links", async () => {
@@ -73,24 +77,22 @@ describe("diagrams API", () => {
     // MCP uses the same createDiagram function, without any browser registration.
     const agent = await createDiagram(env.env, "Agent board");
     await post(env, `/api/d/${old.id}/template?k=${old.key}`, { name: "Template" });
-    const response = await worker.fetch(req("/api/diagrams"), env.env);
+    const response = await call(env, req("/api/diagrams"));
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     const page = (await response.json()) as DiagramPage;
     const listed = page.items;
     expect(listed.map((d) => d.id)).toEqual([agent.id, old.id]);
     const opened = await Promise.all(
-      listed.map(async (d) => worker.fetch(req(`/api/d/${d.id}?k=${d.key}`), env.env)),
+      listed.map(async (d) => call(env, req(`/api/d/${d.id}?k=${d.key}`))),
     );
     expect(opened.map((result) => result.status)).toEqual([200, 200]);
-    expect((await worker.fetch(req(`/api/d/${old.id}?k=${old.key}`), env.env)).status).toBe(200);
-    expect((await worker.fetch(req(`/api/d/${old.id}?k=${listed[0].key}`), env.env)).status).toBe(
-      403,
-    );
-    const again = await worker.fetch(req("/api/diagrams"), env.env);
+    expect((await call(env, req(`/api/d/${old.id}?k=${old.key}`))).status).toBe(200);
+    expect((await call(env, req(`/api/d/${old.id}?k=${listed[0].key}`))).status).toBe(403);
+    const again = await call(env, req("/api/diagrams"));
     expect(await again.json()).toEqual(page);
     await post(env, `/api/d/${agent.id}/rename?k=${listed[0].key}`, { name: "Renamed" });
-    const updated = await worker.fetch(req("/api/diagrams"), env.env);
+    const updated = await call(env, req("/api/diagrams"));
     expect(await updated.json()).toEqual(
       expect.objectContaining({
         items: expect.arrayContaining([expect.objectContaining({ name: "Renamed" })]),
@@ -100,7 +102,7 @@ describe("diagrams API", () => {
 
   it("returns an empty server library before any boards exist", async () => {
     const env = makeEnv();
-    expect(await (await worker.fetch(req("/api/diagrams"), env.env)).json()).toEqual({
+    expect(await (await call(env, req("/api/diagrams"))).json()).toEqual({
       items: [],
       nextCursor: null,
     });
@@ -116,30 +118,19 @@ describe("diagrams API", () => {
       .map((d) => d.id)
       .toSorted()
       .toReversed();
-    const first = (await (
-      await worker.fetch(req("/api/diagrams?limit=2"), env.env)
-    ).json()) as DiagramPage;
+    const first = (await (await call(env, req("/api/diagrams?limit=2"))).json()) as DiagramPage;
     expect(first.items.map((d) => d.id)).toEqual(expected.slice(0, 2));
     expect(env.db.library.size).toBe(2); // Backfill is bounded to the requested page.
     await create(env, "Newer during pagination");
     const last = first.items[1];
-    const removed = await worker.fetch(
-      req(`/api/d/${last.id}?k=${last.key}`, { method: "DELETE" }),
-      env.env,
-    );
+    const removed = await call(env, req(`/api/d/${last.id}?k=${last.key}`, { method: "DELETE" }));
     expect(removed.status).toBe(204);
     const second = (await (
-      await worker.fetch(
-        req(`/api/diagrams?limit=2&cursor=${encodeURIComponent(first.nextCursor!)}`),
-        env.env,
-      )
+      await call(env, req(`/api/diagrams?limit=2&cursor=${encodeURIComponent(first.nextCursor!)}`))
     ).json()) as typeof first;
     expect(second.items.map((d) => d.id)).toEqual(expected.slice(2, 4));
     const third = (await (
-      await worker.fetch(
-        req(`/api/diagrams?limit=2&cursor=${encodeURIComponent(second.nextCursor!)}`),
-        env.env,
-      )
+      await call(env, req(`/api/diagrams?limit=2&cursor=${encodeURIComponent(second.nextCursor!)}`))
     ).json()) as typeof first;
     expect(third.items.map((d) => d.id)).toEqual(expected.slice(4));
     expect(third.nextCursor).toBeNull();
@@ -159,7 +150,7 @@ describe("diagrams API", () => {
       `cursor=${btoa(JSON.stringify({ createdAt: -1, id: "abcdefgh" }))}`,
     ];
     const results = await Promise.all(
-      params.map(async (param) => worker.fetch(req(`/api/diagrams?${param}`), env.env)),
+      params.map(async (param) => call(env, req(`/api/diagrams?${param}`))),
     );
     expect(results.every((res) => res.status === 400)).toBe(true);
   });
@@ -167,31 +158,21 @@ describe("diagrams API", () => {
   it("deletes only an authorized board and disables old and library links", async () => {
     const env = makeEnv();
     const [target, keep] = await Promise.all([create(env, "Prod smoke"), create(env, "Keep")]);
-    const page = (await (await worker.fetch(req("/api/diagrams"), env.env)).json()) as DiagramPage;
+    const page = (await (await call(env, req("/api/diagrams"))).json()) as DiagramPage;
     const libraryKey = page.items.find((d) => d.id === target.id)!.key;
+    expect((await call(env, req(`/api/d/${target.id}?k=wrong`, { method: "DELETE" }))).status).toBe(
+      403,
+    );
     expect(
-      (await worker.fetch(req(`/api/d/${target.id}?k=wrong`, { method: "DELETE" }), env.env))
-        .status,
-    ).toBe(403);
-    expect(
-      (
-        await worker.fetch(
-          req(`/api/d/${target.id}?k=${libraryKey}`, { method: "DELETE" }),
-          env.env,
-        )
-      ).status,
+      (await call(env, req(`/api/d/${target.id}?k=${libraryKey}`, { method: "DELETE" }))).status,
     ).toBe(204);
-    const result = (await (
-      await worker.fetch(req("/api/diagrams"), env.env)
-    ).json()) as typeof page;
+    const result = (await (await call(env, req("/api/diagrams"))).json()) as typeof page;
     expect(result.items.map((d) => d.id)).toEqual([keep.id]);
     const blocked = await Promise.all(
-      [target.key, libraryKey].map(async (key) =>
-        worker.fetch(req(`/api/d/${target.id}?k=${key}`), env.env),
-      ),
+      [target.key, libraryKey].map(async (key) => call(env, req(`/api/d/${target.id}?k=${key}`))),
     );
     expect(blocked.map((res) => res.status)).toEqual([403, 403]);
-    expect((await worker.fetch(req(`/api/d/${keep.id}?k=${keep.key}`), env.env)).status).toBe(200);
+    expect((await call(env, req(`/api/d/${keep.id}?k=${keep.key}`))).status).toBe(200);
   });
 
   it("creates a diagram and serves its capability link", async () => {
@@ -200,7 +181,7 @@ describe("diagrams API", () => {
     expect(d.name).toBe("HLD");
     expect(parseLink(d.link)).toEqual({ id: d.id, key: d.key });
 
-    const ok = await worker.fetch(req(`/api/d/${d.id}?k=${d.key}`), env.env);
+    const ok = await call(env, req(`/api/d/${d.id}?k=${d.key}`));
     expect(ok.status).toBe(200);
     expect(await body(ok)).toMatchObject({ id: d.id, name: "HLD" });
   });
@@ -209,7 +190,7 @@ describe("diagrams API", () => {
     const env = makeEnv();
     const d = await create(env, "HLD");
     const paths = [`/api/d/${d.id}`, `/api/d/${d.id}?k=wrong`, `/api/d/unknown-id?k=${d.key}`];
-    const results = await Promise.all(paths.map(async (path) => worker.fetch(req(path), env.env)));
+    const results = await Promise.all(paths.map(async (path) => call(env, req(path))));
     for (const res of results) expect(res.status).toBe(403);
   });
 
@@ -218,7 +199,7 @@ describe("diagrams API", () => {
     const d = await create(env, "Old");
     const res = await post(env, `/api/d/${d.id}/rename?k=${d.key}`, { name: "  New  " });
     expect(res.status).toBe(200);
-    const got = await worker.fetch(req(`/api/d/${d.id}?k=${d.key}`), env.env);
+    const got = await call(env, req(`/api/d/${d.id}?k=${d.key}`));
     expect(await body(got)).toMatchObject({ name: "New" });
     expect((await env.rooms.get(d.id)!.info()).name).toBe("New");
   });
@@ -232,7 +213,7 @@ describe("diagrams API", () => {
       ),
     );
     for (const response of responses) expect(response.status).toBe(400);
-    const response = await worker.fetch(req(`/api/d/${d.id}?k=${d.key}`), env.env);
+    const response = await call(env, req(`/api/d/${d.id}?k=${d.key}`));
     expect(await body(response)).toMatchObject({ name: "Original" });
   });
 
@@ -264,15 +245,11 @@ describe("diagrams API", () => {
 
   it("lists builtin and saved templates", async () => {
     const env = makeEnv();
-    const before = (await (
-      await worker.fetch(req("/api/templates"), env.env)
-    ).json()) as TemplateInfo[];
+    const before = (await (await call(env, req("/api/templates"))).json()) as TemplateInfo[];
     expect(before.some((t) => t.id === "builtin:interview")).toBe(true);
     const src = await create(env, "Src");
     await post(env, `/api/d/${src.id}/template?k=${src.key}`, { name: "Mine" });
-    const after = (await (
-      await worker.fetch(req("/api/templates"), env.env)
-    ).json()) as TemplateInfo[];
+    const after = (await (await call(env, req("/api/templates"))).json()) as TemplateInfo[];
     expect(after.some((t) => t.name === "Mine")).toBe(true);
   });
 });
@@ -290,7 +267,7 @@ describe("snapshots API", () => {
     expect(meta.name).toBe("v1");
 
     await room.applyPatch([{ op: "add_node", label: "B" }], "system" as Author);
-    const list = await worker.fetch(req(`/api/d/${d.id}/snapshots?k=${d.key}`), env.env);
+    const list = await call(env, req(`/api/d/${d.id}/snapshots?k=${d.key}`));
     expect(await list.json()).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: meta.id })]),
     );
@@ -324,18 +301,14 @@ describe("files API", () => {
     // Content-addressed: a second upload of the same id is a no-op.
     expect((await put(env, `/api/d/${d.id}/files/abc123?k=${d.key}`, png)).status).toBe(204);
 
-    const res = await worker.fetch(req(`/api/d/${d.id}/files/abc123?k=${d.key}`), env.env);
+    const res = await call(env, req(`/api/d/${d.id}/files/abc123?k=${d.key}`));
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("image/png");
     expect(res.headers.get("Content-Security-Policy")).toBe("sandbox");
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(png);
 
-    expect((await worker.fetch(req(`/api/d/${d.id}/files/abc123?k=wrong`), env.env)).status).toBe(
-      403,
-    );
-    expect((await worker.fetch(req(`/api/d/${d.id}/files/nope?k=${d.key}`), env.env)).status).toBe(
-      404,
-    );
+    expect((await call(env, req(`/api/d/${d.id}/files/abc123?k=wrong`))).status).toBe(403);
+    expect((await call(env, req(`/api/d/${d.id}/files/nope?k=${d.key}`))).status).toBe(404);
   });
 
   it("rejects non-images and files over 4 MB", async () => {
@@ -370,7 +343,7 @@ describe("files API", () => {
       await post(env, `/api/d/${d.id}/template?k=${d.key}`, { name: "With image" }),
     )) as WithId;
     const copy = await create(env, "Copy", tpl.id);
-    const res = await worker.fetch(req(`/api/d/${copy.id}/files/file1?k=${copy.key}`), env.env);
+    const res = await call(env, req(`/api/d/${copy.id}/files/file1?k=${copy.key}`));
     expect(res.status).toBe(200);
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(png);
   });
@@ -396,13 +369,13 @@ describe("request validation", () => {
   it("rejects malformed JSON instead of treating it as an empty tidy request", async () => {
     const env = makeEnv();
     const d = await create(env, "Validation");
-    const response = await worker.fetch(
+    const response = await call(
+      env,
       req(`/api/d/${d.id}/tidy?k=${d.key}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: "{",
       }),
-      env.env,
     );
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "Malformed JSON in request body" });
@@ -415,22 +388,19 @@ describe("request validation", () => {
     expect(response.status).toBe(200);
     const d = (await response.json()) as Created;
     expect(d.name).toBe("Untitled");
-    const renamed = await worker.fetch(
+    const renamed = await call(
+      env,
       req(`/api/d/${d.id}/rename?k=${d.key}`, {
         method: "POST",
         headers: { "Content-Type": "application/vnd.example+json; charset=utf-8" },
         body: JSON.stringify({ name: "  Trimmed  " }),
       }),
-      env.env,
     );
     expect(await renamed.json()).toEqual({ ok: true, name: "Trimmed" });
     const snapshot = await post(env, `/api/d/${d.id}/snapshots?k=${d.key}`, {});
     expect(snapshot.status).toBe(200);
     expect(await snapshot.json()).toMatchObject({ name: "manual" });
-    const tidy = await worker.fetch(
-      req(`/api/d/${d.id}/tidy?k=${d.key}`, { method: "POST" }),
-      env.env,
-    );
+    const tidy = await call(env, req(`/api/d/${d.id}/tidy?k=${d.key}`, { method: "POST" }));
     expect(tidy.status).toBe(200);
   });
 
@@ -455,13 +425,13 @@ describe("routing", () => {
       `/ws/${d.id}/extra`,
     ];
     const responses = await Promise.all(
-      paths.map(async (path) => worker.fetch(req(`${path}?k=wrong`), env.env)),
+      paths.map(async (path) => call(env, req(`${path}?k=wrong`))),
     );
     expect(responses.map((response) => response.status)).toEqual(paths.map(() => 403));
     expect(await Promise.all(responses.map((response) => response.json()))).toEqual(
       paths.map(() => ({ error: "invalid link" })),
     );
-    const unknown = await worker.fetch(req(`/api/d/${d.id}/unknown?k=${d.key}`), env.env);
+    const unknown = await call(env, req(`/api/d/${d.id}/unknown?k=${d.key}`));
     expect(unknown.status).toBe(404);
     expect(await unknown.json()).toEqual({ error: "not found" });
   });
@@ -472,7 +442,7 @@ describe("routing", () => {
     const response = new Response("room response", { headers: { "X-Room": d.id } });
     const fetch = vi.spyOn(env.rooms.get(d.id)!, "fetch").mockResolvedValue(response);
     const request = req(`/ws/${d.id}?k=${d.key}`, { headers: { Upgrade: "websocket" } });
-    expect(await worker.fetch(request, env.env)).toBe(response);
+    expect(await call(env, request)).toBe(response);
     expect(fetch).toHaveBeenCalledExactlyOnceWith(request);
   });
 
@@ -486,45 +456,36 @@ describe("routing", () => {
       "/api/d/bad.id?k=wrong",
       "/api/diagrams/",
     ];
-    const responses = await Promise.all(
-      paths.map(async (path) => worker.fetch(req(path), env.env)),
-    );
+    const responses = await Promise.all(paths.map(async (path) => call(env, req(path))));
     expect(responses.map((response) => response.status)).toEqual(paths.map(() => 404));
   });
 
-  it("initializes MCP through the lazy-loaded handler", async () => {
+  it("answers an unauthenticated MCP request with an OAuth challenge", async () => {
     const env = makeEnv();
-    const response = await worker.fetch(
-      req("/mcp", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json, text/event-stream",
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "initialize",
-          params: {
-            protocolVersion: "2025-11-25",
-            capabilities: {},
-            clientInfo: { name: "bundle-test", version: "1" },
-          },
-        }),
-      }),
-      env.env,
+    const response = await post(env, "/mcp", {});
+    expect(response.status).toBe(401);
+    const challenge = response.headers.get("WWW-Authenticate") ?? "";
+    // The client follows this to the RFC 9728 document, which names the issuer.
+    expect(challenge).toContain("Bearer");
+    expect(challenge).toContain(
+      'resource_metadata="http://localhost/.well-known/oauth-protected-resource/mcp"',
     );
-    expect(response.status).toBe(200);
-    const result = await response.text();
-    expect(result).toContain('"protocolVersion":"2025-11-25"');
-    expect(result).toContain('"name":"system-design"');
+    expect(challenge).toContain('scope="mcp:read"');
   });
 
-  it("returns 404 for unknown routes and reaches the MCP handler", async () => {
+  it("publishes protected resource metadata naming this deployment as the issuer", async () => {
     const env = makeEnv();
-    const missing = await worker.fetch(req("/nope"), env.env);
-    expect(missing.status).toBe(404);
-    const mcp = await post(env, "/mcp", {});
-    expect(mcp.status).not.toBe(404);
+    const response = await call(env, req("/.well-known/oauth-protected-resource/mcp"));
+    expect(response.status).toBe(200);
+    const doc = (await response.json()) as ProtectedResource;
+    expect(doc.resource).toBe("http://localhost/mcp");
+    expect(doc.authorization_servers).toEqual(["http://localhost"]);
+  });
+
+  it("reports that sign-in is unavailable until GitHub secrets are set", async () => {
+    const env = makeEnv();
+    const response = await call(env, req("/authorize?response_type=code&client_id=x"));
+    expect(response.status).toBe(503);
+    expect(await response.text()).toContain("GITHUB_CLIENT_ID");
   });
 });

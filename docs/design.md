@@ -166,11 +166,12 @@ It changes no elements and creates no version.
 
 ## Storage
 
-| Where     | What                                                                                       |
-| --------- | ------------------------------------------------------------------------------------------ |
-| DO SQLite | Live elements, tombstones from the last 7 days with their delete times, room meta.         |
-| D1        | Diagram index, capability key hashes, library links, deletions, snapshot metadata.         |
-| R2        | Snapshot and saved-template JSON (`snapshots/<diagram>/<id>.json`, `templates/<id>.json`). |
+| Where     | What                                                                                                        |
+| --------- | ----------------------------------------------------------------------------------------------------------- |
+| DO SQLite | Live elements, tombstones from the last 7 days with their delete times, room meta.                          |
+| D1        | Diagram index, capability key hashes, library links, deletions, snapshot metadata, MCP event subscriptions. |
+| R2        | Snapshot and saved-template JSON (`snapshots/<diagram>/<id>.json`, `templates/<id>.json`).                  |
+| KV        | OAuth tokens, codes and client registrations (`OAUTH_KV`); props encrypted.                                 |
 
 ```mermaid
 erDiagram
@@ -202,12 +203,123 @@ erDiagram
         int created_at
         int element_count
     }
+    event_subscriptions {
+        text id PK "hash of principal, url, event, diagram, filters"
+        text user_id "OAuth subject"
+        text event_name
+        text diagram_id
+        text callback_url
+        text secret "client-supplied whsec_ signing key"
+        int include_agent
+        int expires_at
+        int created_at
+    }
+    event_subscription_access {
+        text id PK "event subscription id"
+        text authorization_id "opaque consent identity"
+        text resource "MCP token audience"
+        text key_hash "capability hash, never the key"
+        text previous_secret "rotation only"
+        int previous_secret_until
+    }
+    event_subscriptions ||--|| event_subscription_access : authorization
+
 ```
 
 The D1 schema is created in code on first use (`ensureSchema`), so a new database needs
 no migration step.
 
-## Auth: capability links
+## Auth: two mechanisms
+
+The MCP endpoint requires OAuth. The canvas does not.
+
+```mermaid
+flowchart TD
+    C["MCP client"] -->|"POST /mcp, Bearer token"| P["OAuth provider"]
+    P -->|"valid"| M["MCP handler"]
+    P -->|"no/invalid token"| Ch["401 + WWW-Authenticate<br/>resource_metadata"]
+    C -.->|"follows challenge"| PRM["/.well-known/<br/>oauth-protected-resource/mcp"]
+    C -->|"GET /authorize"| A["Consent page"] --> G["GitHub"]
+    G -->|"/github/callback"| T["Issue token"]
+    B["Browser tab"] -->|"share link only"| WS["Diagram room"]
+```
+
+`@cloudflare/workers-oauth-provider` fronts `/mcp`: it answers unauthenticated
+requests with a challenge, publishes RFC 9728 protected resource metadata, and
+runs the authorize, token, revocation and registration endpoints. `src/worker/oauth.ts`
+implements the part the library leaves to the app: the consent page and the GitHub
+sign-in. `OAUTH_KV` holds tokens and codes; props are encrypted.
+
+The verified token reaches the MCP handler as `McpPrincipal`
+(`src/worker/principal.ts`), which `mcp.ts` passes to the SDK as `authInfo` and
+`events.ts` uses as the subscription identity. The SDK never verifies tokens
+itself — it is strictly the caller's claim. The provider verifies the token audience
+and identity; the API handler enforces `mcp:read`, while write tool configurations
+use the SDK's `requireScopes("mcp:read", "mcp:write")` challenge before execution.
+GitHub subjects are encoded because the OAuth provider reserves `:` for token parts.
+
+Browsers keep using capability links. Nobody signs in to draw.
+
+## MCP events
+
+Three event types, all webhook delivery, registered by hand on
+`server.server` in `src/worker/events.ts` because the SDK does not implement the
+draft `events/*` methods yet:
+
+```mermaid
+sequenceDiagram
+    participant Chat as ChatGPT
+    participant MCP as /mcp (OAuth)
+    participant DB as D1
+    participant Room as DiagramRoom
+    participant Hook as Callback URL
+
+    Chat->>MCP: events/subscribe {name, arguments.diagram, delivery}
+    MCP->>MCP: verifyKey(diagram) — the share link is the scope
+    MCP->>Hook: POST {type: verification, challenge}
+    Hook-->>MCP: 200 {challenge}
+    MCP->>DB: upsert event_subscriptions
+    MCP-->>Chat: {id, refreshBefore, cursor: null}
+
+    Note over Room,Hook: later, a person edits
+    Room->>Room: commit() / rename() / snapshot()
+    Room->>DB: SELECT subscriptions for (diagram, event)
+    Room->>Hook: POST eventId, name, timestamp, data
+    Hook-->>Room: 2xx
+```
+
+Design choices worth knowing:
+
+- **The diagram link is the scope.** `arguments.diagram` goes through the same
+  `verifyKey` as every tool, so a subscription can never widen access. The key
+  itself is not stored: the access row keeps its hash. The subscription id includes
+  the user, opaque consent identity, callback URL, event, diagram id, key hash and
+  normalized filter. Before every attempt, delivery checks expiry, cancellation,
+  the current key hash and the original OAuth grant through public provider helpers.
+  A different installation cannot unsubscribe or rotate this installation's secret.
+- **Agent edits are withheld** unless the subscription sets `include_agent`.
+  Otherwise every `apply_patch` returns to the agent as an event and it reacts to
+  its own work. `room.ts` tags each change with its `origin` for exactly this.
+- **Payloads carry counts, not elements.** The agent re-reads with `get_scene`.
+  This keeps element data out of callback logs and limits injection surface.
+- **Delivery is best-effort and off the critical path**, via `ctx.waitUntil` in
+  the room. A slow or dead callback must never delay a human's edit. Three
+  attempts with backoff; `410` and `413` are never retried.
+- **Receiver hosts are explicitly trusted.** `MCP_EVENT_CALLBACK_HOSTS` is an exact
+  allowlist. Both address families are resolved before every POST; non-public DNS
+  answers, non-HTTPS URLs, credentials, fragments, IP literals and nonstandard ports
+  are rejected. Redirects are disabled. Workers fetch preserves hostname TLS checks
+  but does not expose IP pinning: the allowlist is a necessary trust boundary, not
+  a replacement for pinned egress if arbitrary callback hosts are needed.
+- **Signing-key rotation overlaps for five minutes.** D1 stores the prior secret
+  and deadline; each attempt signs the exact serialized bytes with fresh timestamps.
+  Retries keep the same event id. `410` removes the subscription; `413` and permanent
+  client errors are not retried. Network failures, `408`, `429` and server errors
+  receive up to three attempts with exponential backoff.
+- **No replay.** There is no event log, so every response carries `cursor: null`
+  and a missed event is not recoverable. A restart can drop a delivery silently.
+
+## Auth: capability links (the canvas)
 
 ```mermaid
 flowchart TD
@@ -222,8 +334,10 @@ flowchart TD
     Lib -- no --> Deny
 ```
 
-- There are no user accounts. Holding a diagram's link is the permission to edit it, for
-  people and agents alike. Hand the interviewer the same link.
+- There are no user accounts on the canvas. Holding a diagram's link is the permission to
+  edit it, for people and agents alike. Hand the interviewer the same link. Agents must
+  also be signed in to reach `/mcp` (see above), but the link is still what authorizes
+  the board itself.
 - **All diagrams** lists every non-template, non-deleted board with a server-managed
   library link, so any visitor to the deployment can open any board. A deployment is a
   shared workspace; put it behind access controls if it should be private.
@@ -294,6 +408,8 @@ flowchart TD
 **Prompts**: `review_design`, `suggest_next_step`, `estimate_capacity`.
 **Resources**: `rubric://system-design`, `components://catalog`, and the view
 `ui://system-design-canvas/diagram.html`.
+**Events**: `diagram.changed`, `diagram.renamed`, `diagram.checkpointed` — webhook
+delivery only, see [MCP events](#mcp-events).
 
 ## Deployment
 
@@ -316,3 +432,19 @@ previews share the one preview database and bucket.
 - GitHub OAuth.
 - Proposal/ghost layer.
 - Server-side lint.
+
+## OAuth and event implementation references
+
+The implementation was checked against these primary sources and samples:
+
+- [OpenAI MCP Events](https://developers.openai.com/plugins/build/mcp-events), including
+  the Node.js delivery sample and subscription lifecycle requirements.
+- [Cloudflare MCP authorization](https://developers.cloudflare.com/agents/model-context-protocol/protocol/authorization/).
+- [Workers OAuth Provider](https://github.com/cloudflare/workers-oauth-provider) and its
+  [split-worker authorization sample](https://github.com/cloudflare/workers-oauth-provider/blob/main/examples/split-workers/auth-server/index.ts)
+  and [end-to-end tests](https://github.com/cloudflare/workers-oauth-provider/blob/main/examples/split-workers/e2e.test.ts).
+  This repo keeps the supported combined `OAuthProvider` because its authorization server
+  and resource server share one Worker; no second Worker or Agents SDK wrapper is needed.
+- [Public fetch routing](https://developers.cloudflare.com/workers/configuration/compatibility-flags/#global-fetch-strictly-public),
+  [Workers HTTPS limitations](https://developers.cloudflare.com/workers/runtime-apis/nodejs/https/)
+  and [Cloudflare DNS JSON queries](https://developers.cloudflare.com/1.1.1.1/encryption/dns-over-https/make-api-requests/dns-json/).

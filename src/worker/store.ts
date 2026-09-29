@@ -31,6 +31,21 @@ export function ensureSchema(env: Env) {
     env.DB.prepare(
       "CREATE INDEX IF NOT EXISTS snapshots_by_diagram ON snapshots (diagram_id, created_at)",
     ),
+    env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS event_subscriptions (
+        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, event_name TEXT NOT NULL,
+        diagram_id TEXT NOT NULL, callback_url TEXT NOT NULL, secret TEXT NOT NULL,
+        include_agent INTEGER NOT NULL DEFAULT 0,
+        expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+    ),
+    env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS event_subscription_access (
+        id TEXT PRIMARY KEY, authorization_id TEXT NOT NULL, resource TEXT NOT NULL,
+        key_hash TEXT NOT NULL, previous_secret TEXT, previous_secret_until INTEGER NOT NULL DEFAULT 0)`,
+    ),
+    env.DB.prepare(
+      "CREATE INDEX IF NOT EXISTS event_subscriptions_diagram ON event_subscriptions (diagram_id, event_name, expires_at)",
+    ),
   ]).catch((e) => {
     schemaReady = null;
     throw e;
@@ -38,7 +53,8 @@ export function ensureSchema(env: Env) {
   return schemaReady;
 }
 
-async function sha256(s: string) {
+/** Hex SHA-256. Also the digest behind event subscription ids. */
+export async function sha256(s: string) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }

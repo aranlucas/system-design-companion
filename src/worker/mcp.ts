@@ -3,9 +3,17 @@ import {
   registerAppResource,
   registerAppTool,
 } from "@modelcontextprotocol/ext-apps/server";
-import { createMcpHandler, McpServer, type McpRequestContext } from "@modelcontextprotocol/server";
+import {
+  createMcpHandler,
+  McpServer,
+  requireScopes,
+  type McpRequestContext,
+  type ServerCapabilities,
+} from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { COMPONENT_KINDS, COMPONENTS } from "../shared/components.ts";
+import { registerEvents } from "./events.ts";
+import type { McpPrincipal } from "./principal.ts";
 import { SHAPES, type Op } from "./scene.ts";
 import { RUBRIC } from "./rubric.ts";
 import {
@@ -19,9 +27,19 @@ import {
 } from "./store.ts";
 import { VIEW_URI, viewHtml } from "./view.ts";
 
-export function handleMcp(request: Request, env: Env) {
-  const handler = createMcpHandler((ctx) => buildServer(env, ctx));
-  return handler.fetch(request);
+export function handleMcp(request: Request, env: Env, principal: McpPrincipal) {
+  const handler = createMcpHandler((ctx) => buildServer(env, ctx, principal));
+  // The SDK never verifies tokens itself; authInfo is strictly the caller's claim
+  // about who is calling, and events/subscribe keys subscriptions on it.
+  return handler.fetch(request, {
+    authInfo: {
+      token: "",
+      clientId: principal.clientId,
+      scopes: principal.scopes,
+      expiresAt: principal.expiresAt,
+      extra: { userId: principal.userId, login: principal.login, name: principal.name },
+    },
+  });
 }
 
 /** Tool and prompt arguments, as their input schemas validate them. */
@@ -153,7 +171,7 @@ const userMsg = (t: string) => ({
   messages: [{ role: "user" as const, content: { type: "text" as const, text: t } }],
 });
 
-export function buildServer(env: Env, ctx: McpRequestContext) {
+export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrincipal) {
   const url = new URL(ctx.requestInfo?.url ?? "http://localhost/mcp");
   const origin = url.origin;
 
@@ -176,8 +194,15 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
         },
       ],
     },
-    { instructions: INSTRUCTIONS, capabilities: { tools: {}, prompts: {}, resources: {} } },
+    {
+      instructions: INSTRUCTIONS,
+      // `events` is not in the SDK's ServerCapabilities type, but the discover
+      // response advertises capabilities verbatim, so the key reaches the wire.
+      capabilities: { tools: {}, prompts: {}, resources: {}, events: {} } as ServerCapabilities,
+    },
   );
+
+  registerEvents(server, env, principal);
 
   /** Resolve a share link to a verified diagram. The link is the client-held handle; nothing is stored server-side. */
   async function pick(link: string) {
@@ -225,6 +250,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
   server.registerTool(
     "create_diagram",
     {
+      scopeChallenge: requireScopes("mcp:read", "mcp:write"),
       description:
         "Create a new diagram (optionally from a template), join it, and return its share link for the user to open.",
       inputSchema: z.object({
@@ -368,6 +394,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
   server.registerTool(
     "apply_patch",
     {
+      scopeChallenge: requireScopes("mcp:read", "mcp:write"),
       description:
         "Apply a batch of semantic edits. Ops run in order; later ops can use refs from earlier ones. A snapshot is taken first (undo with restore). Returns per-op results; failed ops don't abort the batch.",
       inputSchema: z.object({
@@ -403,6 +430,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
   server.registerTool(
     "tidy",
     {
+      scopeChallenge: requireScopes("mcp:read", "mcp:write"),
       description:
         "Non-destructive cleanup: attach loose items to the frame they sit in, wrap over-long notes, snap nearly-aligned boxes and even out their gaps, push apart overlaps with minimal moves (groups move whole), fit frames and separate overlapping frames. Never changes connections, labels or relative order. Snapshotted first when anything changes; returns counts of what it did. (apply_patch already tidies the frames it touches.)",
       inputSchema: z.object({
@@ -425,6 +453,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
   server.registerTool(
     "layout",
     {
+      scopeChallenge: requireScopes("mcp:read", "mcp:write"),
       description:
         "Full re-layout (layered graph) that moves every node in scope. Only when the user explicitly asks to re-arrange; prefer tidy for cleanup.",
       inputSchema: z.object({
@@ -451,6 +480,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
   server.registerTool(
     "import_mermaid",
     {
+      scopeChallenge: requireScopes("mcp:read", "mcp:write"),
       description:
         "Draw a Mermaid flowchart/sequence diagram onto free canvas space (rendered by the user's tab). Good for sketching many nodes at once.",
       inputSchema: z.object({ diagram: diagramArg, source: z.string() }),
@@ -472,6 +502,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
   server.registerTool(
     "snapshot",
     {
+      scopeChallenge: requireScopes("mcp:read", "mcp:write"),
       description: "Save a named version of the diagram.",
       inputSchema: z.object({ diagram: diagramArg, name: z.string() }),
     },
@@ -515,6 +546,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
   server.registerTool(
     "restore",
     {
+      scopeChallenge: requireScopes("mcp:read", "mcp:write"),
       description:
         "Restore the diagram to a snapshot (itself snapshotted first, so restore is undoable).",
       inputSchema: z.object({ diagram: diagramArg, snapshot_id: z.string() }),
@@ -556,6 +588,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
   server.registerTool(
     "save_as_template",
     {
+      scopeChallenge: requireScopes("mcp:read", "mcp:write"),
       description: "Save the current diagram as a reusable template.",
       inputSchema: z.object({
         diagram: diagramArg,
@@ -578,6 +611,7 @@ export function buildServer(env: Env, ctx: McpRequestContext) {
   server.registerTool(
     "focus_view",
     {
+      scopeChallenge: requireScopes("mcp:read", "mcp:write"),
       description:
         "Direct the most recently active subscriber's open diagram tab to components or a frame. mode=focus pans/zooms and briefly highlights the target; mode=point shows a temporary laser-style marker without moving the viewport. Returns visible=false if a point target is offscreen (use focus to bring it into view). Does not change the diagram, selection, or history. Requires an open tab.",
       inputSchema: z.object({
