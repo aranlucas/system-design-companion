@@ -42,7 +42,7 @@ export default defineConfig((ctx) => {
             name: "system-design-companion-preview",
           }),
           // bindings.kv takes only the id; wrangler.jsonc is where the name lives.
-          OAUTH_KV: bindings.kv({ id: "b7d3e90c14f24a8ea5b6c1d82f0a3947" }),
+          OAUTH_KV: bindings.kv({ id: "274ca9d72ca54cb39cb05ca61d50b21b" }),
           ROOM: bindings.durableObject({
             worker: "system-design-companion",
             exportName: "DiagramRoom",
@@ -77,7 +77,7 @@ export default defineConfig((ctx) => {
           name: "system-design-companion",
         }),
         // bindings.kv takes only the id; wrangler.jsonc is where the name lives.
-        OAUTH_KV: bindings.kv({ id: "e4b1c2a95f0d4f7ea38c6b1902d7e5f43" }),
+        OAUTH_KV: bindings.kv({ id: "41212830bf3f4cf983bfe78f6e86a55d" }),
         ROOM: bindings.durableObject({
           worker: "system-design-companion",
           exportName: "DiagramRoom",

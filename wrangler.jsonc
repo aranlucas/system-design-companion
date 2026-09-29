@@ -7,7 +7,8 @@
   // Cloudflare's git builds run a bare `wrangler deploy`, so build the client, view and worker here.
   "build": { "command": "pnpm build:view && vite build" },
   "assets": {
-    "directory": "./dist/client",
+    // Vite plugin v2 emits the client here; legacy Workers Builds still invoke Wrangler.
+    "directory": "./.cloudflare/output/v0/workers/default/assets",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     // Everything the OAuth provider owns must reach the Worker, or the SPA
@@ -34,12 +35,11 @@
     },
   ],
   "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "system-design-companion" }],
-  // Tokens and codes for the OAuth provider. Create it once per environment with
-  // `wrangler kv namespace create OAUTH_KV` and paste the id it prints.
+  // Dedicated production OAuth tokens and codes. Preview uses a separate namespace.
   "kv_namespaces": [
     {
       "binding": "OAUTH_KV",
-      "id": "e4b1c2a95f0d4f7ea38c6b1902d7e5f43",
+      "id": "41212830bf3f4cf983bfe78f6e86a55d",
     },
   ],
   "observability": { "enabled": true },
@@ -55,6 +55,6 @@
       },
     ],
     "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "system-design-companion-preview" }],
-    "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "b7d3e90c14f24a8ea5b6c1d82f0a3947" }],
+    "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "274ca9d72ca54cb39cb05ca61d50b21b" }],
   },
 }

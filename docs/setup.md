@@ -25,7 +25,7 @@ work.
 ```sh
 npx wrangler d1 create system-design-companion   # paste the ID into cloudflare.config.ts and the compatibility wrangler.jsonc if not auto-provisioned
 npx wrangler r2 bucket create system-design-companion
-npx wrangler kv namespace create OAUTH_KV         # paste the ID into both configuration files
+npx wrangler kv namespace create system-design-companion-oauth  # update OAUTH_KV in both files
 pnpm deploy
 ```
 
@@ -39,7 +39,7 @@ resources, set in the `ctx.isPreview` branch of `cloudflare.config.ts` (and the 
 ```sh
 npx wrangler d1 create system-design-companion-preview        # update the preview D1 ID in both configuration files
 npx wrangler r2 bucket create system-design-companion-preview
-npx wrangler kv namespace create OAUTH_KV                     # and the preview KV ID in both files
+npx wrangler kv namespace create system-design-companion-preview-oauth  # update preview OAUTH_KV in both files
 ```
 
 ## Sign-in for agents
