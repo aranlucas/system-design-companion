@@ -142,5 +142,3 @@ permissions, deletion is logical, and shared boards should be protected at the
 deployment or network layer when they contain sensitive interview material.
 Agent operations snapshot before changing the board, but this is a recovery
 mechanism rather than an access-control system.
-
-See [Cloudflare CLI migration](CF_MIGRATION.md) for cf deployment and compatibility details.
