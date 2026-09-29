@@ -635,7 +635,7 @@ describe("webhook delivery lifecycle", () => {
     await ctx.drain();
     expect(await validSignature(receiver.events()[0], SECRET)).toBe(true);
     expect(await validSignature(receiver.events()[0], replacement)).toBe(true);
-    env.db.event_access.get(originalId)!.previous_secret_until = Date.now() - 1;
+    env.db.event_subscriptions.get(originalId)!.previous_secret_until = Date.now() - 1;
     await room.rename("Window closed");
     await ctx.drain();
     expect(receiver.events()[1].headers["webhook-signature"].split(" ")).toHaveLength(1);

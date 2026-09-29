@@ -18,11 +18,14 @@ import {
   type OAuthHelpers,
   type OAuthProviderOptions,
 } from "@cloudflare/workers-oauth-provider";
-import { AUTHORIZE_ENDPOINT, CALLBACK_PATH, MCP_ROUTE } from "./oauth-paths.ts";
+import {
+  AUTHORIZE_ENDPOINT,
+  CALLBACK_PATH,
+  MCP_ROUTE,
+  TOKEN_ENDPOINT,
+  REGISTRATION_ENDPOINT,
+} from "./oauth-paths.ts";
 import { toMcpPrincipal, type OAuthHandlerContext } from "./principal.ts";
-
-const TOKEN_ENDPOINT = "/oauth/token";
-const REGISTRATION_ENDPOINT = "/oauth/register";
 
 /** Everything the authorization server can grant. */
 const SCOPES_SUPPORTED = ["mcp:read", "mcp:write"];
@@ -40,7 +43,7 @@ const GITHUB_TOKEN = "https://github.com/login/oauth/access_token";
 const GITHUB_USER = "https://api.github.com/user";
 
 /** The subset of the GitHub user API this deployment reads. */
-type GithubUser = { id: number; login: string; name: string | null };
+type GithubUser = { id: number };
 
 /** What the GitHub token exchange returns. */
 type GithubTokenResponse = { access_token?: string; error?: string };
@@ -247,7 +250,7 @@ async function callback(
     userId: encodeURIComponent(`github:${user.id}`),
     metadata: { authorizationId },
     scope: authRequest.scope,
-    props: { authorizationId, login: user.login, name: user.name ?? user.login },
+    props: { authorizationId },
   });
   headers.set("Location", redirectTo);
   return new Response(null, { status: 302, headers });
@@ -272,12 +275,7 @@ async function fetchGithubUser(accessToken: string): Promise<GithubUser | null> 
   });
   if (!res.ok) return null;
   const user = (await res.json()) as GithubUser;
-  return Number.isSafeInteger(user.id) &&
-    user.id > 0 &&
-    typeof user.login === "string" &&
-    user.login
-    ? user
-    : null;
+  return Number.isSafeInteger(user.id) && user.id > 0 ? user : null;
 }
 
 async function s256(verifier: string): Promise<string> {

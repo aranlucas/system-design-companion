@@ -37,7 +37,7 @@ export function handleMcp(request: Request, env: Env, principal: McpPrincipal) {
       clientId: principal.clientId,
       scopes: principal.scopes,
       expiresAt: principal.expiresAt,
-      extra: { userId: principal.userId, login: principal.login, name: principal.name },
+      extra: { userId: principal.userId },
     },
   });
 }

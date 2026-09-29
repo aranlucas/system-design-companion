@@ -1,17 +1,6 @@
 import { bindings, defineConfig, exports } from "cf/config";
 
-// The OAuth provider owns /mcp, its discovery documents, and its token and
-// registration endpoints, so those paths must reach the Worker rather than the
-// SPA fallback. This file and wrangler.jsonc have to stay in sync.
-const RUN_WORKER_FIRST = [
-  "/api/*",
-  "/ws/*",
-  "/mcp",
-  "/authorize",
-  "/github/*",
-  "/oauth/*",
-  "/.well-known/oauth-*",
-];
+import { RUN_WORKER_FIRST } from "./src/worker/oauth-paths.ts";
 
 const COMPATIBILITY_FLAGS = ["nodejs_compat", "global_fetch_strictly_public"];
 

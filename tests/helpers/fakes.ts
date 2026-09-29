@@ -31,18 +31,12 @@ export interface EventSubscriptionRow {
   secret: string;
   include_agent: number;
   expires_at: number;
-  created_at: number;
-}
-
-export interface EventAccessRow {
-  id: string;
   authorization_id: string;
   resource: string;
   key_hash: string;
   previous_secret: string | null;
   previous_secret_until: number;
 }
-type EventAccessParams = [string, string, string, string, string | null, number];
 type FakeStatement = { run: () => Promise<unknown> };
 type KvReadOptions = { type?: "text" | "json" };
 type KvWriteOptions = { expirationTtl?: number; expiration?: number };
@@ -101,7 +95,11 @@ type EventSubscriptionParams = [
   secret: string,
   include_agent: number,
   expires_at: number,
-  created_at: number,
+  authorization_id: string,
+  resource: string,
+  key_hash: string,
+  previous_secret: string | null,
+  previous_secret_until: number,
 ];
 type EventSubscriptionFilter = [diagram_id: string, event_name: string, now: number];
 type DiagramInsertParams = [
@@ -143,7 +141,6 @@ export class FakeD1 {
   library = new Map<string, string>();
   deleted = new Set<string>();
   event_subscriptions = new Map<string, EventSubscriptionRow>();
-  event_access = new Map<string, EventAccessRow>();
 
   async batch(stmts: FakeStatement[]): Promise<unknown[]> {
     return Promise.all(stmts.map((stmt) => stmt.run()));
@@ -183,23 +180,6 @@ export class FakeD1 {
 
   private run(sql: string, p: unknown[]): void {
     if (sql.startsWith("CREATE ")) return;
-    if (sql.includes("INSERT INTO event_subscription_access")) {
-      const [id, authorization_id, resource, key_hash, previous_secret, previous_secret_until] =
-        p as EventAccessParams;
-      this.event_access.set(id, {
-        id,
-        authorization_id,
-        resource,
-        key_hash,
-        previous_secret,
-        previous_secret_until,
-      });
-      return;
-    }
-    if (sql.includes("DELETE FROM event_subscription_access")) {
-      this.event_access.delete(p[0] as string);
-      return;
-    }
     if (sql.includes("INSERT OR IGNORE INTO deleted_diagrams")) {
       this.deleted.add(p[0] as string);
       return;
@@ -249,7 +229,7 @@ export class FakeD1 {
       }
       return;
     }
-    if (sql.includes("INSERT INTO event_subscriptions")) {
+    if (sql.includes("INSERT INTO mcp_event_subscriptions")) {
       const [
         id,
         user_id,
@@ -259,7 +239,11 @@ export class FakeD1 {
         secret,
         include,
         expires_at,
-        created_at,
+        authorization_id,
+        resource,
+        key_hash,
+        previous_secret,
+        previous_secret_until,
       ] = p as EventSubscriptionParams;
       // ON CONFLICT(id) DO UPDATE: a refresh keeps the row and moves the grant.
       this.event_subscriptions.set(id, {
@@ -271,11 +255,15 @@ export class FakeD1 {
         secret,
         include_agent: include,
         expires_at,
-        created_at,
+        authorization_id,
+        resource,
+        key_hash,
+        previous_secret,
+        previous_secret_until,
       });
       return;
     }
-    if (sql.includes("DELETE FROM event_subscriptions")) {
+    if (sql.includes("DELETE FROM mcp_event_subscriptions")) {
       this.event_subscriptions.delete(p[0] as string);
       return;
     }
@@ -283,10 +271,8 @@ export class FakeD1 {
   }
 
   private first(sql: string, p: unknown[]): unknown {
-    if (sql.includes("FROM event_subscriptions")) {
-      const subscription = this.event_subscriptions.get(p[0] as string);
-      const access = this.event_access.get(p[0] as string);
-      return subscription && access ? { ...subscription, ...access } : null;
+    if (sql.includes("FROM mcp_event_subscriptions")) {
+      return this.event_subscriptions.get(p[0] as string) ?? null;
     }
     if (sql.includes("FROM diagram_library WHERE diagram_id = ?")) {
       const access_key = this.library.get(p[0] as string);
@@ -333,17 +319,11 @@ export class FakeD1 {
           elements: s.element_count,
         }));
     }
-    if (sql.includes("FROM event_subscriptions")) {
+    if (sql.includes("FROM mcp_event_subscriptions")) {
       const [diagram_id, event_name, now] = p as EventSubscriptionFilter;
-      return [...this.event_subscriptions.values()]
-        .filter(
-          (s) =>
-            s.diagram_id === diagram_id &&
-            s.event_name === event_name &&
-            s.expires_at > now &&
-            this.event_access.has(s.id),
-        )
-        .map((s) => ({ ...s, ...this.event_access.get(s.id) }));
+      return [...this.event_subscriptions.values()].filter(
+        (s) => s.diagram_id === diagram_id && s.event_name === event_name && s.expires_at > now,
+      );
     }
     throw new Error(`FakeD1.all: unsupported SQL: ${sql}`);
   }
@@ -542,8 +522,6 @@ export function testPrincipal(overrides: Partial<McpPrincipal> = {}): McpPrincip
     resource: "https://design.example/mcp",
     clientId: "test-client",
     scopes: ["mcp:read", "mcp:write"],
-    login: "tester",
-    name: "Tester",
     ...overrides,
   };
 }

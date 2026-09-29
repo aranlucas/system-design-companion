@@ -32,19 +32,15 @@ export function ensureSchema(env: Env) {
       "CREATE INDEX IF NOT EXISTS snapshots_by_diagram ON snapshots (diagram_id, created_at)",
     ),
     env.DB.prepare(
-      `CREATE TABLE IF NOT EXISTS event_subscriptions (
+      `CREATE TABLE IF NOT EXISTS mcp_event_subscriptions (
         id TEXT PRIMARY KEY, user_id TEXT NOT NULL, event_name TEXT NOT NULL,
         diagram_id TEXT NOT NULL, callback_url TEXT NOT NULL, secret TEXT NOT NULL,
-        include_agent INTEGER NOT NULL DEFAULT 0,
-        expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+        include_agent INTEGER NOT NULL DEFAULT 0, expires_at INTEGER NOT NULL,
+        authorization_id TEXT NOT NULL, resource TEXT NOT NULL, key_hash TEXT NOT NULL,
+        previous_secret TEXT, previous_secret_until INTEGER NOT NULL DEFAULT 0)`,
     ),
     env.DB.prepare(
-      `CREATE TABLE IF NOT EXISTS event_subscription_access (
-        id TEXT PRIMARY KEY, authorization_id TEXT NOT NULL, resource TEXT NOT NULL,
-        key_hash TEXT NOT NULL, previous_secret TEXT, previous_secret_until INTEGER NOT NULL DEFAULT 0)`,
-    ),
-    env.DB.prepare(
-      "CREATE INDEX IF NOT EXISTS event_subscriptions_diagram ON event_subscriptions (diagram_id, event_name, expires_at)",
+      "CREATE INDEX IF NOT EXISTS mcp_event_subscriptions_diagram ON mcp_event_subscriptions (diagram_id, event_name, expires_at)",
     ),
   ]).catch((e) => {
     schemaReady = null;

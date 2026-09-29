@@ -8,8 +8,8 @@
 export const MCP_ROUTE = "/mcp";
 export const AUTHORIZE_ENDPOINT = "/authorize";
 export const CALLBACK_PATH = "/github/callback";
-const TOKEN_ENDPOINT = "/oauth/token";
-const REGISTRATION_ENDPOINT = "/oauth/register";
+export const TOKEN_ENDPOINT = "/oauth/token";
+export const REGISTRATION_ENDPOINT = "/oauth/register";
 const PROTECTED_RESOURCE_METADATA = "/.well-known/oauth-protected-resource";
 
 /** Whether the OAuth provider handles this path, or Hono does. */

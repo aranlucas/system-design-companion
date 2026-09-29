@@ -117,83 +117,56 @@ const listParams = z.looseObject({ cursor: z.string().optional() });
 type SubscribeRequest = z.infer<typeof subscribeParams>;
 type UnsubscribeRequest = z.infer<typeof unsubscribeParams>;
 
-/** The share link every subscription must name, described for the model that fills it in. */
-const diagramArg = {
-  type: "string",
-  description:
-    "The diagram share link, e.g. https://…/d/<id>?k=<key>. The same link you pass to tools.",
-};
+const diagramArguments = z.strictObject({
+  diagram: z.string().min(1).describe("The diagram share link, e.g. https://…/d/<id>?k=<key>."),
+});
+const changedArguments = diagramArguments.extend({
+  include_agent: z
+    .boolean()
+    .optional()
+    .describe("Include agent edits. Off by default to avoid feedback loops."),
+});
+type EventArguments = z.infer<typeof changedArguments>;
 
 export const EVENT_TYPES: EventType[] = [
-  {
-    name: "diagram.changed",
-    description:
-      "Someone edited a diagram you are watching. Call get_scene with the same share link to see what changed.",
-    delivery: ["webhook"],
-    inputSchema: {
-      type: "object",
-      properties: {
-        diagram: diagramArg,
-        include_agent: {
-          type: "boolean",
-          default: false,
-          description:
-            "Also deliver edits the agent itself made. Off by default, so an agent does not react to its own changes.",
-        },
-      },
-      required: ["diagram"],
-      additionalProperties: false,
-    },
-    payloadSchema: {
-      type: "object",
-      properties: {
-        diagram_id: { type: "string" },
-        origin: { type: "string", enum: ["human", "agent", "system"] },
-        changed_count: { type: "integer", description: "Elements this edit touched." },
-      },
-      required: ["diagram_id", "origin", "changed_count"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "diagram.renamed",
-    description: "A diagram you are watching was renamed.",
-    delivery: ["webhook"],
-    inputSchema: {
-      type: "object",
-      properties: { diagram: diagramArg },
-      required: ["diagram"],
-      additionalProperties: false,
-    },
-    payloadSchema: {
-      type: "object",
-      properties: { diagram_id: { type: "string" }, name: { type: "string" } },
-      required: ["diagram_id", "name"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "diagram.checkpointed",
-    description: "Someone saved a named checkpoint (version) of a diagram you are watching.",
-    delivery: ["webhook"],
-    inputSchema: {
-      type: "object",
-      properties: { diagram: diagramArg },
-      required: ["diagram"],
-      additionalProperties: false,
-    },
-    payloadSchema: {
-      type: "object",
-      properties: {
-        diagram_id: { type: "string" },
-        snapshot_id: { type: "string" },
-        name: { type: "string" },
-      },
-      required: ["diagram_id", "snapshot_id", "name"],
-      additionalProperties: false,
-    },
-  },
+  eventType(
+    "diagram.changed",
+    "Someone edited a diagram you are watching. Call get_scene with the same share link to see what changed.",
+    changedArguments,
+    z.strictObject({
+      diagram_id: z.string(),
+      origin: z.enum(["human", "agent", "system"]),
+      changed_count: z.number().int().describe("Elements this edit touched."),
+    }),
+  ),
+  eventType(
+    "diagram.renamed",
+    "A diagram you are watching was renamed.",
+    diagramArguments,
+    z.strictObject({ diagram_id: z.string(), name: z.string() }),
+  ),
+  eventType(
+    "diagram.checkpointed",
+    "Someone saved a named checkpoint (version) of a diagram you are watching.",
+    diagramArguments,
+    z.strictObject({ diagram_id: z.string(), snapshot_id: z.string(), name: z.string() }),
+  ),
 ];
+
+function eventType(
+  name: string,
+  description: string,
+  input: z.ZodType,
+  payload: z.ZodType,
+): EventType {
+  return {
+    name,
+    description,
+    delivery: ["webhook"],
+    inputSchema: z.toJSONSchema(input),
+    payloadSchema: z.toJSONSchema(payload),
+  };
+}
 
 const byName = new Map(EVENT_TYPES.map((t) => [t.name, t]));
 
@@ -248,7 +221,8 @@ async function subscribe(env: Env, principal: McpPrincipal, params: SubscribeReq
 
   const args = validateArguments(params.name, params.arguments);
   const parsed = parseLink(args.diagram)!;
-  await resolveDiagram(env, args);
+  if (!(await verifyKey(env, parsed.id, parsed.key)))
+    throw protocolError(ERR_FORBIDDEN, "Forbidden", { reason: "diagram link is not valid" });
   const diagramId = parsed.id;
   const keyHash = await sha256(parsed.key);
   const includeAgent = args.include_agent === true;
@@ -281,9 +255,7 @@ async function subscribe(env: Env, principal: McpPrincipal, params: SubscribeReq
     markVerified(principal.userId, url);
   }
 
-  const previous = await env.DB.prepare(
-    "SELECT s.*, a.* FROM event_subscriptions s JOIN event_subscription_access a ON a.id = s.id WHERE s.id = ?",
-  )
+  const previous = await env.DB.prepare("SELECT * FROM mcp_event_subscriptions WHERE id = ?")
     .bind(sub.id)
     .first<SubscriptionRow>();
   if (previous?.secret !== secret && previous && previous.expires_at > Date.now()) {
@@ -293,14 +265,15 @@ async function subscribe(env: Env, principal: McpPrincipal, params: SubscribeReq
     sub.previousSecret = previous.previous_secret;
     sub.previousSecretUntil = previous.previous_secret_until;
   }
-  // Store both halves atomically. Old rows without access metadata fail closed.
-  await env.DB.batch([
-    env.DB.prepare(
-      `INSERT INTO event_subscriptions
-        (id, user_id, event_name, diagram_id, callback_url, secret, include_agent, expires_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET secret = excluded.secret, expires_at = excluded.expires_at`,
-    ).bind(
+  await env.DB.prepare(
+    `INSERT INTO mcp_event_subscriptions
+      (id, user_id, event_name, diagram_id, callback_url, secret, include_agent, expires_at,
+       authorization_id, resource, key_hash, previous_secret, previous_secret_until)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET secret = excluded.secret, expires_at = excluded.expires_at,
+       previous_secret = excluded.previous_secret, previous_secret_until = excluded.previous_secret_until`,
+  )
+    .bind(
       sub.id,
       sub.userId,
       sub.eventName,
@@ -309,23 +282,13 @@ async function subscribe(env: Env, principal: McpPrincipal, params: SubscribeReq
       sub.secret,
       sub.includeAgent ? 1 : 0,
       sub.expiresAt,
-      Date.now(),
-    ),
-    env.DB.prepare(
-      `INSERT INTO event_subscription_access
-        (id, authorization_id, resource, key_hash, previous_secret, previous_secret_until)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET previous_secret = excluded.previous_secret,
-         previous_secret_until = excluded.previous_secret_until`,
-    ).bind(
-      sub.id,
       sub.authorizationId,
       sub.resource,
       sub.keyHash,
       sub.previousSecret,
       sub.previousSecretUntil,
-    ),
-  ]);
+    )
+    .run();
 
   return {
     id: sub.id,
@@ -352,24 +315,6 @@ async function unsubscribe(env: Env, principal: McpPrincipal, params: Unsubscrib
   );
   await removeSubscription(env, id);
   return {};
-}
-
-/** Resolve the `diagram` argument to an authorized diagram id, or refuse. */
-async function resolveDiagram(
-  env: Env,
-  args: Record<string, unknown> | undefined,
-): Promise<string> {
-  const link = args?.diagram;
-  if (typeof link !== "string" || !link) throw invalidParams("`diagram` is required");
-  const parsed = parseLink(link);
-  if (!parsed)
-    throw invalidParams("`diagram` must be the share link, e.g. https://…/d/<id>?k=<key>");
-  const row = await verifyKey(env, parsed.id, parsed.key);
-  // A bad or revoked link is Forbidden rather than NotFound, which would tell an
-  // unauthorized caller whether the diagram exists.
-  if (!row)
-    throw protocolError(ERR_FORBIDDEN, "Forbidden", { reason: "diagram link is not valid" });
-  return row.id;
 }
 
 /**
@@ -436,9 +381,8 @@ export async function deliverDiagramEvent(
 async function subscriptionsFor(env: Env, diagramId: string, name: string) {
   await ensureSchema(env);
   const { results } = await env.DB.prepare(
-    `SELECT s.*, a.* FROM event_subscriptions s
-       JOIN event_subscription_access a ON a.id = s.id
-      WHERE s.diagram_id = ? AND s.event_name = ? AND s.expires_at > ?`,
+    `SELECT * FROM mcp_event_subscriptions
+      WHERE diagram_id = ? AND event_name = ? AND expires_at > ?`,
   )
     .bind(diagramId, name, Date.now())
     .all<SubscriptionRow>();
@@ -635,9 +579,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-const diagramArguments = z.strictObject({ diagram: z.string().min(1) });
-const changedArguments = diagramArguments.extend({ include_agent: z.boolean().optional() });
-type EventArguments = z.infer<typeof changedArguments>;
 type KeyHashRow = { key_hash: string };
 
 function validateArguments(
@@ -696,17 +637,12 @@ async function signatures(
 
 async function removeSubscription(env: Env, id: string): Promise<void> {
   await ensureSchema(env);
-  await env.DB.batch([
-    env.DB.prepare("DELETE FROM event_subscriptions WHERE id = ?").bind(id),
-    env.DB.prepare("DELETE FROM event_subscription_access WHERE id = ?").bind(id),
-  ]);
+  await env.DB.prepare("DELETE FROM mcp_event_subscriptions WHERE id = ?").bind(id).run();
 }
 
 /** Recheck consent, capability, expiry and unsubscribe before every delivery attempt. */
 async function activeSubscription(env: Env, sub: Subscription): Promise<Subscription | null> {
-  const current = await env.DB.prepare(
-    "SELECT s.*, a.* FROM event_subscriptions s JOIN event_subscription_access a ON a.id = s.id WHERE s.id = ?",
-  )
+  const current = await env.DB.prepare("SELECT * FROM mcp_event_subscriptions WHERE id = ?")
     .bind(sub.id)
     .first<SubscriptionRow>();
   if (!current || current.expires_at <= Date.now()) return null;

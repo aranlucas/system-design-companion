@@ -203,7 +203,7 @@ erDiagram
         int created_at
         int element_count
     }
-    event_subscriptions {
+    mcp_event_subscriptions {
         text id PK "hash of principal, url, event, diagram, filters"
         text user_id "OAuth subject"
         text event_name
@@ -212,17 +212,12 @@ erDiagram
         text secret "client-supplied whsec_ signing key"
         int include_agent
         int expires_at
-        int created_at
-    }
-    event_subscription_access {
-        text id PK "event subscription id"
         text authorization_id "opaque consent identity"
         text resource "MCP token audience"
         text key_hash "capability hash, never the key"
         text previous_secret "rotation only"
         int previous_secret_until
     }
-    event_subscriptions ||--|| event_subscription_access : authorization
 
 ```
 
@@ -278,7 +273,7 @@ sequenceDiagram
     MCP->>MCP: verifyKey(diagram) — the share link is the scope
     MCP->>Hook: POST {type: verification, challenge}
     Hook-->>MCP: 200 {challenge}
-    MCP->>DB: upsert event_subscriptions
+    MCP->>DB: upsert mcp_event_subscriptions
     MCP-->>Chat: {id, refreshBefore, cursor: null}
 
     Note over Room,Hook: later, a person edits
@@ -292,7 +287,7 @@ Design choices worth knowing:
 
 - **The diagram link is the scope.** `arguments.diagram` goes through the same
   `verifyKey` as every tool, so a subscription can never widen access. The key
-  itself is not stored: the access row keeps its hash. The subscription id includes
+  itself is not stored: the subscription keeps its hash. The subscription id includes
   the user, opaque consent identity, callback URL, event, diagram id, key hash and
   normalized filter. Before every attempt, delivery checks expiry, cancellation,
   the current key hash and the original OAuth grant through public provider helpers.
