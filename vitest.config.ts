@@ -12,5 +12,13 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.test.ts"],
     environment: "node",
+    server: {
+      deps: {
+        // The OAuth provider imports "cloudflare:workers" at module scope, so it
+        // has to go through vite's alias to the stub above rather than being
+        // externalized to node's ESM loader.
+        inline: ["@cloudflare/workers-oauth-provider"],
+      },
+    },
   },
 });

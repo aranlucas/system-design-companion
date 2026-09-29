@@ -1,7 +1,7 @@
 # Improvements & research
 
 Companion to [design.md](design.md). Sources: the new `tests/` suite (`pnpm test`,
-149 tests), a review of `src/worker/*.ts`, and a survey of comparable projects (Sep 2026).
+232 tests), a review of `src/worker/*.ts`, and a survey of comparable projects (Sep 2026).
 
 ## 1. What the test suite covers
 
@@ -15,10 +15,19 @@ Companion to [design.md](design.md). Sources: the new `tests/` suite (`pnpm test
 | `tests/scene-templates.test.ts` | All builtin templates apply cleanly with expected node/edge counts; tidy-stability                                                                                                                                                           |
 | `tests/store-meta.test.ts`      | `parseLink` / `shareLink`, `createDiagram` → `verifyKey` round-trip, builtin + saved templates, component catalog, rubric shape                                                                                                              |
 | `tests/room.test.ts`            | `DiagramRoom` on fake storage: ops layer + auto-snapshots, `tidy` / `layout`, snapshot/restore/undo, `seed`, tombstone hiding, the version/nonce merge rule, tab broadcast, presence/selection, no-tab RPC errors, end-to-end interview flow |
-| `tests/http.test.ts`            | Worker routes with real rooms: create/get/rename, 403s, builtin + saved templates, snapshots/restore/tidy over HTTP, 404s, `/mcp` reachability                                                                                               |
+| `tests/http.test.ts`            | Worker routes with real rooms: create/get/rename, 403s, builtin + saved templates, snapshots/restore/tidy over HTTP, 404s, the `/mcp` token challenge, RFC 9728 metadata, unconfigured-sign-in 503                                           |
+| `tests/mcp-events.test.ts`      | Event catalog, subscriptions, signatures, rotation, retry and revocation checks.                                                                                                                                                             |
 | `tests/helpers/fakes.ts`        | In-memory D1 / R2 / DO-SQL / sockets; `cloudflare:workers` stubbed via `vitest.config.ts` alias                                                                                                                                              |
 
 Run: `pnpm test`. The suite is typechecked, linted, and formatted by `pnpm check`; CI runs it with `pnpm test`.
+
+## OAuth and events limitations
+
+OAuth and MCP event coverage is in `tests/oauth.test.ts`, `tests/mcp-events.test.ts`
+and `tests/webhook-destination.test.ts`. See [design.md](design.md#mcp-events) for
+security decisions and [setup.md](setup.md#mcp-events) for deployment and live testing.
+Events have no durable replay, callback hosts must be trusted because Workers fetch
+cannot pin DNS addresses, and grant revocation follows KV consistency.
 
 ## 2. Findings from writing the tests (all verified in code)
 

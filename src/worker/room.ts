@@ -9,6 +9,7 @@ import type {
   Viewport,
 } from "../shared/protocol.ts";
 import { Scene, graphView, type Author, type Op } from "./scene.ts";
+import { deliverDiagramEvent } from "./events.ts";
 import { patchSnapshotName } from "./patch-name.ts";
 import { copyFiles } from "./store.ts";
 
@@ -178,7 +179,25 @@ export class DiagramRoom extends DurableObject<Env> {
     if (!changed.length) return 0;
     this.persist(changed);
     this.broadcast({ type: "update", elements: changed, origin });
+    this.emit("diagram.changed", {
+      diagram_id: this.diagramId,
+      origin,
+      changed_count: changed.length,
+    });
     return changed.length;
+  }
+
+  /**
+   * Fire an MCP event at whoever subscribed to this diagram. Delivery is
+   * best-effort and off the critical path: a webhook that hangs or fails must
+   * never delay or fail the edit that triggered it.
+   */
+  private emit(name: string, data: Record<string, unknown>) {
+    this.ctx.waitUntil(
+      deliverDiagramEvent(this.env, this.diagramId, name, data).catch((e) =>
+        console.error("mcp events:", e),
+      ),
+    );
   }
 
   // ---------- lifecycle ----------
@@ -208,6 +227,7 @@ export class DiagramRoom extends DurableObject<Env> {
     this.name = name;
     this.setMeta("name", name);
     this.broadcast({ type: "rename", name });
+    this.emit("diagram.renamed", { diagram_id: this.diagramId, name });
   }
 
   /** All elements (incl. tombstones) in z-order; Excalidraw re-indexes anything out of order. */
@@ -270,6 +290,11 @@ export class DiagramRoom extends DurableObject<Env> {
         if (accepted.length) {
           this.persist(accepted);
           this.broadcast({ type: "update", elements: accepted, origin: "human" }, ws);
+          this.emit("diagram.changed", {
+            diagram_id: this.diagramId,
+            origin: "human",
+            changed_count: accepted.length,
+          });
         }
         break;
       }
@@ -487,6 +512,14 @@ export class DiagramRoom extends DurableObject<Env> {
     )
       .bind(meta.id, this.diagramId, name, kind, meta.createdAt, meta.elements)
       .run();
+    // Only checkpoints the user asked for. Every agent edit auto-snapshots, and
+    // reporting those would bury the ones a person deliberately took.
+    if (kind === "named")
+      this.emit("diagram.checkpointed", {
+        diagram_id: this.diagramId,
+        snapshot_id: meta.id,
+        name,
+      });
     return meta;
   }
 

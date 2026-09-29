@@ -29,8 +29,10 @@ changes land.
 > the conversation move together.
 
 The browser link is the capability: anyone who has a diagram's share link can
-edit that board. There are no user accounts, and a deployment is a shared
-workspace unless you put it behind access controls.
+edit that board. There are no canvas user accounts, and a deployment is a shared
+workspace unless you put it behind access controls. Agents are different — they
+sign in once with GitHub, because the model needs to know who is acting before it
+can watch a board for changes.
 
 ## A session
 
@@ -39,8 +41,9 @@ workspace unless you put it behind access controls.
    URL shortener or a realtime chat/feed fan-out.
 2. **Share the link** with your interviewer. Anyone with it can edit, and you see each
    other's cursors and selections.
-3. **Tell your agent "join" and paste the link.** From then on, you can talk about the
-   diagram in plain words: "add a cache in front of the database", "split the write
+3. **Tell your agent "join" and paste the link.** The first connection opens a browser
+   window to sign in with GitHub and approve the agent. From then on, you can talk about
+   the diagram in plain words: "add a cache in front of the database", "split the write
    path into a queue".
 4. **Point and ask.** Select something on the canvas and ask "what about this?". The
    agent knows what you selected.
@@ -60,6 +63,8 @@ workspace unless you put it behind access controls.
 
 **Work with the agent**
 
+- Agents sign in once with GitHub; you never sign in to draw. The canvas keeps working
+  on plain share links.
 - The agent edits with high-level operations (add a component, connect two, rename,
   restyle, group into a frame) rather than raw drawing commands. Its work shows up in
   violet, and a toast tells you when it changed something.
@@ -71,6 +76,10 @@ workspace unless you put it behind access controls.
 - In chat apps that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps)
   (Claude Desktop and web, ChatGPT, VS Code), the conversation shows a live hand-drawn
   picture of the canvas.
+- In ChatGPT, you can subscribe to a board and have the model react on its own: _"watch
+  this diagram and tell me what you'd add when I change it."_ It hears renames, the
+  checkpoints you save, and edits people make — not the agent's own edits, so it never
+  chases its own work.
 
 **Keep it readable**
 
@@ -106,12 +115,13 @@ How it's built (a Cloudflare Worker with one Durable Object per diagram) is in
 ```mermaid
 flowchart LR
   Tabs[Candidate + interviewer tabs] -- WebSocket --> Worker[Cloudflare Worker]
-  Agent[MCP client] -- Streamable HTTP --> Worker
+  Agent[MCP client] -- Streamable HTTP + OAuth --> Worker
   Worker --> Room[One DiagramRoom Durable Object per board]
   Room --> Scene[Pure scene engine]
   Room --> DOSQL[(Durable Object SQLite)]
   Worker --> D1[(D1 index + metadata)]
   Room --> R2[(R2 snapshots + templates)]
+  Room -.->|signed webhooks| Chat[ChatGPT subscriptions]
 ```
 
 `DiagramRoom` owns the live scene, presence, semantic operations, snapshots,
@@ -119,6 +129,11 @@ and tab RPCs. The pure scene engine applies patches, tidy, and layout without
 I/O, which is why most behavior is covered by unit tests. The MCP endpoint and
 HTTP routes are thin adapters over the same room operations, so a human edit
 and an agent edit converge on the same state and persistence rules.
+
+The MCP endpoint sits behind OAuth so an agent has an identity; the canvas does
+not, because a share link is already the permission. Events flow back out of the
+room as signed webhooks, which is how a subscribed model hears about a change
+nobody asked it to look at.
 
 ## Source map
 
@@ -129,6 +144,8 @@ and an agent edit converge on the same state and persistence rules.
 - `src/worker/room.ts` — live room state, collaboration, snapshots, and RPC.
 - `src/worker/scene.ts` — pure semantic scene operations and layout helpers.
 - `src/worker/mcp.ts` — MCP tools and prompts, including the MCP Apps view.
+- `src/worker/oauth.ts` — OAuth provider, GitHub sign-in, and the consent page.
+- `src/worker/events.ts` — MCP event catalog, subscriptions, and webhook delivery.
 - `src/shared/` — wire protocol and reusable component definitions.
 - `src/view/` plus `scripts/build-view.ts` — the inline MCP Apps canvas view.
 - `docs/setup.md` — local/deployment setup and MCP client commands.
@@ -136,9 +153,14 @@ and an agent edit converge on the same state and persistence rules.
 
 ## Status and limits
 
-The project is deployable to Cloudflare Workers with D1, R2, and Durable
+The project is deployable to Cloudflare Workers with D1, R2, KV, and Durable
 Objects. It is intentionally a capability-link collaboration tool: links are
 permissions, deletion is logical, and shared boards should be protected at the
 deployment or network layer when they contain sensitive interview material.
-Agent operations snapshot before changing the board, but this is a recovery
+Agent operations snapshot before changing the board, but that is a recovery
 mechanism rather than an access-control system.
+
+MCP events are best-effort. There is no event log, so a subscription cannot
+replay what it missed, and a deployment restart can drop a delivery without
+telling anyone. Sign-in needs an interactive browser, so a non-interactive
+client (CI, a cron job) cannot authorize itself.

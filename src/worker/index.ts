@@ -1,6 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono, type Handler, type MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
+import { AUTHORIZE_ENDPOINT, CALLBACK_PATH, isOAuthPath } from "./oauth-paths.ts";
 import {
   createBody,
   paginationQuery,
@@ -37,12 +38,6 @@ app.onError((error, c) => {
   return c.json({ error: error.message }, 500);
 });
 app.notFound((c) => c.json({ error: "not found" }, 404));
-
-app.all("/mcp", async (c) => {
-  // HTTP and Durable Object requests do not need to initialize the MCP SDK or its schemas.
-  const { handleMcp } = await import("./mcp.ts");
-  return handleMcp(c.req.raw, c.env);
-});
 
 app.get("/api/templates", async (c) => c.json(await listTemplates(c.env)));
 
@@ -123,4 +118,22 @@ sockets.delete("/", deleteAuthorizedDiagram);
 sockets.all("*", (c) => c.var.room.fetch(c.req.raw));
 app.route("/ws/:id{[A-Za-z0-9_-]+}", sockets);
 
-export default app;
+// The provider owns the OAuth protocol endpoints but forwards /authorize and
+// /github/callback here, so they are Hono routes that load the provider lazily.
+const interactive: Handler<WorkerEnv> = async (c) => {
+  const { oauthRoutes } = await import("./oauth.ts");
+  return oauthRoutes(c.req.raw, c.env);
+};
+app.all(AUTHORIZE_ENDPOINT, interactive);
+app.all(CALLBACK_PATH, interactive);
+
+// The OAuth provider fronts /mcp and owns its own discovery, token, registration,
+// authorize and callback endpoints. Canvas traffic never touches it: the path
+// check runs first so the provider is only loaded for requests that need it.
+export default {
+  fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
+    if (!isOAuthPath(new URL(request.url).pathname)) return app.fetch(request, env, ctx);
+    const { oauthProvider } = await import("./oauth.ts");
+    return oauthProvider(new URL(request.url).origin, app).fetch(request, env, ctx);
+  },
+};

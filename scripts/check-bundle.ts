@@ -47,7 +47,15 @@ console.table({
   "MCP view HTML (self-contained)": view,
 });
 
+// The Worker budget covers every chunk, including the lazily loaded OAuth
+// provider (~250 kB of @cloudflare/workers-oauth-provider). It is loaded only
+// for /mcp and the OAuth endpoints, but the total is what ships.
+const WORKER_BUDGET_BYTES = 700_000;
+
 assert(home.raw < 300_000, `Home JavaScript exceeds 300 kB: ${home.raw} bytes`);
-assert(worker.raw < 550_000, `Worker JavaScript exceeds 550 kB: ${worker.raw} bytes`);
+assert(
+  worker.raw < WORKER_BUDGET_BYTES,
+  `Worker JavaScript exceeds ${WORKER_BUDGET_BYTES / 1000} kB: ${worker.raw} bytes`,
+);
 assert(manifest["src/app/library.ts"]?.isDynamicEntry, "Component library must be a lazy chunk");
 assert(!canvasImports.has("src/app/library.ts"), "Canvas must not eagerly import the library");
