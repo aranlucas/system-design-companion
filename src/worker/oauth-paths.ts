@@ -34,4 +34,5 @@ export const RUN_WORKER_FIRST = [
   "/github/*",
   "/oauth/*",
   "/.well-known/oauth-*",
+  "/.well-known/openai-apps-challenge",
 ];

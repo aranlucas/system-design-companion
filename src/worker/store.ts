@@ -2,11 +2,15 @@
 import type { El } from "../shared/protocol.ts";
 import { BUILTIN_TEMPLATES } from "./templates.ts";
 import { newId } from "./scene.ts";
+import { HTTPException } from "hono/http-exception";
+import { readBounded, takeBudget } from "./request-limits.ts";
 
-let schemaReady: Promise<unknown> | null = null;
+const schemas = new WeakMap<D1Database, Promise<unknown>>();
 
 export function ensureSchema(env: Env) {
-  schemaReady ??= env.DB.batch([
+  const cached = schemas.get(env.DB);
+  if (cached) return cached;
+  const ready = env.DB.batch([
     env.DB.prepare(
       `CREATE TABLE IF NOT EXISTS diagrams (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT NOT NULL,
@@ -15,6 +19,12 @@ export function ensureSchema(env: Env) {
     ),
     env.DB.prepare(
       "CREATE INDEX IF NOT EXISTS diagrams_library_order ON diagrams (is_template, created_at DESC, id DESC)",
+    ),
+    env.DB.prepare(
+      "CREATE TABLE IF NOT EXISTS diagram_owners (diagram_id TEXT PRIMARY KEY, user_id TEXT NOT NULL)",
+    ),
+    env.DB.prepare(
+      "CREATE INDEX IF NOT EXISTS diagram_owners_user ON diagram_owners (user_id, diagram_id)",
     ),
     env.DB.prepare(
       "CREATE TABLE IF NOT EXISTS deleted_diagrams (diagram_id TEXT PRIMARY KEY, deleted_at INTEGER NOT NULL)",
@@ -43,10 +53,11 @@ export function ensureSchema(env: Env) {
       "CREATE INDEX IF NOT EXISTS mcp_event_subscriptions_diagram ON mcp_event_subscriptions (diagram_id, event_name, expires_at)",
     ),
   ]).catch((e) => {
-    schemaReady = null;
+    schemas.delete(env.DB);
     throw e;
   });
-  return schemaReady;
+  schemas.set(env.DB, ready);
+  return ready;
 }
 
 /** Hex SHA-256. Also the digest behind event subscription ids. */
@@ -73,6 +84,21 @@ export interface DiagramRow {
   name: string;
   is_template: number;
   description: string | null;
+}
+
+type OwnerRow = { user_id: string };
+
+export async function ownsDiagram(env: Env, id: string, userId: string) {
+  await ensureSchema(env);
+  const owner = await env.DB.prepare("SELECT user_id FROM diagram_owners WHERE diagram_id = ?")
+    .bind(id)
+    .first<OwnerRow>();
+  return owner?.user_id === userId;
+}
+
+export async function requireOwner(env: Env, id: string, userId: string) {
+  if (!(await ownsDiagram(env, id, userId)))
+    throw new HTTPException(403, { message: "Only the diagram owner can do this." });
 }
 
 export async function verifyKey(
@@ -103,11 +129,13 @@ export function parseLink(link: string): DiagramLink | null {
   return m ? { id: m[1], key: m[2] } : null;
 }
 
-export async function listTemplates(env: Env) {
+export async function listTemplates(env: Env, userId?: string) {
   await ensureSchema(env);
   const { results } = await env.DB.prepare(
-    "SELECT id, name, description FROM diagrams WHERE is_template = 1 ORDER BY created_at DESC",
-  ).all<TemplateRow>();
+    "SELECT id, name, description FROM diagrams WHERE is_template = 1 AND id IN (SELECT diagram_id FROM diagram_owners WHERE user_id = ?) ORDER BY created_at DESC",
+  )
+    .bind(userId ?? "")
+    .all<TemplateRow>();
   return [
     ...BUILTIN_TEMPLATES.map(({ id, name, description }) => ({ id, name, description })),
     ...results.map((r) => ({
@@ -144,14 +172,16 @@ export function parseDiagramCursor(value: string): DiagramCursor | null {
   }
 }
 
-export async function listDiagrams(env: Env, limit = 50, cursor?: DiagramCursor) {
+export async function listDiagrams(env: Env, limit = 50, cursor?: DiagramCursor, userId?: string) {
+  if (!userId) return { items: [], nextCursor: null };
   await ensureSchema(env);
   const boundary = cursor ? "AND (d.created_at, d.id) < (?, ?)" : "";
-  const params = cursor ? [cursor.createdAt, cursor.id, limit + 1] : [limit + 1];
+  const params = cursor ? [userId, cursor.createdAt, cursor.id, limit + 1] : [userId, limit + 1];
   const { results } = await env.DB.prepare(
     `SELECT d.id, d.name, l.access_key AS key, d.created_at AS createdAt
      FROM diagrams d LEFT JOIN diagram_library l ON l.diagram_id = d.id
      WHERE d.is_template = 0
+       AND d.id IN (SELECT diagram_id FROM diagram_owners WHERE user_id = ?)
        AND NOT EXISTS (SELECT 1 FROM deleted_diagrams WHERE diagram_id = d.id) ${boundary}
      ORDER BY d.created_at DESC, d.id DESC LIMIT ?`,
   )
@@ -183,20 +213,52 @@ export async function listDiagrams(env: Env, limit = 50, cursor?: DiagramCursor)
   return { items, nextCursor };
 }
 
-/** Logical deletion keeps snapshots available for administrative recovery. */
+/** Revoke access first, then erase scene, files, snapshots and subscription secrets. */
 export async function deleteDiagram(env: Env, id: string) {
   await ensureSchema(env);
-  // Disable active sockets first; retrying the delete safely completes the tombstone.
-  await room(env, id).deactivate();
   await env.DB.prepare(
     "INSERT OR IGNORE INTO deleted_diagrams (diagram_id, deleted_at) VALUES (?, ?)",
   )
     .bind(id, Date.now())
     .run();
+  await room(env, id).deactivate();
+  await eraseObjects(env, `snapshots/${id}/`);
+  await eraseObjects(env, `files/${id}/`);
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM snapshots WHERE diagram_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM mcp_event_subscriptions WHERE diagram_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM diagram_library WHERE diagram_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM diagrams WHERE id = ?").bind(id),
+  ]);
+  await room(env, id).erase();
+  // Keep the owner and deletion marker so authenticated retries can finish cleanup.
 }
 
-export async function createDiagram(env: Env, name: string, template?: string) {
+async function eraseObjects(env: Env, prefix: string) {
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- delete one bounded page at a time
+    const page = await env.BUCKET.list({ prefix, limit: 1000 });
+    if (!page.objects.length) return;
+    // oxlint-disable-next-line no-await-in-loop -- finish this page before listing again
+    await env.BUCKET.delete(page.objects.map((item) => item.key));
+  }
+}
+
+export async function createDiagram(env: Env, name: string, template?: string, userId?: string) {
   await ensureSchema(env);
+  if (userId) await takeBudget(env, `create:${userId}`, 10);
+  // Validate private template access before creating any persistent artifacts.
+  if (template && !BUILTIN_TEMPLATES.some((item) => item.id === template)) {
+    if (!userId || !(await ownsDiagram(env, template, userId)))
+      throw new HTTPException(403, { message: "Template is not available to this account." });
+    const row = await env.DB.prepare(
+      "SELECT id, name, is_template, description FROM diagrams WHERE id = ?",
+    )
+      .bind(template)
+      .first<DiagramRow>();
+    if (!row?.is_template || !(await env.BUCKET.head(`templates/${template}.json`)))
+      throw new HTTPException(404, { message: "Template not found." });
+  }
   const id = newId().replace(/[_-]/g, "x");
   const key = newId() + newId();
   const now = Date.now();
@@ -205,6 +267,10 @@ export async function createDiagram(env: Env, name: string, template?: string) {
   )
     .bind(id, name, await sha256(key), now, now)
     .run();
+  if (userId)
+    await env.DB.prepare("INSERT INTO diagram_owners (diagram_id, user_id) VALUES (?, ?)")
+      .bind(id, userId)
+      .run();
   const stub = room(env, id);
   await stub.init(id, name);
   if (template) {
@@ -227,17 +293,23 @@ export async function saveAsTemplate(
   sourceId: string,
   name: string,
   description?: string,
+  userId?: string,
 ) {
   await ensureSchema(env);
+  if (userId) await requireOwner(env, sourceId, userId);
   const id = "tpl" + newId().replace(/[_-]/g, "x");
   await room(env, sourceId).saveAsTemplate(id);
   const now = Date.now();
-  // Templates are public starting points: the key hash is random and never handed out.
+  // Saved templates are private copies; only their owner can list or clone them.
   await env.DB.prepare(
     "INSERT INTO diagrams (id, name, key_hash, is_template, description, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?, ?)",
   )
     .bind(id, name, await sha256(newId()), description ?? null, now, now)
     .run();
+  if (userId)
+    await env.DB.prepare("INSERT INTO diagram_owners (diagram_id, user_id) VALUES (?, ?)")
+      .bind(id, userId)
+      .run();
   return { id, name };
 }
 
@@ -255,10 +327,17 @@ export async function putFile(env: Env, diagramId: string, fileId: string, reque
     return Response.json({ error: "file too large" }, { status: 413 });
   const key = fileKey(diagramId, fileId);
   if (await env.BUCKET.head(key)) return new Response(null, { status: 204 });
-  const bytes = await request.arrayBuffer();
-  if (bytes.byteLength > MAX_FILE_BYTES)
-    return Response.json({ error: "file too large" }, { status: 413 });
+  const bytes = await readBounded(request.body, MAX_FILE_BYTES);
   await env.BUCKET.put(key, bytes, { httpMetadata: { contentType: type } });
+  const active = await env.DB.prepare(
+    "SELECT id FROM diagrams WHERE id = ? AND NOT EXISTS (SELECT 1 FROM deleted_diagrams WHERE diagram_id = diagrams.id)",
+  )
+    .bind(diagramId)
+    .first<DiagramRow>();
+  if (!active) {
+    await env.BUCKET.delete(key);
+    return Response.json({ error: "Diagram deleted." }, { status: 410 });
+  }
   return new Response(null, { status: 204 });
 }
 

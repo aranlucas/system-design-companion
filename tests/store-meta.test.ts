@@ -65,19 +65,21 @@ describe("diagram lifecycle (store.ts + real rooms on fake bindings)", () => {
 
   it("rejects unknown templates", async () => {
     const { env } = makeEnv();
-    await expect(createDiagram(env, "X", "builtin:nope")).rejects.toThrow("unknown template");
+    await expect(createDiagram(env, "X", "builtin:nope")).rejects.toThrow(
+      "Template is not available",
+    );
   });
 
   it("saves and reuses custom templates", async () => {
     const { env, rooms } = makeEnv();
-    const d = await createDiagram(env, "Src", "builtin:read-heavy");
-    const tpl = await saveAsTemplate(env, d.id, "My shape", "desc");
+    const d = await createDiagram(env, "Src", "builtin:read-heavy", "github%3A1");
+    const tpl = await saveAsTemplate(env, d.id, "My shape", "desc", "github%3A1");
     expect(tpl.id.startsWith("tpl")).toBe(true);
-    const listed = await listTemplates(env);
+    const listed = await listTemplates(env, "github%3A1");
     expect(listed.some((t) => t.id === tpl.id && t.name === "My shape")).toBe(true);
     expect(listed.some((t) => t.id === "builtin:interview")).toBe(true);
 
-    const d2 = await createDiagram(env, "Copy", tpl.id);
+    const d2 = await createDiagram(env, "Copy", tpl.id, "github%3A1");
     const g = await rooms.get(d2.id)!.getGraph();
     expect(g.nodes).toHaveLength(6);
     expect(g.edges).toHaveLength(5);

@@ -45,8 +45,10 @@ npx wrangler kv namespace create system-design-companion-preview-oauth  # update
 ## Sign-in for agents
 
 The MCP endpoint requires OAuth, so the first time an agent connects, your browser opens
-a consent page and signs you in with GitHub. The canvas itself is unchanged: share links
-still work, and a browser tab never needs to sign in.
+a consent page and signs you in with GitHub. The homepage uses the same GitHub
+identity to create boards and manage a private library. Shared canvas links still
+allow collaborators to draw without signing in. Browser login reuses the existing
+GitHub callback URL.
 
 Sign-in needs an OAuth app on GitHub, once per deployment:
 
@@ -219,12 +221,14 @@ implemented.
 
 ## Diagram library API
 
-All diagrams lists every saved non-template board in the deployment, including boards
-created through MCP and boards that predate the library. No browser history or manual
-link registration is needed. The list refreshes every ten seconds while visible and when
-the window regains focus. Original share links remain valid. The library uses additional
-server-managed links rather than recovering or replacing the original capability keys.
-Clearing browser storage does not remove boards from the library.
+**Your diagrams** lists the signed-in GitHub user's non-template boards, including
+boards created through MCP with the same identity. It refreshes every ten seconds
+while visible and when the window regains focus. Original share links remain valid.
+Saved templates are private to their owner; builtin templates remain available.
+
+Legacy boards without an ownership record are omitted from private libraries.
+Their original links still work. An operator must explicitly assign ownership in
+`diagram_owners`; signing in does not claim existing boards automatically.
 
 The diagrams API is paginated: `GET /api/diagrams?limit=50&cursor=...` returns
 `{ items, nextCursor }`. The default page size is 50, with a maximum of 100. Pass the
@@ -234,5 +238,12 @@ diagrams** when needed and refreshes loaded pages.
 
 **Delete** asks for confirmation, then removes a diagram for everyone and disables its
 original and library links, including active canvas connections. The authorized API is
-`DELETE /api/d/:id?k=<key>`. Deletion is logical: saved data and snapshots remain for
-administrative recovery; there is no restore action in the UI.
+`DELETE /api/diagrams/:id`, with an authenticated owner session and same-origin
+request. The capability route `DELETE /api/d/:id?k=<key>` also requires the owner.
+Deletion erases the room scene, uploaded files, saved versions, library entry,
+and subscriptions. It keeps an ownership record and deletion marker so the owner
+can retry incomplete cleanup. Previously saved template copies remain independent.
+
+For OpenAI domain verification, configure `OPENAI_APPS_CHALLENGE` with the exact
+portal token. `/.well-known/openai-apps-challenge` serves that token as plain text;
+it returns 404 when the secret is not configured.

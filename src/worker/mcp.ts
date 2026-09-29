@@ -25,9 +25,21 @@ import {
   shareLink,
   verifyKey,
 } from "./store.ts";
+import { MAX_PATCH_OPS, takeBudget } from "./request-limits.ts";
 import { VIEW_URI, viewHtml } from "./view.ts";
+import { HTTPException } from "hono/http-exception";
 
-export function handleMcp(request: Request, env: Env, principal: McpPrincipal) {
+export async function handleMcp(request: Request, env: Env, principal: McpPrincipal) {
+  try {
+    await takeBudget(env, `mcp:${principal.userId}`, 120);
+  } catch (error) {
+    if (error instanceof HTTPException)
+      return Response.json(
+        { error: error.message },
+        { status: error.status, headers: { "Retry-After": "60" } },
+      );
+    throw error;
+  }
   const handler = createMcpHandler((ctx) => buildServer(env, ctx, principal));
   // The SDK never verifies tokens itself; authInfo is strictly the caller's claim
   // about who is calling, and events/subscribe keys subscriptions on it.
@@ -146,7 +158,7 @@ const opSchema = z.discriminatedUnion("op", [
   z.object({
     op: z.literal("add_frame"),
     ref: z.string().optional(),
-    name: z.string(),
+    name: z.string().trim().min(1).max(120),
     contains: z.array(target).optional().describe("wrap these existing elements"),
     place: placement.optional(),
     width: z.number().optional(),
@@ -221,7 +233,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
       description:
         "Validate a diagram share link and get an overview. Pass the same link as `diagram` to every other tool.",
       inputSchema: z.object({ diagram: diagramArg }),
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ diagram }: DiagramArgs) => {
       const row = await pick(diagram);
@@ -251,15 +263,16 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     "create_diagram",
     {
       scopeChallenge: requireScopes("mcp:read", "mcp:write"),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       description:
         "Create a new diagram (optionally from a template), join it, and return its share link for the user to open.",
       inputSchema: z.object({
-        name: z.string(),
+        name: z.string().trim().min(1).max(120),
         template: z.string().optional().describe("template id from list_templates"),
       }),
     },
     async ({ name, template }: CreateDiagramArgs) => {
-      const d = await createDiagram(env, name, template);
+      const d = await createDiagram(env, name, template, principal.userId);
       const link = shareLink(origin, d.id, d.key);
       const data = {
         name: d.name,
@@ -288,7 +301,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
       description:
         "Read the canvas. format=graph (default): frames, nodes, edges (arrows resolved to node labels; inferred=true if the arrow only touches a node), standalone notes, and unstructured sketches. selected=true marks the user's current selection. format=raw: Excalidraw elements.",
       inputSchema: z.object({ diagram: diagramArg, format: z.enum(["graph", "raw"]).optional() }),
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ diagram, format }: GetSceneArgs) => {
       const d = await pick(diagram);
@@ -313,7 +326,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
       _meta: { ui: { resourceUri: VIEW_URI, visibility: ["app"] } },
       description: "Elements to draw in the diagram view (called by the view, not the model).",
       inputSchema: z.object({ diagram: diagramArg }),
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ diagram }: DiagramArgs) => {
       const d = await pick(diagram);
@@ -348,7 +361,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
       description:
         "What the user currently has selected in their canvas tab (and their viewport). Use this to resolve 'this', 'these', 'here'.",
       inputSchema: z.object({ diagram: diagramArg }),
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ diagram }: DiagramArgs) => {
       const data = await room(env, (await pick(diagram)).id).getSelection();
@@ -381,7 +394,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
             "limit to these elements (e.g. a frame and its contents); default whole canvas",
           ),
       }),
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ diagram, element_ids }: ScreenshotArgs) => {
       const shot = await room(env, (await pick(diagram)).id).screenshot(element_ids);
@@ -395,11 +408,12 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     "apply_patch",
     {
       scopeChallenge: requireScopes("mcp:read", "mcp:write"),
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
       description:
         "Apply a batch of semantic edits. Ops run in order; later ops can use refs from earlier ones. A snapshot is taken first (undo with restore). Returns per-op results; failed ops don't abort the batch.",
       inputSchema: z.object({
         diagram: diagramArg,
-        ops: z.array(opSchema).min(1),
+        ops: z.array(opSchema).min(1).max(MAX_PATCH_OPS),
         summary: z
           .string()
           .trim()
@@ -431,6 +445,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     "tidy",
     {
       scopeChallenge: requireScopes("mcp:read", "mcp:write"),
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
       description:
         "Non-destructive cleanup: attach loose items to the frame they sit in, wrap over-long notes, snap nearly-aligned boxes and even out their gaps, push apart overlaps with minimal moves (groups move whole), fit frames and separate overlapping frames. Never changes connections, labels or relative order. Snapshotted first when anything changes; returns counts of what it did. (apply_patch already tidies the frames it touches.)",
       inputSchema: z.object({
@@ -454,6 +469,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     "layout",
     {
       scopeChallenge: requireScopes("mcp:read", "mcp:write"),
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
       description:
         "Full re-layout (layered graph) that moves every node in scope. Only when the user explicitly asks to re-arrange; prefer tidy for cleanup.",
       inputSchema: z.object({
@@ -481,9 +497,10 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     "import_mermaid",
     {
       scopeChallenge: requireScopes("mcp:read", "mcp:write"),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       description:
         "Draw a Mermaid flowchart/sequence diagram onto free canvas space (rendered by the user's tab). Good for sketching many nodes at once.",
-      inputSchema: z.object({ diagram: diagramArg, source: z.string() }),
+      inputSchema: z.object({ diagram: diagramArg, source: z.string().min(1).max(100_000) }),
     },
     async ({ diagram, source }: MermaidArgs) => {
       const data = await room(env, (await pick(diagram)).id).importMermaid(source);
@@ -503,6 +520,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     "snapshot",
     {
       scopeChallenge: requireScopes("mcp:read", "mcp:write"),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       description: "Save a named version of the diagram.",
       inputSchema: z.object({ diagram: diagramArg, name: z.string() }),
     },
@@ -526,7 +544,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     {
       description: "Versions, newest first (auto = taken before each agent edit).",
       inputSchema: z.object({ diagram: diagramArg }),
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ diagram }: DiagramArgs) => {
       const data = { snapshots: await room(env, (await pick(diagram)).id).listSnapshots() };
@@ -547,6 +565,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     "restore",
     {
       scopeChallenge: requireScopes("mcp:read", "mcp:write"),
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
       description:
         "Restore the diagram to a snapshot (itself snapshotted first, so restore is undoable).",
       inputSchema: z.object({ diagram: diagramArg, snapshot_id: z.string() }),
@@ -571,10 +590,10 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     {
       description: "Starter layouts usable with create_diagram.",
       inputSchema: z.object({}),
-      annotations: { readOnlyHint: true },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async () => {
-      const data = { templates: await listTemplates(env) };
+      const data = { templates: await listTemplates(env, principal.userId) };
       return {
         content: [
           { type: "text" as const, text: `Found ${data.templates.length} templates.` },
@@ -589,15 +608,22 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     "save_as_template",
     {
       scopeChallenge: requireScopes("mcp:read", "mcp:write"),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       description: "Save the current diagram as a reusable template.",
       inputSchema: z.object({
         diagram: diagramArg,
-        name: z.string(),
+        name: z.string().trim().min(1).max(120),
         description: z.string().optional(),
       }),
     },
     async ({ diagram, name, description }: TemplateArgs) => {
-      const data = await saveAsTemplate(env, (await pick(diagram)).id, name, description);
+      const data = await saveAsTemplate(
+        env,
+        (await pick(diagram)).id,
+        name,
+        description,
+        principal.userId,
+      );
       return {
         content: [
           { type: "text" as const, text: `Saved template ${data.name}.` },
@@ -612,6 +638,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     "focus_view",
     {
       scopeChallenge: requireScopes("mcp:read", "mcp:write"),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       description:
         "Direct the most recently active subscriber's open diagram tab to components or a frame. mode=focus pans/zooms and briefly highlights the target; mode=point shows a temporary laser-style marker without moving the viewport. Returns visible=false if a point target is offscreen (use focus to bring it into view). Does not change the diagram, selection, or history. Requires an open tab.",
       inputSchema: z.object({

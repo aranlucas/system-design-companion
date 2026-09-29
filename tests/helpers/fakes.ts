@@ -37,6 +37,7 @@ export interface EventSubscriptionRow {
   previous_secret: string | null;
   previous_secret_until: number;
 }
+type BudgetEntry = { window: number; count: number };
 type FakeStatement = { run: () => Promise<unknown> };
 type KvReadOptions = { type?: "text" | "json" };
 type KvWriteOptions = { expirationTtl?: number; expiration?: number };
@@ -130,12 +131,15 @@ type CursorParams = [time: number, id: string];
 type SnapshotListParams = [diagramId: string, limit: number];
 type HttpMetadata = { contentType?: string };
 type StoredObject = { bytes: Uint8Array; httpMetadata?: HttpMetadata };
+type ListOptions = { prefix: string };
 type PutOptions = { httpMetadata?: HttpMetadata };
 /** The env binding the fake wires up after creating the env. */
 type RoomBinding = { ROOM: unknown };
 
 /** Minimal D1 stand-in covering exactly the statements store.ts / room.ts use. */
 export class FakeD1 {
+  owners = new Map<string, string>();
+  budgets = new Map<string, BudgetEntry>();
   diagrams = new Map<string, DiagramRow>();
   snapshots: SnapshotRow[] = [];
   library = new Map<string, string>();
@@ -180,6 +184,10 @@ export class FakeD1 {
 
   private run(sql: string, p: unknown[]): void {
     if (sql.startsWith("CREATE ")) return;
+    if (sql.includes("INSERT INTO diagram_owners")) {
+      this.owners.set(p[0] as string, p[1] as string);
+      return;
+    }
     if (sql.includes("INSERT OR IGNORE INTO deleted_diagrams")) {
       this.deleted.add(p[0] as string);
       return;
@@ -263,6 +271,27 @@ export class FakeD1 {
       });
       return;
     }
+    if (sql.includes("DELETE FROM snapshots WHERE id")) {
+      this.snapshots = this.snapshots.filter((row) => row.id !== p[0]);
+      return;
+    }
+    if (sql.includes("DELETE FROM snapshots WHERE diagram_id")) {
+      this.snapshots = this.snapshots.filter((row) => row.diagram_id !== p[0]);
+      return;
+    }
+    if (sql.includes("DELETE FROM diagram_library")) {
+      this.library.delete(p[0] as string);
+      return;
+    }
+    if (sql.includes("DELETE FROM diagrams WHERE id")) {
+      this.diagrams.delete(p[0] as string);
+      return;
+    }
+    if (sql.includes("DELETE FROM mcp_event_subscriptions WHERE diagram_id")) {
+      for (const [id, row] of this.event_subscriptions)
+        if (row.diagram_id === p[0]) this.event_subscriptions.delete(id);
+      return;
+    }
     if (sql.includes("DELETE FROM mcp_event_subscriptions")) {
       this.event_subscriptions.delete(p[0] as string);
       return;
@@ -271,6 +300,20 @@ export class FakeD1 {
   }
 
   private first(sql: string, p: unknown[]): unknown {
+    if (sql.includes("INSERT INTO request_budgets")) {
+      const key = p[0] as string;
+      const window = p[1] as number;
+      const limit = p[2] as number;
+      const existing = this.budgets.get(key);
+      if (existing?.window === window && existing.count >= limit) return null;
+      const count = existing?.window === window ? existing.count + 1 : 1;
+      this.budgets.set(key, { window, count });
+      return { count };
+    }
+    if (sql.includes("FROM diagram_owners")) {
+      const user_id = this.owners.get(p[0] as string);
+      return user_id ? { user_id } : null;
+    }
     if (sql.includes("FROM mcp_event_subscriptions")) {
       return this.event_subscriptions.get(p[0] as string) ?? null;
     }
@@ -286,10 +329,11 @@ export class FakeD1 {
   private all(sql: string, p: unknown[]): unknown[] {
     if (sql.includes("FROM diagrams d LEFT JOIN diagram_library")) {
       const hasCursor = sql.includes("(d.created_at, d.id) <");
-      const [time, id] = p as CursorParams;
+      const [time, id] = p.slice(1) as CursorParams;
       const limit = p.at(-1) as number;
       return [...this.diagrams.values()]
         .filter((d) => !d.is_template && !this.deleted.has(d.id))
+        .filter((d) => this.owners.get(d.id) === p[0])
         .filter((d) => !hasCursor || d.created_at < time || (d.created_at === time && d.id < id))
         .toSorted((a, b) => b.created_at - a.created_at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
         .slice(0, limit)
@@ -303,6 +347,7 @@ export class FakeD1 {
     if (sql.includes("WHERE is_template = 1")) {
       return [...this.diagrams.values()]
         .filter((r) => r.is_template === 1)
+        .filter((r) => this.owners.get(r.id) === p[0])
         .map((r) => ({ id: r.id, name: r.name, description: r.description }));
     }
     if (sql.includes("FROM snapshots WHERE diagram_id = ?")) {
@@ -345,6 +390,18 @@ export class FakeR2 {
     this.objects.set(key, { bytes, httpMetadata: options?.httpMetadata });
   }
 
+  async list(options: ListOptions) {
+    return {
+      objects: [...this.objects.keys()]
+        .filter((key) => key.startsWith(options.prefix))
+        .map((key) => ({ key })),
+    };
+  }
+
+  async delete(keys: string | string[]) {
+    for (const key of [keys].flat()) this.objects.delete(key);
+  }
+
   async head(key: string) {
     return this.objects.has(key) ? {} : null;
   }
@@ -377,6 +434,18 @@ export class FakeDOSql {
       return [...this.tombstones].map(([id, at]) => ({ id, deleted_at: at }));
     if (q.startsWith("INSERT OR REPLACE INTO tombstones")) {
       this.tombstones.set(params[0] as string, params[1] as number);
+      return [];
+    }
+    if (q === "DELETE FROM elements") {
+      this.elements.clear();
+      return [];
+    }
+    if (q === "DELETE FROM tombstones") {
+      this.tombstones.clear();
+      return [];
+    }
+    if (q === "DELETE FROM meta") {
+      this.meta.clear();
       return [];
     }
     if (q.startsWith("DELETE FROM tombstones WHERE id = ?")) {
@@ -474,6 +543,12 @@ export function makeEnv(): TestEnv {
   const bucket = new FakeR2();
   const rooms = new Map<string, DiagramRoom>();
   const kv = new FakeKV();
+  kv.values.set(
+    "browser-session:bafde89c041e1756082b933aaf16cad8e65dec48de748479352f657e89dd6da5",
+    {
+      value: JSON.stringify({ userId: "github%3A1", expiresAt: Date.now() + 60_000 }),
+    },
+  );
   kv.values.set("grant:github%3A1:test-grant", {
     value: JSON.stringify({
       id: "test-grant",
