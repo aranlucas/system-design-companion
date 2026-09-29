@@ -15,7 +15,8 @@
     "check": "pnpm typecheck && pnpm lint && pnpm format:check",
     "typecheck": "tsc -p tsconfig.worker.json && tsc -p tsconfig.app.json",
     "cf-typegen": "wrangler types",
-    "deploy:preview": "pnpm build:view && cf previews deploy"
+    "build:preview": "pnpm build:view && CLOUDFLARE_VITE_PREVIEW_BUILD=true vite build",
+    "deploy:preview": "pnpm build:preview && cf previews deploy --prebuilt"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",

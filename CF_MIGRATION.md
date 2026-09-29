@@ -20,5 +20,10 @@ For Cloudflare Workers Builds, update dashboard deploy commands from
 `wrangler deploy` to the package deployment script after merging. Dashboard
 settings and production deployments are not changed by this PR.
 
-Use `pnpm deploy:preview` for Cloudflare Preview builds so `ctx.isPreview`
-is set by cf. Configure this as the non-production Workers Builds command.
+Use `pnpm deploy:preview` for Cloudflare Preview builds. It builds with
+`CLOUDFLARE_VITE_PREVIEW_BUILD=true`, the Preview flag consumed by the pinned
+Vite plugin beta, then deploys that output with `cf previews deploy --prebuilt`.
+The cf beta sets `CLOUDFLARE_PREVIEW_BUILD` when it builds automatically, which
+this plugin version does not consume. The explicit Preview build ensures
+`ctx.isPreview` selects the separate Preview D1 database and R2 bucket.
+Configure `pnpm deploy:preview` as the non-production Workers Builds command.
