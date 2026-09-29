@@ -8,13 +8,15 @@
     "build": "pnpm build:view && vite build",
     "build:view": "node scripts/build-view.ts",
     "check:bundle": "pnpm build && node scripts/check-bundle.ts",
-    "deploy": "pnpm build && wrangler deploy",
+    "deploy": "pnpm build && cf deploy --prebuilt",
     "lint": "oxlint --max-warnings 0",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check",
     "typecheck": "tsc -p tsconfig.worker.json && tsc -p tsconfig.app.json",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "build:preview": "pnpm build:view && CLOUDFLARE_VITE_PREVIEW_BUILD=true vite build",
+    "deploy:preview": "pnpm build:preview && cf previews deploy --prebuilt"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",
@@ -33,17 +35,18 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.59.0",
+    "@cloudflare/vite-plugin": "^2.0.0-beta.sha-ad79608dd",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "cf": "1.0.0-beta.5",
     "oxfmt": "^0.70.0",
     "oxlint": "^1.85.0",
     "oxlint-tsgolint": "^7.0.2003",
     "typescript": "^7.0.2",
     "vite": "^8.3.1",
     "vitest": "^5.0.1",
-    "wrangler": "^4.138.0"
+    "wrangler": "^4.143.0"
   },
   "packageManager": "pnpm@12.6.0"
 }
