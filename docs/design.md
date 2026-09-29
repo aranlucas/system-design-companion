@@ -300,13 +300,13 @@ flowchart TD
 ```mermaid
 flowchart LR
     Push["git push"] --> Branch{"Branch?"}
-    Branch -- main --> Deploy["Workers Builds:<br/>vite build + wrangler deploy"] --> Prod["Production Worker<br/>D1 + R2: system-design-companion"]
+    Branch -- main --> Deploy["Workers Builds:<br/>pnpm deploy (cf)"] --> Prod["Production Worker<br/>D1 + R2: system-design-companion"]
     Branch -- other --> Preview["Workers Builds:<br/>wrangler preview"] --> PrevWorker["Preview URL per branch<br/>own Durable Object storage<br/>D1 + R2: system-design-companion-preview"]
     Push --> CI["GitHub Actions:<br/>check, test, smoke test, build"]
 ```
 
 Previews get isolated Durable Object namespaces automatically; D1 and R2 come from the
-`previews` block in `wrangler.jsonc`, so previews never touch production data. All
+`ctx.isPreview` branch in `cloudflare.config.ts`, so previews never touch production data. All
 previews share the one preview database and bucket.
 
 ## Deferred (post-interview)

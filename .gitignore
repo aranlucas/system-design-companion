@@ -3,3 +3,6 @@ dist
 .wrangler
 .dev.vars
 public/mcp-view.html
+
+# Cloudflare CLI build output and generated types
+.cloudflare/

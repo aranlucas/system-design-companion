@@ -23,7 +23,7 @@ work.
 ## Deploy (Cloudflare)
 
 ```sh
-npx wrangler d1 create system-design-companion   # paste database_id into wrangler.jsonc if not auto-provisioned
+npx wrangler d1 create system-design-companion   # paste the ID into cloudflare.config.ts and the compatibility wrangler.jsonc if not auto-provisioned
 npx wrangler r2 bucket create system-design-companion
 pnpm deploy
 ```
@@ -33,10 +33,10 @@ Then `claude mcp add --transport http system-design https://<your-worker>.worker
 
 Git-connected Workers Builds deploy `main` and build a Preview for every other branch.
 Previews get their own Durable Object storage automatically but need separate D1 and R2
-resources, set in the `previews` block of `wrangler.jsonc`:
+resources, set in the `ctx.isPreview` branch of `cloudflare.config.ts` (and the compatibility `wrangler.jsonc`):
 
 ```sh
-npx wrangler d1 create system-design-companion-preview        # paste its database_id into previews.d1_databases
+npx wrangler d1 create system-design-companion-preview        # update the preview D1 ID in both configuration files
 npx wrangler r2 bucket create system-design-companion-preview
 ```
 
@@ -58,8 +58,8 @@ any existing library items.
 For a source-map breakdown, run `pnpm build:view`, then
 `pnpm exec vite build --sourcemap`. The optional
 [bundle-analyzer](https://github.com/lhorie/bundle-analyzer) can inspect
-`dist/client/assets`, `dist/system_design_companion`, and
-`dist/system_design_companion/assets` separately (it does not recurse into directories).
+`.cloudflare/output/v0/workers/default/assets/assets` and
+`.cloudflare/output/v0/workers/default/bundle` separately (it does not recurse into directories).
 Its estimates are uncompressed; `check:bundle` measures actual output bytes and gzip sizes.
 Run a normal `pnpm build` afterward to return to a build without source maps.
 

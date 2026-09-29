@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import type { Manifest } from "vite";
 
-const clientDir = "dist/client";
+const clientDir = ".cloudflare/output/v0/workers/default/assets";
 const manifest: Manifest = JSON.parse(readFileSync(`${clientDir}/.vite/manifest.json`, "utf8"));
 
 function staticFiles(entry: string, seen = new Set<string>()): Set<string> {
@@ -31,7 +31,7 @@ const home = sizes(
   [...staticFiles("index.html")].map((entry) => join(clientDir, manifest[entry].file)),
 );
 // Include every Worker chunk so splitting the Worker cannot hide its total size.
-const workerDir = "dist/system_design_companion";
+const workerDir = ".cloudflare/output/v0/workers/default/bundle";
 const worker = sizes(
   readdirSync(workerDir, { recursive: true, encoding: "utf8" })
     .filter((file) => file.endsWith(".js") || file.endsWith(".mjs"))
