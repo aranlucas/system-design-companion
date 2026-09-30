@@ -7,7 +7,11 @@ import type { Author } from "../src/worker/scene.ts";
 import { makeEnv, testCtx, type TestEnv } from "./helpers/fakes.ts";
 
 function req(path: string, init?: RequestInit): Request {
-  return new Request(`http://localhost${path}`, init);
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Cookie"))
+    headers.set("Cookie", "sdc-session=11111111-1111-1111-1111-111111111111");
+  if (!headers.has("Origin")) headers.set("Origin", "http://localhost");
+  return new Request(`http://localhost${path}`, { ...init, headers });
 }
 
 /** The Worker's default export, with the execution context the runtime always passes. */
@@ -75,7 +79,7 @@ describe("diagrams API", () => {
     const old = await create(env, "Existing board");
     env.db.diagrams.get(old.id)!.created_at = 1;
     // MCP uses the same createDiagram function, without any browser registration.
-    const agent = await createDiagram(env.env, "Agent board");
+    const agent = await createDiagram(env.env, "Agent board", undefined, "github%3A1");
     await post(env, `/api/d/${old.id}/template?k=${old.key}`, { name: "Template" });
     const response = await call(env, req("/api/diagrams"));
     expect(response.status).toBe(200);
@@ -239,8 +243,9 @@ describe("diagrams API", () => {
   it("fails loudly on unknown templates", async () => {
     const env = makeEnv();
     const res = await post(env, "/api/diagrams", { name: "X", template: "nope" });
-    expect(res.status).toBe(500);
-    expect(((await body(res)) as ErrorBody).error).toMatch("unknown template");
+    expect(res.status).toBe(403);
+    expect(((await body(res)) as ErrorBody).error).toMatch("Template is not available");
+    expect(env.db.diagrams.size).toBe(0);
   });
 
   it("lists builtin and saved templates", async () => {

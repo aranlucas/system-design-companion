@@ -6,3 +6,6 @@ public/mcp-view.html
 
 # Cloudflare CLI build output and generated types
 .cloudflare/
+
+# TypeScript project-reference build cache
+*.tsbuildinfo

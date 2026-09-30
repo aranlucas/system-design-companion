@@ -13,7 +13,7 @@
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check",
-    "typecheck": "tsc -p tsconfig.worker.json && tsc -p tsconfig.app.json",
+    "typecheck": "tsc -b",
     "cf-typegen": "wrangler types",
     "build:preview": "pnpm build:view && CLOUDFLARE_VITE_PREVIEW_BUILD=true vite build",
     "deploy:preview": "pnpm build:preview && cf previews deploy --prebuilt"
@@ -26,6 +26,7 @@
     "@hono/zod-validator": "^0.9.1",
     "@modelcontextprotocol/ext-apps": "^2.0.0",
     "@modelcontextprotocol/server": "^2.1.0",
+    "@tanstack/react-query": "^5.104.0",
     "fractional-indexing": "^4.0.0",
     "hono": "^4.13.9",
     "ipaddr.js": "^2.5.0",

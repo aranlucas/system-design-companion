@@ -70,6 +70,17 @@ interface RpcReply<T> {
 /** What events/list returns. */
 type EventsListResult = { events: ListedEvent[] };
 
+/** Safety metadata advertised to a host before it decides to execute a tool. */
+type ListedTool = {
+  name: string;
+  annotations?: {
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    openWorldHint?: boolean;
+  };
+};
+type ToolsListResult = { tools: ListedTool[] };
+
 /** One entry of the events/list catalog. */
 type ListedEvent = {
   name: string;
@@ -185,6 +196,35 @@ async function newDiagram(name = "Board") {
   const d = await createDiagram(env.env, name);
   return { ...d, link: shareLink("https://design.example", d.id, d.key) };
 }
+
+describe("public MCP tool metadata", () => {
+  it("advertises explicit safety hints for every tool, including the app-only view", async () => {
+    const reply = await rpc<ToolsListResult>("tools/list", {});
+    expect(reply.error).toBeUndefined();
+    const tools = reply.result!.tools;
+    expect(tools).toHaveLength(16);
+    for (const tool of tools) {
+      expect(typeof tool.annotations?.readOnlyHint, tool.name).toBe("boolean");
+      expect(typeof tool.annotations?.destructiveHint, tool.name).toBe("boolean");
+      expect(typeof tool.annotations?.openWorldHint, tool.name).toBe("boolean");
+      if (tool.annotations?.readOnlyHint) expect(tool.annotations.destructiveHint).toBe(false);
+    }
+    for (const name of ["apply_patch", "restore", "tidy", "layout"]) {
+      expect(tools.find((tool) => tool.name === name)?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: true,
+      });
+    }
+    expect(tools.find((tool) => tool.name === "render_scene")?.annotations).toMatchObject({
+      readOnlyHint: true,
+      destructiveHint: false,
+    });
+    expect(tools.find((tool) => tool.name === "focus_view")?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: false,
+    });
+  });
+});
 
 /** The subscribe params every test shares. */
 function subscribeParams(link: string, overrides: Record<string, unknown> = {}) {

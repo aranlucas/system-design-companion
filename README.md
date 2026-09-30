@@ -29,10 +29,9 @@ changes land.
 > the conversation move together.
 
 The browser link is the capability: anyone who has a diagram's share link can
-edit that board. There are no canvas user accounts, and a deployment is a shared
-workspace unless you put it behind access controls. Agents are different — they
-sign in once with GitHub, because the model needs to know who is acting before it
-can watch a board for changes.
+edit that board. Sign in with GitHub to create diagrams and manage your private
+library and templates. Collaborators can draw using a shared link without signing
+in. Agents also sign in with GitHub through OAuth.
 
 ## A session
 
@@ -63,8 +62,8 @@ can watch a board for changes.
 
 **Work with the agent**
 
-- Agents sign in once with GitHub; you never sign in to draw. The canvas keeps working
-  on plain share links.
+- Sign in with GitHub to create and manage boards. Drawing on a shared board keeps
+  working through its share link; agents authenticate through OAuth.
 - The agent edits with high-level operations (add a component, connect two, rename,
   restyle, group into a frame) rather than raw drawing commands. Its work shows up in
   violet, and a toast tells you when it changed something.
@@ -96,11 +95,12 @@ can watch a board for changes.
 
 **Find your diagrams**
 
-- **All diagrams** lists every board in the deployment, including ones the agent created.
-  Rename a diagram from its title, and delete it (with confirmation) for everyone.
-
-> A deployment is a shared workspace: anyone who can reach it can list, open and edit its
-> diagrams. Put it behind access controls if it should be private.
+- **Your diagrams** lists your boards, including ones your agent created with the same
+  GitHub identity. Saved templates are private to their owner.
+- Owners can permanently delete a board, its uploaded files, and saved versions.
+  Existing copies saved as separate templates remain independent.
+- Legacy boards stay accessible through their original links and are omitted from
+  private libraries until an operator explicitly assigns ownership.
 
 ## Get started
 
@@ -155,8 +155,8 @@ nobody asked it to look at.
 
 The project is deployable to Cloudflare Workers with D1, R2, KV, and Durable
 Objects. It is intentionally a capability-link collaboration tool: links are
-permissions, deletion is logical, and shared boards should be protected at the
-deployment or network layer when they contain sensitive interview material.
+permissions, libraries are private, and owners can permanently erase boards.
+Treat a share link as an editing credential when sharing interview material.
 Agent operations snapshot before changing the board, but that is a recovery
 mechanism rather than an access-control system.
 

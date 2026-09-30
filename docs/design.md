@@ -329,15 +329,17 @@ flowchart TD
     Lib -- no --> Deny
 ```
 
-- There are no user accounts on the canvas. Holding a diagram's link is the permission to
-  edit it, for people and agents alike. Hand the interviewer the same link. Agents must
-  also be signed in to reach `/mcp` (see above), but the link is still what authorizes
-  the board itself.
-- **All diagrams** lists every non-template, non-deleted board with a server-managed
-  library link, so any visitor to the deployment can open any board. A deployment is a
-  shared workspace; put it behind access controls if it should be private.
-- **Delete** is logical: the diagram is added to `deleted_diagrams`, open sockets are
-  closed, and both links stop working. Data and snapshots remain for recovery.
+- A shared diagram link authorizes drawing and collaboration. Browser users sign
+  in with GitHub to create diagrams and manage their private library; agents sign
+  in through OAuth. Both use the same encoded GitHub user ID for ownership.
+- **Your diagrams** and saved templates are owner-scoped. Builtin templates remain
+  available. Legacy boards are hidden from libraries until an operator explicitly
+  assigns ownership, while their original links remain valid.
+- **Delete** requires the signed-in owner and a same-origin request. It first
+  records a deletion marker and closes sockets, then erases R2 files and snapshots,
+  D1 metadata and subscriptions, and the Durable Object scene. The owner record
+  and deletion marker remain for cleanup retries. Independent template copies
+  remain available to their owner.
 
 ## Formatting without overriding
 

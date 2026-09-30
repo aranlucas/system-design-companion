@@ -1,3 +1,5 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getJson } from "./queries.ts";
 import {
   CaptureUpdateAction,
   CommandPalette,
@@ -917,28 +919,39 @@ function tidySummary(d: TidyResult) {
   return parts.join(" · ") || `${d.changed} changes`;
 }
 
+type VersionChange = { path: string; body: unknown };
+
 function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
-  const [snaps, setSnaps] = useState<Snapshot[] | null>(null);
+  const queryClient = useQueryClient();
   const [label, setLabel] = useState("");
   const q = `?k=${encodeURIComponent(k)}`;
-
-  const load = useCallback(
-    () =>
-      fetch(`/api/d/${id}/snapshots${q}`)
-        .then((r) => r.json())
-        .then(setSnaps),
-    [id, q],
-  );
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const post = (path: string, body: unknown) =>
-    fetch(`/api/d/${id}${path}${q}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => r.json());
+  const queryKey = ["snapshots", id, k];
+  const snapshots = useQuery({
+    queryKey,
+    queryFn: ({ signal }) => getJson<Snapshot[]>(`/api/d/${id}/snapshots${q}`, signal),
+  });
+  const snaps = snapshots.data;
+  const mutation = useMutation({
+    mutationFn: async ({ path, body }: VersionChange) => {
+      const response = await fetch(`/api/d/${id}${path}${q}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = (await response.json()) as ApiFailure;
+      if (!response.ok) throw new Error(apiErrorMessage(result, "Could not save this change."));
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
+    onError: (error) => flash(error.message),
+  });
+  const post = async (path: string, body: unknown) => {
+    try {
+      await mutation.mutateAsync({ path, body });
+      return true;
+    } catch {
+      return false;
+    }
+  };
 
   return (
     <div className="sd-panel">
@@ -947,10 +960,9 @@ function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
         className="row"
         onSubmit={async (e) => {
           e.preventDefault();
-          await post("/snapshots", { name: label || "checkpoint" });
+          if (!(await post("/snapshots", { name: label || "checkpoint" }))) return;
           setLabel("");
           flash("Saved version");
-          void load();
         }}
       >
         <input
@@ -958,26 +970,26 @@ function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
           value={label}
           onChange={(e) => setLabel(e.target.value)}
         />
-        <button>Save</button>
+        <button disabled={mutation.isPending}>Save</button>
       </form>
       <form
         className="row"
         onSubmit={async (e) => {
           e.preventDefault();
-          const input = (
-            e.currentTarget.elements.namedItem("tpl") as HTMLInputElement
-          ).value.trim();
+          const field = e.currentTarget.elements.namedItem("tpl") as HTMLInputElement;
+          const input = field.value.trim();
           if (!input) return;
-          await post("/template", { name: input });
+          if (!(await post("/template", { name: input }))) return;
           flash("Saved as template");
-          (e.currentTarget.elements.namedItem("tpl") as HTMLInputElement).value = "";
+          field.value = "";
         }}
       >
         <input name="tpl" placeholder="Save as template…" />
-        <button>Save</button>
+        <button disabled={mutation.isPending}>Save</button>
       </form>
       <ul className="list snaps">
-        {snaps === null && <li className="muted">Loading…</li>}
+        {snapshots.isLoading && <li className="muted">Loading…</li>}
+        {snapshots.error && <li role="alert">{snapshots.error.message}</li>}
         {snaps?.length === 0 && (
           <li className="muted">No versions yet. Claude's edits are auto-saved here first.</li>
         )}
@@ -991,10 +1003,10 @@ function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
               </span>
             </span>
             <button
+              disabled={mutation.isPending}
               onClick={async () => {
-                await post("/restore", { snapshotId: s.id });
+                if (!(await post("/restore", { snapshotId: s.id }))) return;
                 flash(`Restored "${s.name}"`);
-                void load();
               }}
             >
               Restore

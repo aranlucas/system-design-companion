@@ -21,6 +21,7 @@
       "/github/*",
       "/oauth/*",
       "/.well-known/oauth-*",
+      "/.well-known/openai-apps-challenge",
     ],
   },
   "durable_objects": {

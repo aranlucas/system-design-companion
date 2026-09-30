@@ -12,6 +12,8 @@ import { Scene, graphView, type Author, type Op } from "./scene.ts";
 import { deliverDiagramEvent } from "./events.ts";
 import { patchSnapshotName } from "./patch-name.ts";
 import { copyFiles } from "./store.ts";
+import { MAX_JSON_BYTES, MAX_SCENE_ELEMENTS, MAX_PATCH_OPS, takeBudget } from "./request-limits.ts";
+import { socketMessageSchema } from "./socket-schema.ts";
 
 /** A tab RPC waiting for its reply. */
 type PendingCall = { resolve: (v: unknown) => void; reject: (e: Error) => void };
@@ -175,6 +177,8 @@ export class DiagramRoom extends DurableObject<Env> {
   }
 
   private commit(scene: Scene, origin: "agent" | "system") {
+    if (this.deleted) throw new Error("Diagram deleted.");
+    if (scene.els.size > MAX_SCENE_ELEMENTS) throw new Error("Diagram element limit reached.");
     const changed = scene.changedElements();
     if (!changed.length) return 0;
     this.persist(changed);
@@ -221,6 +225,25 @@ export class DiagramRoom extends DurableObject<Env> {
     }
     for (const pending of this.pending.values()) pending.reject(new Error("Diagram deleted"));
     this.pending.clear();
+  }
+
+  /** Retain only a deletion marker, so late sockets and RPCs cannot revive this room. */
+  async erase() {
+    await this.deactivate();
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec("DELETE FROM elements");
+      this.ctx.storage.sql.exec("DELETE FROM tombstones");
+      this.ctx.storage.sql.exec("DELETE FROM meta");
+      this.ctx.storage.sql.exec(
+        "INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)",
+        "deleted",
+        "true",
+      );
+    });
+    this.els.clear();
+    this.deletedAt.clear();
+    this.name = "Deleted";
+    this.diagramId = "";
   }
 
   async rename(name: string) {
@@ -271,11 +294,34 @@ export class DiagramRoom extends DurableObject<Env> {
 
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
     if (this.deleted) return;
-    const msg = JSON.parse(
-      typeof raw === "string" ? raw : new TextDecoder().decode(raw),
-    ) as ClientMessage;
+    const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+    if (new TextEncoder().encode(text).byteLength > MAX_JSON_BYTES) {
+      ws.close(1009, "Message is too large");
+      return;
+    }
+    let msg: ClientMessage;
+    try {
+      msg = socketMessageSchema.parse(JSON.parse(text)) as ClientMessage;
+    } catch {
+      ws.close(1008, "Invalid canvas message");
+      return;
+    }
     switch (msg.type) {
       case "update": {
+        try {
+          await takeBudget(this.env, `board-update:${this.diagramId}`, 240);
+        } catch {
+          ws.close(1013, "Too many canvas updates");
+          return;
+        }
+        if (this.deleted) return;
+        const newIds = new Set(
+          msg.elements.filter((el) => !this.els.has(el.id)).map((el) => el.id),
+        );
+        if (this.els.size + newIds.size > MAX_SCENE_ELEMENTS) {
+          ws.close(1008, "Diagram element limit reached");
+          return;
+        }
         const accepted: El[] = [];
         for (const el of msg.elements) {
           const cur = this.els.get(el.id);
@@ -424,6 +470,7 @@ export class DiagramRoom extends DurableObject<Env> {
   }
 
   async applyPatch(ops: Op[], author: Author = "agent", summary?: string) {
+    if (ops.length > MAX_PATCH_OPS) throw new Error("Too many operations in one patch.");
     const snap =
       author === "agent"
         ? await this.snapshot(patchSnapshotName(ops, new Scene(this.els.values()), summary), "auto")
@@ -495,6 +542,8 @@ export class DiagramRoom extends DurableObject<Env> {
   // ---------- snapshots & templates ----------
 
   async snapshot(name: string, kind: "auto" | "named" = "named"): Promise<SnapshotMeta> {
+    if (this.deleted) throw new Error("Diagram deleted.");
+    const diagramId = this.diagramId;
     const elements = await this.getRaw();
     const meta: SnapshotMeta = {
       id: crypto.randomUUID(),
@@ -503,15 +552,17 @@ export class DiagramRoom extends DurableObject<Env> {
       createdAt: Date.now(),
       elements: elements.length,
     };
-    await this.env.BUCKET.put(
-      `snapshots/${this.diagramId}/${meta.id}.json`,
-      JSON.stringify(elements),
-    );
+    await this.env.BUCKET.put(`snapshots/${diagramId}/${meta.id}.json`, JSON.stringify(elements));
     await this.env.DB.prepare(
       "INSERT INTO snapshots (id, diagram_id, name, kind, created_at, element_count) VALUES (?, ?, ?, ?, ?, ?)",
     )
-      .bind(meta.id, this.diagramId, name, kind, meta.createdAt, meta.elements)
+      .bind(meta.id, diagramId, name, kind, meta.createdAt, meta.elements)
       .run();
+    if (this.deleted) {
+      await this.env.BUCKET.delete(`snapshots/${diagramId}/${meta.id}.json`);
+      await this.env.DB.prepare("DELETE FROM snapshots WHERE id = ?").bind(meta.id).run();
+      throw new Error("Diagram deleted.");
+    }
     // Only checkpoints the user asked for. Every agent edit auto-snapshots, and
     // reporting those would bury the ones a person deliberately took.
     if (kind === "named")

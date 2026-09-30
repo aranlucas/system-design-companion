@@ -366,7 +366,7 @@ describe("concurrent-edit merge rule", () => {
     const ws2 = makeWs();
     addWs(ws1);
     addWs(ws2);
-    const el = { id: "ext", type: "rectangle", version: 1, versionNonce: 7 } as El;
+    const el: El = { ...rect("ext", 0, 0), versionNonce: 7 };
     await (room as unknown as SocketHandlers).webSocketMessage(
       ws1,
       JSON.stringify({ type: "update", elements: [el] }),
