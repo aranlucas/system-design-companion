@@ -808,3 +808,12 @@ body,
   color: var(--text-primary-color);
   background: var(--color-surface-low);
 }
+
+/* Keep native status feedback above mobile panels and clear of the drawing toolbar. */
+.canvas-wrap .excalidraw.excalidraw--mobile .viewport-status-frame__badge-row {
+  top: auto;
+  bottom: calc(var(--lg-button-size) + 2rem);
+  z-index: var(--zIndex-toast);
+  width: max-content;
+  max-width: calc(100% - 32px);
+}
