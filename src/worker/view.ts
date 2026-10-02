@@ -2,14 +2,21 @@
 // (public/mcp-view.html); the resource handler reads it back through the ASSETS binding.
 
 // Resource URIs are host cache keys; keep this experiment separate from the old view.
-export const VIEW_URI = "ui://system-design-canvas/diagram-chatgpt-v1.html";
+export const VIEW_URI = "ui://system-design-canvas/diagram-extensions-v1.html";
+export const WORKSPACE_URI = "ui://system-design-canvas/workspace-v1.html";
+type ViewKind = "diagram" | "workspace";
 
 const ERROR_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8" /></head>
 <body style="font:13px system-ui;color:#868e96;padding:16px">Diagram view unavailable.</body></html>`;
 
-export async function viewHtml(env: Env, origin: string): Promise<string> {
+export async function viewHtml(
+  env: Env,
+  origin: string,
+  kind: ViewKind = "diagram",
+): Promise<string> {
   try {
-    const res = await env.ASSETS.fetch(new Request(`${origin}/mcp-view.html`));
+    const filename = kind === "workspace" ? "mcp-workspace.html" : "mcp-view.html";
+    const res = await env.ASSETS.fetch(new Request(`${origin}/${filename}`));
     const html = await res.text();
     // The SPA fallback answers 200 with index.html when the view wasn't built.
     if (!res.ok || !html.includes('name="mcp-view"')) throw new Error(`status ${res.status}`);

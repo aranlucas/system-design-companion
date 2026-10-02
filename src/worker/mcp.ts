@@ -1,8 +1,5 @@
-import {
-  RESOURCE_MIME_TYPE,
-  registerAppResource,
-  registerAppTool,
-} from "@modelcontextprotocol/ext-apps/server";
+import { RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
+import type { OpenAIUiResourceMetadata, OpenAIUiToolMetadata } from "@openai/mcp-extensions/server";
 import {
   createMcpHandler,
   McpServer,
@@ -19,6 +16,8 @@ import { RUBRIC } from "./rubric.ts";
 import {
   createDiagram,
   listTemplates,
+  listDiagrams,
+  parseDiagramCursor,
   parseLink,
   room,
   saveAsTemplate,
@@ -26,7 +25,7 @@ import {
   verifyKey,
 } from "./store.ts";
 import { MAX_PATCH_OPS, takeBudget } from "./request-limits.ts";
-import { VIEW_URI, viewHtml } from "./view.ts";
+import { VIEW_URI, WORKSPACE_URI, viewHtml } from "./view.ts";
 import { HTTPException } from "hono/http-exception";
 
 export async function handleMcp(request: Request, env: Env, principal: McpPrincipal) {
@@ -73,6 +72,8 @@ type FocusArgs = DiagramArgs & {
 };
 type ReviewArgs = { focus?: string };
 type EstimateArgs = { dau?: string; notes?: string };
+type OpenCanvasArgs = { diagram?: string; cursor?: string };
+type LibraryArgs = { cursor?: string };
 
 const INSTRUCTIONS = `Collaborative Excalidraw canvas for system design. A human (and possibly an interviewer) edits the same canvas live in a browser tab.
 Workflow:
@@ -293,8 +294,9 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
 
   // Hosts that support MCP Apps (Claude Desktop/web, ChatGPT, VS Code…) render VIEW_URI next to
   // this tool's result; others just get the text. The view fetches pixels via render_scene.
-  registerAppTool(
-    server,
+  // Register directly on MCP v2: the v1 MCP Apps helpers have nominal v1 server
+  // types. The Extensions entrypoints are metadata and work on the v2 transport.
+  server.registerTool(
     "get_scene",
     {
       _meta: {
@@ -303,6 +305,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
         "openai/widgetAccessible": true,
         "openai/toolInvocation/invoking": "Reading the diagram…",
         "openai/toolInvocation/invoked": "Diagram ready",
+        "openai/ui": { preferredModelDisplayMode: "inline" } satisfies OpenAIUiToolMetadata,
       },
       description:
         "Read the canvas. format=graph (default): frames, nodes, edges (arrows resolved to node labels; inferred=true if the arrow only touches a node), standalone notes, and unstructured sketches. selected=true marks the user's current selection. format=raw: Excalidraw elements.",
@@ -325,8 +328,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     },
   );
 
-  registerAppTool(
-    server,
+  server.registerTool(
     "render_scene",
     {
       _meta: {
@@ -354,11 +356,10 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     },
   );
 
-  registerAppResource(
-    server,
+  server.registerResource(
     "Diagram view",
     VIEW_URI,
-    { description: "Hand-drawn picture of the shared canvas" },
+    { description: "Hand-drawn picture of the shared canvas", mimeType: RESOURCE_MIME_TYPE },
     async () => ({
       contents: [
         {
@@ -370,12 +371,108 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
             "openai/widgetDescription":
               "Preview of the shared system design diagram. Refresh it, view it full screen, or open the collaborative canvas.",
             "openai/widgetPrefersBorder": true,
-            "openai/ui": { availableDisplayModes: ["inline", "fullscreen"] },
+            "openai/ui": {
+              availableDisplayModes: ["inline", "fullscreen"],
+              preferredDisplayMode: "inline",
+            } satisfies OpenAIUiResourceMetadata,
             "openai/widgetCSP": {
               connect_domains: [],
               resource_domains: [origin],
               redirect_domains: [origin],
             },
+          },
+        },
+      ],
+    }),
+  );
+
+  const librarySchema = z.object({
+    diagrams: z.array(z.object({ name: z.string(), diagram: z.string() })),
+    nextCursor: z.string().nullable(),
+    activeDiagram: z.string().optional(),
+    activeName: z.string().optional(),
+  });
+
+  async function library(cursor?: string) {
+    const boundary = cursor ? parseDiagramCursor(cursor) : undefined;
+    if (cursor && !boundary) throw new Error("Invalid diagram library cursor.");
+    const page = await listDiagrams(env, 50, boundary ?? undefined, principal.userId);
+    return {
+      diagrams: page.items.map((item) => ({
+        name: item.name,
+        diagram: shareLink(origin, item.id, item.key),
+      })),
+      nextCursor: page.nextCursor,
+    };
+  }
+
+  server.registerTool(
+    "open_canvas",
+    {
+      title: "System Design",
+      description: "Open the system design workspace and choose one of your diagrams.",
+      icons: [{ src: `${origin}/icons/system-design-128.png`, mimeType: "image/png" }],
+      inputSchema: z.object({ diagram: diagramArg.optional(), cursor: z.string().optional() }),
+      outputSchema: librarySchema,
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      _meta: {
+        ui: { resourceUri: WORKSPACE_URI, visibility: ["app"] },
+        "openai/ui": {
+          entrypoints: [{ type: "global" }, { type: "thread" }],
+          preferredModelDisplayMode: "fullscreen",
+        } satisfies OpenAIUiToolMetadata,
+      },
+    },
+    async ({ diagram, cursor }: OpenCanvasArgs) => {
+      let activeDiagram: string | undefined;
+      let activeName: string | undefined;
+      if (diagram) {
+        activeName = (await pick(diagram)).name;
+        const parsed = parseLink(diagram)!;
+        activeDiagram = shareLink(origin, parsed.id, parsed.key);
+      }
+      return {
+        content: [{ type: "text" as const, text: "System design workspace ready." }],
+        structuredContent: {
+          ...(await library(cursor)),
+          ...(activeDiagram ? { activeDiagram, activeName } : {}),
+        },
+      };
+    },
+  );
+
+  server.registerTool(
+    "list_diagrams",
+    {
+      description: "List the signed-in user's diagrams for the workspace chooser.",
+      inputSchema: z.object({ cursor: z.string().optional() }),
+      outputSchema: librarySchema,
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      _meta: { ui: { resourceUri: WORKSPACE_URI, visibility: ["app"] } },
+    },
+    async ({ cursor }: LibraryArgs) => ({
+      content: [{ type: "text" as const, text: "Retrieved your diagrams." }],
+      structuredContent: await library(cursor),
+    }),
+  );
+
+  server.registerResource(
+    "System design workspace",
+    WORKSPACE_URI,
+    { description: "Full collaborative Excalidraw workspace", mimeType: RESOURCE_MIME_TYPE },
+    async () => ({
+      contents: [
+        {
+          uri: WORKSPACE_URI,
+          mimeType: RESOURCE_MIME_TYPE,
+          text: await viewHtml(env, origin, "workspace"),
+          _meta: {
+            ui: { prefersBorder: false, csp: { frameDomains: [origin] } },
+            "openai/ui": {
+              availableDisplayModes: ["fullscreen"],
+              preferredDisplayMode: "fullscreen",
+            } satisfies OpenAIUiResourceMetadata,
+            "openai/widgetDescription": "Choose a diagram and edit it live with ChatGPT.",
           },
         },
       ],

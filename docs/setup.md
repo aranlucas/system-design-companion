@@ -132,9 +132,10 @@ research.
   usual text. The view lives in `src/view/`; `pnpm build:view` bundles it into
   `public/mcp-view.html`, which the worker reads via the `ASSETS` binding.
 
-For the experimental `window.openai` preview branch, see
-[ChatGPT plugin API experiment](chatgpt-plugin-api.md). It uses the existing MCP
-2.0 endpoint and OAuth setup.
+For the experimental sidebar app and conversation panel, see
+[ChatGPT Plugin Extensions experiment](chatgpt-plugin-api.md). Its widgets use
+the older MCP Apps version required by the Extensions SDK; the server retains
+the existing MCP 2.0 endpoint and OAuth setup.
 
 ## MCP events
 

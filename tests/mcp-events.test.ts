@@ -9,7 +9,11 @@ import { deliverDiagramEvent, resetVerificationCache } from "../src/worker/event
 import { handleMcp } from "../src/worker/mcp.ts";
 import { DiagramRoom } from "../src/worker/room.ts";
 import { createDiagram, shareLink } from "../src/worker/store.ts";
-import { VIEW_URI } from "../src/worker/view.ts";
+import { VIEW_URI, WORKSPACE_URI } from "../src/worker/view.ts";
+import {
+  OpenAIUiToolMetadataSchema,
+  OpenAIUiResourceMetadataSchema,
+} from "@openai/mcp-extensions/server";
 import {
   makeEnv,
   makeRoom,
@@ -92,6 +96,16 @@ type ResourceContent = {
 type ReadResourceResult = { contents: ResourceContent[] };
 type RenderedScene = { name: string; url: string; elements: El[] };
 type RenderSceneResult = { structuredContent?: RenderedScene; isError?: boolean };
+type LibraryOption = { name: string; diagram: string };
+type LibraryResult = {
+  structuredContent?: {
+    diagrams: LibraryOption[];
+    nextCursor: string | null;
+    activeDiagram?: string;
+    activeName?: string;
+  };
+  isError?: boolean;
+};
 
 /** One entry of the events/list catalog. */
 type ListedEvent = {
@@ -213,6 +227,70 @@ async function newDiagram(name = "Board") {
 }
 
 describe("public MCP tool metadata", () => {
+  it("registers sidebar and conversation entrypoints using the released Extensions metadata schema", async () => {
+    const { result } = await rpc<ToolsListResult>("tools/list", {});
+    const opener = result!.tools.find((tool) => tool.name === "open_canvas")!;
+    expect(opener["_meta"]).toMatchObject({
+      ui: { resourceUri: WORKSPACE_URI, visibility: ["app"] },
+    });
+    expect(OpenAIUiToolMetadataSchema.parse(opener["_meta"]?.["openai/ui"])).toEqual({
+      entrypoints: [{ type: "global" }, { type: "thread" }],
+      preferredModelDisplayMode: "fullscreen",
+    });
+  });
+
+  it("launches without required arguments and scopes the chooser to the signed-in owner", async () => {
+    const mine = await createDiagram(env.env, "Mine", undefined, "github%3A1");
+    await createDiagram(env.env, "Another user's board", undefined, "github%3A2");
+    const reply = await rpc<LibraryResult>("tools/call", { name: "open_canvas", arguments: {} });
+    expect(reply.error).toBeUndefined();
+    expect(reply.result?.isError).not.toBe(true);
+    expect(reply.result?.structuredContent?.diagrams).toHaveLength(1);
+    expect(reply.result?.structuredContent?.diagrams[0]).toMatchObject({ name: "Mine" });
+    expect(reply.result?.structuredContent?.diagrams[0].diagram).toContain(`/d/${mine.id}?k=`);
+  });
+
+  it("accepts an explicitly shared board and rejects revoked links and invalid pagination", async () => {
+    const board = await newDiagram("Shared");
+    const reply = await rpc<LibraryResult>("tools/call", {
+      name: "open_canvas",
+      arguments: { diagram: board.link },
+    });
+    expect(reply.result?.structuredContent?.activeDiagram).toBe(board.link);
+    expect(reply.result?.structuredContent?.activeName).toBe("Shared");
+    const invalid = await rpc<LibraryResult>("tools/call", {
+      name: "list_diagrams",
+      arguments: { cursor: "invalid" },
+    });
+    expect(invalid.result?.isError).toBe(true);
+    env.db.diagrams.delete(board.id);
+    const revoked = await rpc<LibraryResult>("tools/call", {
+      name: "open_canvas",
+      arguments: { diagram: board.link },
+    });
+    expect(revoked.result?.isError).toBe(true);
+  });
+
+  it("serves a fullscreen workspace with only this deployment allowed as a nested editor", async () => {
+    const assetFetch = vi
+      .fn()
+      .mockResolvedValue(new Response('<meta name="mcp-view"><b>__ORIGIN__</b>'));
+    env.env.ASSETS = {
+      fetch: assetFetch,
+    } as unknown as Fetcher;
+    const { result } = await rpc<ReadResourceResult>("resources/read", { uri: WORKSPACE_URI });
+    const resource = result!.contents[0];
+    expect(resource["_meta"]).toMatchObject({
+      ui: { csp: { frameDomains: ["https://design.example"] } },
+    });
+    expect(OpenAIUiResourceMetadataSchema.parse(resource["_meta"]["openai/ui"])).toEqual({
+      availableDisplayModes: ["fullscreen"],
+      preferredDisplayMode: "fullscreen",
+    });
+    expect(assetFetch).toHaveBeenCalledWith(
+      expect.objectContaining({ url: "https://design.example/mcp-workspace.html" }),
+    );
+  });
   it("renders scene data through MCP 2.0 and rejects a revoked share link", async () => {
     const diagram = await newDiagram();
     const { result, error } = await rpc<RenderSceneResult>("tools/call", {
@@ -274,7 +352,7 @@ describe("public MCP tool metadata", () => {
     const reply = await rpc<ToolsListResult>("tools/list", {});
     expect(reply.error).toBeUndefined();
     const tools = reply.result!.tools;
-    expect(tools).toHaveLength(16);
+    expect(tools).toHaveLength(18);
     for (const tool of tools) {
       expect(typeof tool.annotations?.readOnlyHint, tool.name).toBe("boolean");
       expect(typeof tool.annotations?.destructiveHint, tool.name).toBe("boolean");

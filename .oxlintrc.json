@@ -45,6 +45,10 @@
     "maxWarnings": 0,
     "reportUnusedDisableDirectives": "error"
   },
-  "ignorePatterns": ["worker-configuration.d.ts", "public/mcp-view.html"],
+  "ignorePatterns": [
+    "worker-configuration.d.ts",
+    "public/mcp-view.html",
+    "public/mcp-workspace.html"
+  ],
   "jsPlugins": ["./lint/types-plugin.ts"]
 }

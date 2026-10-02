@@ -38,6 +38,7 @@ const worker = sizes(
     .map((file) => join(workerDir, file)),
 );
 const view = sizes([`${clientDir}/mcp-view.html`]);
+const workspace = sizes([`${clientDir}/mcp-workspace.html`]);
 const canvasImports = staticFiles("src/app/canvas.tsx");
 const canvas = sizes([...canvasImports].map((entry) => join(clientDir, manifest[entry].file)));
 console.table({
@@ -45,6 +46,7 @@ console.table({
   "Canvas JavaScript (static imports)": canvas,
   "Worker JavaScript (all chunks)": worker,
   "MCP view HTML (self-contained)": view,
+  "Extensions workspace HTML (self-contained)": workspace,
 });
 
 // The Worker budget covers every chunk, including the lazily loaded OAuth

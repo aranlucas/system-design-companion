@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="mcp-view" content="workspace" />
+    <meta name="canvas-origin" content="__ORIGIN__" />
+    <title>System Design workspace</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background: var(--color-background-primary, light-dark(#fff, #181818));
+        color: var(--color-text-primary, light-dark(#1e1e1e, #ececec));
+        font: 14px/1.4 var(--font-sans, system-ui, sans-serif);
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px;
+        flex-wrap: wrap;
+      }
+      label {
+        font-weight: 600;
+      }
+      select,
+      input,
+      button {
+        font: inherit;
+        color: inherit;
+        padding: 6px 9px;
+        border-radius: 6px;
+        background: var(--color-background-secondary, light-dark(#f4f4f4, #2c2c2c));
+        border: 1px solid var(--color-border-primary, light-dark(#ddd, #444));
+      }
+      select {
+        min-width: 160px;
+        max-width: 320px;
+        flex: 1 1 200px;
+      }
+      button {
+        cursor: var(--cursor-interaction, pointer);
+      }
+      button:disabled {
+        opacity: 0.5;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      #status {
+        padding: 0 8px 8px;
+        color: var(--color-text-secondary, light-dark(#666, #aaa));
+      }
+      #empty {
+        padding: 24px;
+        max-width: 600px;
+      }
+      #empty h1 {
+        margin-top: 0;
+      }
+      form {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      input {
+        flex: 1;
+        min-width: 180px;
+      }
+      iframe {
+        border: 0;
+        width: 100%;
+        flex: 1;
+        min-height: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <label for="diagrams">Your diagrams</label>
+      <select id="diagrams">
+        <option value="">Choose a diagram</option>
+      </select>
+      <button id="refresh" type="button">Refresh library</button>
+      <button id="more" type="button" hidden>Load more</button>
+      <button id="library" type="button" hidden>Library</button>
+    </header>
+    <output id="status" aria-live="polite">Loading your diagrams…</output>
+    <section id="empty">
+      <h1>Design together</h1>
+      <p>Choose a diagram above, ask ChatGPT to create one, or open a shared link.</p>
+      <form id="join">
+        <input
+          id="link"
+          type="url"
+          required
+          aria-label="Diagram share link"
+          placeholder="Paste a diagram share link"
+        />
+        <button type="submit">Open diagram</button>
+      </form>
+      <p>
+        In the editor menu, use <strong>Use selection in chat</strong> to give ChatGPT context about
+        the components you selected.
+      </p>
+    </section>
+    <iframe
+      id="canvas"
+      title="Collaborative system design canvas"
+      allow="clipboard-read; clipboard-write; fullscreen"
+      hidden
+    ></iframe>
+    <script>
+      /* VIEW_SCRIPT */
+    </script>
+  </body>
+</html>

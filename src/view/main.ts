@@ -24,7 +24,7 @@ const refreshBtn = byId("refresh") as HTMLButtonElement;
 const openBtn = byId("open") as HTMLButtonElement;
 const fullBtn = byId("full") as HTMLButtonElement;
 
-const host = createViewHost(window);
+const host = createViewHost();
 
 let diagram: string | undefined;
 let data: SceneData | undefined;
@@ -59,7 +59,6 @@ async function load() {
       renderScene(svg, data.elements);
     }
     title.textContent = data.name;
-    host.setCanvasUrl(data.url);
     openBtn.hidden = false;
     const nodes = data.elements.filter((e) => e.type !== "text" && e.type !== "arrow").length;
     status.textContent = data.elements.length

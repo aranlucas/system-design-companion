@@ -40,6 +40,7 @@ import {
 } from "../shared/protocol.ts";
 import { apiErrorMessage, type ApiFailure } from "./api-error.ts";
 import { CopyRow } from "./copy-row.tsx";
+import { embeddedHostOrigin, isEmbeddedHostMessage } from "../shared/embedded-canvas.ts";
 import { displayName, linkFor, remember, setDisplayName, setupCommands } from "./local.ts";
 
 interface CanvasProps {
@@ -115,6 +116,7 @@ const blobToBase64 = (b: Blob) =>
   });
 
 export function Canvas({ id, k }: CanvasProps) {
+  const embeddedOrigin = embeddedHostOrigin(location.search);
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [name, setName] = useState("…");
   const [peers, setPeers] = useState(1);
@@ -154,6 +156,39 @@ export function Canvas({ id, k }: CanvasProps) {
       (window as any).excalidrawAPI = null;
     };
   }, [api]);
+
+  useEffect(() => {
+    if (!embeddedOrigin || !api) return undefined;
+    const receiveTheme = (event: MessageEvent<unknown>) => {
+      if (
+        event.source !== window.parent ||
+        event.origin !== embeddedOrigin ||
+        !isEmbeddedHostMessage(event.data)
+      )
+        return;
+      api.updateScene({ appState: { theme: event.data.theme } });
+    };
+    window.addEventListener("message", receiveTheme);
+    window.parent.postMessage({ type: "system-design.ready" }, embeddedOrigin);
+    return () => window.removeEventListener("message", receiveTheme);
+  }, [api, embeddedOrigin]);
+
+  const openAllDiagrams = () => {
+    if (embeddedOrigin)
+      window.parent.postMessage({ type: "system-design.library" }, embeddedOrigin);
+    else location.assign("/");
+  };
+  const attachSelection = () => {
+    const current = apiRef.current;
+    if (!embeddedOrigin || !current) return;
+    const selectedElementIds = Object.keys(current.getAppState().selectedElementIds).filter(
+      (elementId) => current.getAppState().selectedElementIds[elementId],
+    );
+    window.parent.postMessage(
+      { type: "system-design.context", selectedElementIds },
+      embeddedOrigin,
+    );
+  };
 
   const flash = (message: string) => apiRef.current?.setToast({ message, duration: 2500 });
   const loadLibrary = async () => {
@@ -674,7 +709,14 @@ export function Canvas({ id, k }: CanvasProps) {
             <MainMenu.Item onSelect={tidy}>Tidy layout</MainMenu.Item>
             <MainMenu.Item onSelect={() => open("versions")}>Versions</MainMenu.Item>
             <MainMenu.Item onSelect={() => open("share")}>Share &amp; connect agent</MainMenu.Item>
-            <MainMenu.ItemLink href="/">All diagrams</MainMenu.ItemLink>
+            {embeddedOrigin && (
+              <MainMenu.Item onSelect={attachSelection}>Use selection in chat</MainMenu.Item>
+            )}
+            {embeddedOrigin ? (
+              <MainMenu.Item onSelect={openAllDiagrams}>All diagrams</MainMenu.Item>
+            ) : (
+              <MainMenu.ItemLink href="/">All diagrams</MainMenu.ItemLink>
+            )}
           </MainMenu.Group>
           <MainMenu.Separator />
           <MainMenu.DefaultItems.CommandPalette className="highlighted" />
@@ -716,7 +758,7 @@ export function Canvas({ id, k }: CanvasProps) {
               icon: libraryIcon,
               perform: () => open("library"),
             },
-            { label: "All diagrams", category: "Links", perform: () => location.assign("/") },
+            { label: "All diagrams", category: "Links", perform: openAllDiagrams },
           ]}
         />
         {/* Mounted after the room's first sync so it never flashes over a non-empty board. */}
@@ -739,9 +781,15 @@ export function Canvas({ id, k }: CanvasProps) {
                 <WelcomeScreen.Center.MenuItem icon={libraryIcon} onSelect={() => open("library")}>
                   Component library
                 </WelcomeScreen.Center.MenuItem>
-                <WelcomeScreen.Center.MenuItemLink href="/">
-                  All diagrams
-                </WelcomeScreen.Center.MenuItemLink>
+                {embeddedOrigin ? (
+                  <WelcomeScreen.Center.MenuItem onSelect={openAllDiagrams}>
+                    All diagrams
+                  </WelcomeScreen.Center.MenuItem>
+                ) : (
+                  <WelcomeScreen.Center.MenuItemLink href="/">
+                    All diagrams
+                  </WelcomeScreen.Center.MenuItemLink>
+                )}
                 <WelcomeScreen.Center.MenuItemHelp />
               </WelcomeScreen.Center.Menu>
             </WelcomeScreen.Center>
