@@ -302,3 +302,518 @@ body,
     animation: none;
   }
 }
+
+/* The home is a workspace: the canvas task leads; setup stays in a quiet rail. */
+.home {
+  max-width: 1120px;
+  padding: 48px 32px 64px;
+}
+.home-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: center;
+  padding-bottom: 32px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 36px;
+}
+.brand {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  min-width: 0;
+}
+.brand img {
+  border-radius: 10px;
+}
+.home h1 {
+  font-size: 28px;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+  margin: 0 0 8px;
+}
+.home p {
+  line-height: 1.6;
+}
+.home .muted {
+  font-size: 14px;
+}
+.home h2 {
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  margin: 0 0 12px;
+}
+.home h3 {
+  font-size: 17px;
+  margin: 0 0 8px;
+}
+.home-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 48px;
+  align-items: start;
+}
+.workspace-main {
+  min-width: 0;
+}
+.start-panel {
+  padding: 28px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+.start-panel h2 {
+  font-size: 30px;
+  max-width: 18ch;
+  line-height: 1.15;
+}
+.start-panel > p {
+  max-width: 60ch;
+}
+.home a {
+  color: var(--accent);
+  text-underline-offset: 4px;
+}
+.home .action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  padding: 12px 20px;
+  min-height: 48px;
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: 600;
+  margin: 12px 0;
+}
+.home :is(button, input, select) {
+  min-height: 44px;
+}
+.home :is(button.primary, a.primary) {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+}
+.home .primary:hover {
+  background: #5530bc;
+}
+.home button.quiet {
+  background: transparent;
+  border-color: var(--border);
+}
+.home button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.home :is(input, select):disabled {
+  opacity: 0.6;
+}
+.home :is(button, a, input, select, summary):focus-visible,
+.sd-panel :is(button, a, input):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.home input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+.home input {
+  caret-color: var(--accent);
+}
+::selection {
+  background: #e5dbff;
+  color: #38206f;
+}
+.create-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr);
+  gap: 16px;
+  margin-top: 24px;
+}
+.create-form > button {
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding-inline: 24px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.home label {
+  font-size: 14px;
+  font-weight: 600;
+}
+.field input,
+.field select {
+  width: 100%;
+  min-width: 0;
+}
+.diagram-library {
+  margin-top: 36px;
+}
+.section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.section-heading h2 {
+  margin: 0;
+}
+.search-field {
+  margin-bottom: 20px;
+}
+.diagram-list li {
+  padding: 16px 0;
+}
+.diagram-list a {
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 4px;
+}
+.diagram-list a > span:first-child {
+  overflow-wrap: anywhere;
+  font-size: 16px;
+}
+.diagram-list a > .muted {
+  font-weight: 400;
+}
+.diagram-list button {
+  flex-shrink: 0;
+}
+.home .delete-diagram {
+  color: var(--muted);
+}
+.empty-library {
+  padding: 28px 0;
+  border-block: 1px solid var(--border);
+}
+.empty-library p {
+  margin: 0 0 16px;
+}
+.join-section {
+  margin-top: 36px;
+  padding-top: 28px;
+  border-top: 1px solid var(--border);
+}
+.join-section .row {
+  align-items: end;
+}
+.join-section .field {
+  flex: 1 1 200px;
+}
+.join-section button {
+  flex-shrink: 0;
+}
+.setup-panel {
+  padding-top: 8px;
+}
+.setup-panel h2 {
+  font-size: 20px;
+}
+.setup-steps {
+  padding-inline-start: 20px;
+  margin: 28px 0;
+}
+.setup-steps li {
+  padding-inline-start: 8px;
+  margin-bottom: 24px;
+}
+.setup-steps li::marker {
+  color: var(--accent);
+  font-weight: 600;
+}
+.setup-steps p {
+  margin: 4px 0;
+}
+.agent-commands {
+  border-block: 1px solid var(--border);
+  padding-block: 18px;
+}
+.agent-commands summary {
+  min-height: 44px;
+  padding-block: 12px;
+  line-height: 20px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.agent-commands .row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin: 16px 0;
+}
+.agent-commands .copy-label {
+  grid-column: 1 / -1;
+  width: auto;
+}
+.setup-note {
+  margin-top: 24px;
+}
+.notice {
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.notice.error {
+  border-color: #c92a2a;
+}
+.notice p {
+  margin: 0 0 12px;
+}
+.skeleton {
+  height: 24px;
+  margin-block: 16px;
+  border-radius: 6px;
+  background: var(--border);
+}
+.skeleton.short {
+  width: 60%;
+}
+.sd-panel .row {
+  align-items: end;
+}
+.sd-panel .field {
+  width: 100%;
+}
+.sd-panel :is(input, button) {
+  min-height: 40px;
+}
+.sd-panel .copy-label {
+  width: auto;
+  flex-basis: 100%;
+}
+.sd-panel .notice {
+  font-size: 14px;
+}
+@media (max-width: 760px) {
+  .home {
+    padding: 28px 20px max(40px, env(safe-area-inset-bottom));
+  }
+  .home-header {
+    align-items: start;
+    gap: 12px;
+    margin-bottom: 28px;
+    padding-bottom: 24px;
+  }
+  .brand {
+    gap: 12px;
+  }
+  .brand img {
+    width: 36px;
+    height: 36px;
+  }
+  .home h1 {
+    font-size: 24px;
+  }
+  .home-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 36px;
+  }
+  .start-panel {
+    padding: 24px;
+  }
+  .start-panel h2 {
+    font-size: 28px;
+  }
+  .create-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .home :is(input, select),
+  .sd-panel input {
+    font-size: 16px;
+  }
+  .sd-panel :is(button, input) {
+    min-height: 44px;
+  }
+  .home .cmd {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .home-header > button {
+    padding-inline: 8px;
+    white-space: nowrap;
+  }
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #b197fc;
+  }
+  .home :is(button.primary, a.primary) {
+    color: #241343;
+  }
+  .home .primary:hover {
+    background: #c6b3ff;
+  }
+}
+.copy-error {
+  flex-basis: 100%;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The purple connection rail belongs to this collaborative canvas. */
+.home {
+  --bg: #f4f3fb;
+  --border: #d9d7e8;
+  --muted: #625d76;
+  --fg: #242138;
+  --accent: #6140c4;
+  max-width: 1180px;
+}
+.home h1 {
+  font-size: 32px;
+}
+.home-workspace {
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 40px;
+}
+.start-panel {
+  border: none;
+  padding: 36px;
+  border-radius: 16px;
+}
+.start-panel h2 {
+  font-size: 36px;
+  line-height: 1.15;
+}
+.setup-panel {
+  --muted: #c9c6e3;
+  --border: #4c456e;
+  --accent: #dfd0ff;
+  --card: #302b48;
+  --bg: #29233f;
+  --fg: #f6f0ff;
+  background: #29233f;
+  color: var(--fg);
+  padding: 28px;
+  border-radius: 16px;
+}
+.setup-panel h2 {
+  font-size: 22px;
+}
+.setup-panel .setup-steps {
+  list-style: none;
+  padding: 0;
+}
+.setup-steps li {
+  position: relative;
+  padding-inline-start: 28px;
+}
+.setup-steps li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 5px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #c3a8f5;
+  border-radius: 50%;
+}
+.setup-steps li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 22px;
+  bottom: -18px;
+  left: 5px;
+  border-left: 1px solid #6e5c93;
+}
+.home .setup-panel button {
+  background: var(--card);
+  color: var(--fg);
+  border-color: var(--border);
+}
+.home .setup-panel button:hover {
+  border-color: var(--accent);
+}
+.home .setup-panel .cmd {
+  background: var(--bg);
+  color: var(--fg);
+}
+.home .diagram-list a {
+  color: var(--fg);
+}
+.home .diagram-list li:hover a > span:first-child {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.home .diagram-library {
+  padding: 28px 8px 0;
+}
+.home .join-section {
+  padding: 28px 8px 0;
+}
+@media (max-width: 760px) {
+  .home-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+  }
+  .home h1 {
+    font-size: 26px;
+  }
+  .start-panel {
+    padding: 28px;
+  }
+  .start-panel h2 {
+    font-size: 30px;
+  }
+  .setup-panel {
+    padding: 28px;
+  }
+}
+@media (prefers-color-scheme: dark) {
+  .home {
+    --bg: #171322;
+    --fg: #f2eaf9;
+    --muted: #bfb2cf;
+    --border: #4e405e;
+    --card: #241c30;
+    --accent: #c5a8f2;
+  }
+}
+
+.canvas-recovery {
+  padding: 0;
+  gap: 16px;
+}
+.canvas-recovery p {
+  margin: 0;
+}
+.canvas-recovery a {
+  color: var(--accent);
+  text-underline-offset: 4px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.canvas-wrap .excalidraw :is(kbd, .HintViewer, .ToolIcon__keybinding),
+.canvas-wrap .excalidraw.theme--dark :is(kbd, .HintViewer, .ToolIcon__keybinding) {
+  color: var(--text-primary-color);
+  background: var(--color-surface-low);
+}
+
+/* Keep native status feedback above mobile panels and clear of the drawing toolbar. */
+.canvas-wrap .excalidraw.excalidraw--mobile .viewport-status-frame__badge-row {
+  top: auto;
+  bottom: calc(var(--lg-button-size) + 2rem);
+  z-index: var(--zIndex-toast);
+  width: max-content;
+  max-width: calc(100% - 32px);
+}
