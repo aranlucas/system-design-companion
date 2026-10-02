@@ -42,6 +42,34 @@ import { apiErrorMessage, type ApiFailure } from "./api-error.ts";
 import { CopyRow } from "./copy-row.tsx";
 import { displayName, linkFor, remember, setDisplayName, setupCommands } from "./local.ts";
 
+interface CanvasRecoveryProps {
+  message: string;
+  retry?: () => void;
+}
+
+function CanvasRecovery({ message, retry }: CanvasRecoveryProps) {
+  return (
+    <div className="sd-panel canvas-recovery">
+      <p>{message}</p>
+      <div className="row">
+        {retry && <button onClick={retry}>Retry canvas</button>}
+        <a href="/">All diagrams</a>
+      </div>
+    </div>
+  );
+}
+
+function unavailableCanvasMessage() {
+  return (
+    <CanvasRecovery message="This diagram is no longer available. Ask the owner for a new share link, or return to your diagrams." />
+  );
+}
+
+interface DiagramMetadata {
+  id: string;
+  name: string;
+}
+
 interface CanvasProps {
   id: string;
   k: string;
@@ -54,7 +82,7 @@ type RenameResult = { name: string } & ApiFailure;
 
 interface SharePanelProps {
   link: string;
-  copy: (text: string, what: string) => void;
+  copy: (text: string, what: string) => Promise<void>;
   onName: () => void;
 }
 
@@ -119,6 +147,57 @@ export function Canvas({ id, k }: CanvasProps) {
   const [name, setName] = useState("…");
   const [peers, setPeers] = useState(1);
   const [loaded, setLoaded] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    },
+    [],
+  );
+  const canvasRoot = useRef<HTMLDivElement>(null);
+  const access = useQuery({
+    queryKey: ["diagram", id, k],
+    queryFn: ({ signal }) =>
+      getJson<DiagramMetadata>(`/api/d/${id}?k=${encodeURIComponent(k)}`, signal),
+    retry: 1,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+  const retryAccess = access.refetch;
+  useEffect(() => {
+    api?.updateScene({
+      appState: {
+        isLoading: !loaded && !access.error,
+        errorMessage: access.error ? (
+          <CanvasRecovery
+            message="Could not open this canvas. Check your connection or ask the owner for a fresh share link."
+            retry={() => {
+              api?.updateScene({ appState: { errorMessage: null, isLoading: true } });
+              void retryAccess();
+            }}
+          />
+        ) : null,
+      },
+    });
+  }, [api, loaded, access.error, retryAccess]);
+  useEffect(() => {
+    const root = canvasRoot.current;
+    if (!api || !root) return undefined;
+    // MainMenu retains its native trigger, but this version exposes no prop for its label.
+    // Keep the integration scoped to the canvas and account for responsive remounts.
+    const labelMenu = () => {
+      const trigger = root.querySelector<HTMLButtonElement>(".main-menu-trigger");
+      if (trigger?.getAttribute("aria-label") !== "Canvas menu")
+        trigger?.setAttribute("aria-label", "Canvas menu");
+    };
+    labelMenu();
+    const observer = new MutationObserver(labelMenu);
+    observer.observe(root, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [api]);
   useEffect(() => {
     if (loaded) document.title = `${name} · System Design`;
   }, [loaded, name]);
@@ -155,7 +234,11 @@ export function Canvas({ id, k }: CanvasProps) {
     };
   }, [api]);
 
-  const flash = (message: string) => apiRef.current?.setToast({ message, duration: 2500 });
+  const flash = (message: string) => {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    setNotice(message);
+    noticeTimer.current = setTimeout(() => setNotice(null), 2500);
+  };
   const loadLibrary = async () => {
     const currentApi = apiRef.current;
     if (!currentApi || libraryRequested.current) return;
@@ -338,21 +421,31 @@ export function Canvas({ id, k }: CanvasProps) {
   // partysocket reconnects with backoff; messages sent while offline are dropped (not
   // queued) because the room re-sends a full init and flush() re-diffs on reconnect.
   const socket = useWebSocket(wsUrl, undefined, {
-    enabled: !!api,
+    enabled: !!api && access.isSuccess,
     maxEnqueuedMessages: 0,
     shouldReconnectOnClose: (event) => event.code !== 1008, // 1008: diagram deleted
     onOpen: () => {
-      if (offline.current) api?.setToast(null);
       offline.current = false;
+      setIsOffline(false);
       sendPresence(true);
     },
     onClose: (event) => {
       // Peers re-announce themselves on reconnect.
       collaborators.current.clear();
       api?.updateScene({ collaborators: new Map() });
-      if (event.code === 1008 || offline.current) return;
+      if (event.code === 1008) {
+        setIsOffline(false);
+        api?.updateScene({
+          appState: {
+            isLoading: false,
+            errorMessage: unavailableCanvasMessage(),
+          },
+        });
+        return;
+      }
+      if (offline.current) return;
       offline.current = true;
-      api?.setToast({ message: "Offline, reconnecting…", duration: Infinity });
+      setIsOffline(true);
     },
     onMessage: (ev) => {
       if (!api) return;
@@ -366,7 +459,11 @@ export function Canvas({ id, k }: CanvasProps) {
           ? reconcileElements(local, remote as any, api.getAppState())
           : remote;
         for (const e of msg.elements) synced.current.set(e.id, e.version);
-        api.updateScene({ elements: merged, captureUpdate: CaptureUpdateAction.NEVER });
+        api.updateScene({
+          elements: merged,
+          appState: { isLoading: false },
+          captureUpdate: CaptureUpdateAction.NEVER,
+        });
         fetchFiles();
         // Fitting an empty board would zoom to Excalidraw's 3000% maximum.
         if (!local.length && msg.elements.some((e) => !e.isDeleted))
@@ -391,7 +488,11 @@ export function Canvas({ id, k }: CanvasProps) {
         );
         for (const e of msg.elements)
           synced.current.set(e.id, Math.max(e.version, synced.current.get(e.id) ?? 0));
-        api.updateScene({ elements: merged, captureUpdate: CaptureUpdateAction.NEVER });
+        api.updateScene({
+          elements: merged,
+          appState: { isLoading: false },
+          captureUpdate: CaptureUpdateAction.NEVER,
+        });
         fetchFiles();
         if (msg.origin === "agent") {
           flash(
@@ -619,13 +720,17 @@ export function Canvas({ id, k }: CanvasProps) {
   };
 
   const shareLink = linkFor(id, k);
-  const copy = (text: string, what: string) => {
-    void navigator.clipboard.writeText(text);
-    flash(`${what} copied`);
+  const copy = async (text: string, what: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      flash(`${what} copied`);
+    } catch {
+      flash("Clipboard unavailable. Select the text and copy it manually.");
+    }
   };
 
   return (
-    <div className="canvas-wrap">
+    <div className="canvas-wrap" ref={canvasRoot}>
       {heart && (
         <output
           key={heart.startedAt}
@@ -644,7 +749,21 @@ export function Canvas({ id, k }: CanvasProps) {
       <Excalidraw
         onExcalidrawAPI={setApi}
         name={name}
+        initialData={{ appState: { isLoading: true } }}
         isCollaborating={peers > 1}
+        // This native badge renders on phones too; the installed mobile UI omits toasts.
+        viewportStatusFrame={
+          isOffline || notice
+            ? {
+                border: false,
+                label: {
+                  label: isOffline ? "Offline, reconnecting…" : notice,
+                  background: "var(--color-surface-low)",
+                  color: "var(--text-primary-color)",
+                },
+              }
+            : null
+        }
         UIOptions={{
           // The room is the source of truth; loading or clearing a local file would bypass it.
           canvasActions: { loadScene: false, saveToActiveFile: false, clearCanvas: false },
@@ -812,7 +931,7 @@ function SharePanel({ link, copy, onName }: SharePanelProps) {
       <p className="muted">Edit link: anyone with it can edit (give it to your interviewer).</p>
       <div className="row">
         <code className="cmd">{link}</code>
-        <button onClick={() => copy(link, "Link")}>Copy</button>
+        <button onClick={() => void copy(link, "Link")}>Copy</button>
       </div>
       <label htmlFor="display-name">Your name (shown on your cursor)</label>
       <input
@@ -833,7 +952,7 @@ function SharePanel({ link, copy, onName }: SharePanelProps) {
       <p className="muted">Then tell the agent:</p>
       <div className="row">
         <code className="cmd">join {link}</code>
-        <button onClick={() => copy(`Join my system design canvas: ${link}`, "Prompt")}>
+        <button onClick={() => void copy(`Join my system design canvas: ${link}`, "Prompt")}>
           Copy
         </button>
       </div>
@@ -956,6 +1075,9 @@ function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
   return (
     <div className="sd-panel">
       <h3>Versions</h3>
+      <p className="muted">
+        Save a checkpoint before a big change. Restore a version to recover earlier work.
+      </p>
       <form
         className="row"
         onSubmit={async (e) => {
@@ -966,11 +1088,12 @@ function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
         }}
       >
         <input
+          aria-label="Version name"
           placeholder="Name this version"
           value={label}
           onChange={(e) => setLabel(e.target.value)}
         />
-        <button disabled={mutation.isPending}>Save</button>
+        <button disabled={mutation.isPending}>Save version</button>
       </form>
       <form
         className="row"
@@ -984,14 +1107,25 @@ function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
           field.value = "";
         }}
       >
-        <input name="tpl" placeholder="Save as template…" />
-        <button disabled={mutation.isPending}>Save</button>
+        <input name="tpl" aria-label="Template name" placeholder="Save as template…" />
+        <button disabled={mutation.isPending}>Save template</button>
       </form>
       <ul className="list snaps">
-        {snapshots.isLoading && <li className="muted">Loading…</li>}
-        {snapshots.error && <li role="alert">{snapshots.error.message}</li>}
+        {snapshots.isLoading && (
+          <li className="muted">
+            <output>Loading saved versions…</output>
+          </li>
+        )}
+        {snapshots.error && (
+          <li>
+            <div role="alert">
+              <p>{snapshots.error.message}</p>
+              <button onClick={() => void snapshots.refetch()}>Retry versions</button>
+            </div>
+          </li>
+        )}
         {snaps?.length === 0 && (
-          <li className="muted">No versions yet. Claude's edits are auto-saved here first.</li>
+          <li className="muted">No versions yet. Agent edits save a checkpoint here first.</li>
         )}
         {snaps?.map((s) => (
           <li key={s.id}>
