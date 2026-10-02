@@ -346,7 +346,7 @@ export class FakeD1 {
     }
     if (sql.includes("WHERE is_template = 1")) {
       return [...this.diagrams.values()]
-        .filter((r) => r.is_template === 1)
+        .filter((r) => r.is_template === 1 && !this.deleted.has(r.id))
         .filter((r) => this.owners.get(r.id) === p[0])
         .map((r) => ({ id: r.id, name: r.name, description: r.description }));
     }
