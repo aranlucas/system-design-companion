@@ -132,7 +132,10 @@ export function parseLink(link: string): DiagramLink | null {
 export async function listTemplates(env: Env, userId?: string) {
   await ensureSchema(env);
   const { results } = await env.DB.prepare(
-    "SELECT id, name, description FROM diagrams WHERE is_template = 1 AND id IN (SELECT diagram_id FROM diagram_owners WHERE user_id = ?) ORDER BY created_at DESC",
+    `SELECT id, name, description FROM diagrams WHERE is_template = 1
+     AND id IN (SELECT diagram_id FROM diagram_owners WHERE user_id = ?)
+     AND NOT EXISTS (SELECT 1 FROM deleted_diagrams WHERE diagram_id = diagrams.id)
+     ORDER BY created_at DESC`,
   )
     .bind(userId ?? "")
     .all<TemplateRow>();
@@ -224,6 +227,7 @@ export async function deleteDiagram(env: Env, id: string) {
   await room(env, id).deactivate();
   await eraseObjects(env, `snapshots/${id}/`);
   await eraseObjects(env, `files/${id}/`);
+  await env.BUCKET.delete(`templates/${id}.json`);
   await env.DB.batch([
     env.DB.prepare("DELETE FROM snapshots WHERE diagram_id = ?").bind(id),
     env.DB.prepare("DELETE FROM mcp_event_subscriptions WHERE diagram_id = ?").bind(id),
@@ -252,7 +256,8 @@ export async function createDiagram(env: Env, name: string, template?: string, u
     if (!userId || !(await ownsDiagram(env, template, userId)))
       throw new HTTPException(403, { message: "Template is not available to this account." });
     const row = await env.DB.prepare(
-      "SELECT id, name, is_template, description FROM diagrams WHERE id = ?",
+      `SELECT id, name, is_template, description FROM diagrams WHERE id = ?
+       AND NOT EXISTS (SELECT 1 FROM deleted_diagrams WHERE diagram_id = diagrams.id)`,
     )
       .bind(template)
       .first<DiagramRow>();
@@ -262,28 +267,28 @@ export async function createDiagram(env: Env, name: string, template?: string, u
   const id = newId().replace(/[_-]/g, "x");
   const key = newId() + newId();
   const now = Date.now();
-  await env.DB.prepare(
+  const metadata = env.DB.prepare(
     "INSERT INTO diagrams (id, name, key_hash, is_template, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?)",
-  )
-    .bind(id, name, await sha256(key), now, now)
-    .run();
-  if (userId)
-    await env.DB.prepare("INSERT INTO diagram_owners (diagram_id, user_id) VALUES (?, ?)")
-      .bind(id, userId)
-      .run();
-  const stub = room(env, id);
-  await stub.init(id, name);
-  if (template) {
-    const builtin = BUILTIN_TEMPLATES.find((t) => t.id === template);
-    if (builtin) {
-      await stub.applyPatch(builtin.ops, "template");
-    } else {
-      const obj = await env.BUCKET.get(`templates/${template}.json`);
-      if (!obj) throw new Error(`unknown template "${template}"`);
-      const elements = (await obj.json()) as El[];
-      await copyFiles(env, template, id, elements);
-      await stub.seed(elements);
+  ).bind(id, name, await sha256(key), now, now);
+  try {
+    const stub = room(env, id);
+    await stub.init(id, name);
+    if (template) {
+      const builtin = BUILTIN_TEMPLATES.find((t) => t.id === template);
+      if (builtin) {
+        await stub.applyPatch(builtin.ops, "template");
+      } else {
+        const obj = await env.BUCKET.get(`templates/${template}.json`);
+        if (!obj) throw new Error(`unknown template "${template}"`);
+        const elements = (await obj.json()) as El[];
+        await copyFiles(env, template, id, elements);
+        await stub.seed(elements);
+      }
     }
+    // Publish only a fully initialized room, together with its owner.
+    await publishDiagram(env, metadata, id, userId);
+  } catch (error) {
+    await discardCreation(env, id, error);
   }
   return { id, key, name };
 }
@@ -298,19 +303,53 @@ export async function saveAsTemplate(
   await ensureSchema(env);
   if (userId) await requireOwner(env, sourceId, userId);
   const id = "tpl" + newId().replace(/[_-]/g, "x");
-  await room(env, sourceId).saveAsTemplate(id);
   const now = Date.now();
-  // Saved templates are private copies; only their owner can list or clone them.
-  await env.DB.prepare(
+  const metadata = env.DB.prepare(
     "INSERT INTO diagrams (id, name, key_hash, is_template, description, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?, ?)",
-  )
-    .bind(id, name, await sha256(newId()), description ?? null, now, now)
-    .run();
-  if (userId)
-    await env.DB.prepare("INSERT INTO diagram_owners (diagram_id, user_id) VALUES (?, ?)")
-      .bind(id, userId)
-      .run();
+  ).bind(id, name, await sha256(newId()), description ?? null, now, now);
+  try {
+    await room(env, sourceId).saveAsTemplate(id);
+    // Saved templates become discoverable only after every copied object exists.
+    await publishDiagram(env, metadata, id, userId);
+  } catch (error) {
+    await discardCreation(env, id, error);
+  }
   return { id, name };
+}
+
+/** D1 batches are transactions: an owner failure must not leave an ownerless row. */
+async function publishDiagram(
+  env: Env,
+  metadata: D1PreparedStatement,
+  id: string,
+  userId?: string,
+) {
+  const statements = [metadata];
+  if (userId)
+    statements.push(
+      env.DB.prepare("INSERT INTO diagram_owners (diagram_id, user_id) VALUES (?, ?)").bind(
+        id,
+        userId,
+      ),
+    );
+  await env.DB.batch(statements);
+}
+
+/** Compensate only this new destination, never the source diagram/template.
+ * Reuse deletion's revocation-first, idempotent cleanup if publication failed after committing.
+ * This is not a cross-store transaction: an outage may leave revoked artifacts to clean later.
+ */
+async function discardCreation(env: Env, id: string, error: unknown): Promise<never> {
+  try {
+    await deleteDiagram(env, id);
+  } catch (cleanupError) {
+    throw new AggregateError(
+      [error, cleanupError],
+      `Creation failed; cleanup incomplete for ${id}`,
+      { cause: cleanupError },
+    );
+  }
+  throw error;
 }
 
 // ---------- image files ----------
@@ -360,11 +399,14 @@ export async function copyFiles(env: Env, from: string, to: string, elements: El
   const ids = new Set(
     elements.filter((e) => e.type === "image" && e.fileId).map((e) => e.fileId as string),
   );
-  await Promise.all(
+  const copied = await Promise.allSettled(
     [...ids].map(async (fileId) => {
       const obj = await env.BUCKET.get(fileKey(from, fileId));
       if (obj)
         await env.BUCKET.put(fileKey(to, fileId), obj.body, { httpMetadata: obj.httpMetadata });
     }),
   );
+  // A rejected copy must not race cleanup with another still-running destination write.
+  const failure = copied.find((result) => result.status === "rejected");
+  if (failure) throw failure.reason;
 }
