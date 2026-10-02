@@ -132,6 +132,10 @@ research.
   usual text. The view lives in `src/view/`; `pnpm build:view` bundles it into
   `public/mcp-view.html`, which the worker reads via the `ASSETS` binding.
 
+For the experimental `window.openai` preview branch, see
+[ChatGPT plugin API experiment](chatgpt-plugin-api.md). It uses the existing MCP
+2.0 endpoint and OAuth setup.
+
 ## MCP events
 
 This integration follows [OpenAI's MCP Events guide](https://developers.openai.com/plugins/build/mcp-events)

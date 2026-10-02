@@ -297,7 +297,13 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     server,
     "get_scene",
     {
-      _meta: { ui: { resourceUri: VIEW_URI } },
+      _meta: {
+        ui: { resourceUri: VIEW_URI },
+        "openai/outputTemplate": VIEW_URI,
+        "openai/widgetAccessible": true,
+        "openai/toolInvocation/invoking": "Reading the diagram…",
+        "openai/toolInvocation/invoked": "Diagram ready",
+      },
       description:
         "Read the canvas. format=graph (default): frames, nodes, edges (arrows resolved to node labels; inferred=true if the arrow only touches a node), standalone notes, and unstructured sketches. selected=true marks the user's current selection. format=raw: Excalidraw elements.",
       inputSchema: z.object({ diagram: diagramArg, format: z.enum(["graph", "raw"]).optional() }),
@@ -323,9 +329,19 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     server,
     "render_scene",
     {
-      _meta: { ui: { resourceUri: VIEW_URI, visibility: ["app"] } },
+      _meta: {
+        ui: { resourceUri: VIEW_URI, visibility: ["app"] },
+        "openai/outputTemplate": VIEW_URI,
+        "openai/widgetAccessible": true,
+        "openai/visibility": "private",
+      },
       description: "Elements to draw in the diagram view (called by the view, not the model).",
       inputSchema: z.object({ diagram: diagramArg }),
+      outputSchema: z.object({
+        name: z.string(),
+        url: z.string(),
+        elements: z.array(z.record(z.string(), z.unknown())),
+      }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ diagram }: DiagramArgs) => {
@@ -349,7 +365,18 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
           uri: VIEW_URI,
           mimeType: RESOURCE_MIME_TYPE,
           text: await viewHtml(env, origin),
-          _meta: { ui: { prefersBorder: true, csp: { resourceDomains: [origin] } } },
+          _meta: {
+            ui: { prefersBorder: true, csp: { resourceDomains: [origin] } },
+            "openai/widgetDescription":
+              "Preview of the shared system design diagram. Refresh it, view it full screen, or open the collaborative canvas.",
+            "openai/widgetPrefersBorder": true,
+            "openai/ui": { availableDisplayModes: ["inline", "fullscreen"] },
+            "openai/widgetCSP": {
+              connect_domains: [],
+              resource_domains: [origin],
+              redirect_domains: [origin],
+            },
+          },
         },
       ],
     }),

@@ -9,6 +9,7 @@ import { deliverDiagramEvent, resetVerificationCache } from "../src/worker/event
 import { handleMcp } from "../src/worker/mcp.ts";
 import { DiagramRoom } from "../src/worker/room.ts";
 import { createDiagram, shareLink } from "../src/worker/store.ts";
+import { VIEW_URI } from "../src/worker/view.ts";
 import {
   makeEnv,
   makeRoom,
@@ -73,6 +74,8 @@ type EventsListResult = { events: ListedEvent[] };
 /** Safety metadata advertised to a host before it decides to execute a tool. */
 type ListedTool = {
   name: string;
+  _meta?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
   annotations?: {
     readOnlyHint?: boolean;
     destructiveHint?: boolean;
@@ -80,6 +83,15 @@ type ListedTool = {
   };
 };
 type ToolsListResult = { tools: ListedTool[] };
+type ResourceContent = {
+  uri: string;
+  mimeType: string;
+  text: string;
+  _meta: Record<string, unknown>;
+};
+type ReadResourceResult = { contents: ResourceContent[] };
+type RenderedScene = { name: string; url: string; elements: El[] };
+type RenderSceneResult = { structuredContent?: RenderedScene; isError?: boolean };
 
 /** One entry of the events/list catalog. */
 type ListedEvent = {
@@ -156,6 +168,8 @@ async function rpc<T extends Record<string, unknown>>(
   params: Record<string, unknown>,
   principal = testPrincipal(),
 ): Promise<RpcReply<T>> {
+  const target =
+    method === "resources/read" ? params.uri : method === "tools/call" ? params.name : undefined;
   const response = await handleMcp(
     new Request("https://design.example/mcp", {
       method: "POST",
@@ -165,6 +179,7 @@ async function rpc<T extends Record<string, unknown>>(
         // The modern era cross-checks these against the body's envelope.
         "mcp-protocol-version": PROTOCOL_VERSION,
         "mcp-method": method,
+        ...(typeof target === "string" ? { "mcp-name": target } : {}),
       },
       body: JSON.stringify({
         jsonrpc: "2.0",
@@ -198,6 +213,63 @@ async function newDiagram(name = "Board") {
 }
 
 describe("public MCP tool metadata", () => {
+  it("renders scene data through MCP 2.0 and rejects a revoked share link", async () => {
+    const diagram = await newDiagram();
+    const { result, error } = await rpc<RenderSceneResult>("tools/call", {
+      name: "render_scene",
+      arguments: { diagram: diagram.link },
+    });
+    expect(error).toBeUndefined();
+    expect(result?.isError).not.toBe(true);
+    expect(result?.structuredContent).toEqual({ name: "Board", url: diagram.link, elements: [] });
+
+    env.db.diagrams.delete(diagram.id);
+    const failed = await rpc<RenderSceneResult>("tools/call", {
+      name: "render_scene",
+      arguments: { diagram: diagram.link },
+    });
+    expect(failed.result?.isError).toBe(true);
+  });
+
+  it("advertises ChatGPT compatibility metadata on the MCP 2.0 transport", async () => {
+    const { result } = await rpc<ToolsListResult>("tools/list", {});
+    const scene = result!.tools.find((tool) => tool.name === "get_scene")!;
+    const render = result!.tools.find((tool) => tool.name === "render_scene")!;
+    expect(scene["_meta"]).toMatchObject({
+      ui: { resourceUri: VIEW_URI },
+      "openai/outputTemplate": VIEW_URI,
+      "openai/widgetAccessible": true,
+    });
+    expect(render["_meta"]).toMatchObject({
+      ui: { visibility: ["app"] },
+      "openai/widgetAccessible": true,
+      "openai/visibility": "private",
+    });
+    expect(render.outputSchema).toMatchObject({ required: ["name", "url", "elements"] });
+  });
+
+  it("serves the versioned UI resource with declared display modes and narrow CSP", async () => {
+    env.env.ASSETS = {
+      fetch: vi.fn().mockResolvedValue(new Response('<meta name="mcp-view"><b>__ORIGIN__</b>')),
+    } as unknown as Fetcher;
+    const { result, error } = await rpc<ReadResourceResult>("resources/read", { uri: VIEW_URI });
+    expect(error).toBeUndefined();
+    expect(result!.contents[0]).toMatchObject({
+      uri: VIEW_URI,
+      mimeType: "text/html;profile=mcp-app",
+      text: '<meta name="mcp-view"><b>https://design.example</b>',
+      _meta: {
+        ui: { prefersBorder: true, csp: { resourceDomains: ["https://design.example"] } },
+        "openai/ui": { availableDisplayModes: ["inline", "fullscreen"] },
+        "openai/widgetCSP": {
+          connect_domains: [],
+          resource_domains: ["https://design.example"],
+          redirect_domains: ["https://design.example"],
+        },
+      },
+    });
+  });
+
   it("advertises explicit safety hints for every tool, including the app-only view", async () => {
     const reply = await rpc<ToolsListResult>("tools/list", {});
     expect(reply.error).toBeUndefined();

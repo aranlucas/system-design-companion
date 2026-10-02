@@ -1,7 +1,8 @@
 // The get_scene MCP App view. scripts/build-view.ts builds it into a static asset
 // (public/mcp-view.html); the resource handler reads it back through the ASSETS binding.
 
-export const VIEW_URI = "ui://system-design-canvas/diagram.html";
+// Resource URIs are host cache keys; keep this experiment separate from the old view.
+export const VIEW_URI = "ui://system-design-canvas/diagram-chatgpt-v1.html";
 
 const ERROR_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8" /></head>
 <body style="font:13px system-ui;color:#868e96;padding:16px">Diagram view unavailable.</body></html>`;

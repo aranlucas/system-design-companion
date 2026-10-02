@@ -1,12 +1,12 @@
 // MCP App view shown for get_scene: a live-ish picture of the shared canvas inside the chat.
 import {
-  App,
   applyDocumentTheme,
   applyHostStyleVariables,
   type McpUiHostContext,
 } from "@modelcontextprotocol/ext-apps";
 import type { El } from "../shared/protocol.ts";
 import { renderScene } from "./render.ts";
+import { createViewHost } from "./host.ts";
 
 interface SceneData {
   name: string;
@@ -24,36 +24,55 @@ const refreshBtn = byId("refresh") as HTMLButtonElement;
 const openBtn = byId("open") as HTMLButtonElement;
 const fullBtn = byId("full") as HTMLButtonElement;
 
-const app = new App({ name: "diagram-view", version: "1.0.0" });
+const host = createViewHost(window);
 
 let diagram: string | undefined;
 let data: SceneData | undefined;
 let signature = "";
 let displayMode = "inline";
 let poll: ReturnType<typeof setInterval> | undefined;
+let requestVersion = 0;
+let pendingDiagram: string | undefined;
 
 async function load() {
-  if (!diagram) return;
+  if (!diagram || pendingDiagram === diagram) return;
+  const request = ++requestVersion;
+  const requestedDiagram = diagram;
+  pendingDiagram = diagram;
   refreshBtn.disabled = true;
   try {
-    const res = await app.callServerTool({ name: "render_scene", arguments: { diagram } });
-    if (res.isError) throw new Error(res.content.find((c) => c.type === "text")?.text ?? "error");
-    data = res.structuredContent as SceneData;
+    const res = await host.callTool("render_scene", { diagram: requestedDiagram });
+    if (request !== requestVersion) return;
+    if (res.isError) throw new Error(res.content?.find((c) => c.type === "text")?.text ?? "error");
+    const next = res.structuredContent as SceneData | undefined;
+    if (
+      !next ||
+      typeof next.name !== "string" ||
+      typeof next.url !== "string" ||
+      !Array.isArray(next.elements)
+    )
+      throw new Error("The host returned an invalid scene.");
+    data = next;
     const sig = data.elements.map((e) => `${e.id}:${e.version}`).join(",");
     if (sig !== signature) {
       signature = sig;
       renderScene(svg, data.elements);
     }
     title.textContent = data.name;
+    host.setCanvasUrl(data.url);
     openBtn.hidden = false;
     const nodes = data.elements.filter((e) => e.type !== "text" && e.type !== "arrow").length;
     status.textContent = data.elements.length
       ? `${nodes} shapes · updated ${new Date().toLocaleTimeString([], { timeStyle: "short" })}`
       : "The canvas is empty.";
   } catch (e) {
-    status.textContent = `Couldn't load the diagram: ${(e as Error).message}`;
+    if (request === requestVersion)
+      status.textContent = `Couldn't load the diagram: ${(e as Error).message}`;
   } finally {
-    refreshBtn.disabled = false;
+    if (request === requestVersion) {
+      pendingDiagram = undefined;
+      refreshBtn.disabled = false;
+    }
   }
 }
 
@@ -66,13 +85,18 @@ function setDisplayMode(mode: string) {
   if (mode === "fullscreen") poll = setInterval(() => void load(), POLL_MS);
 }
 
-app.ontoolinput = ({ arguments: args }) => {
-  const link = args?.diagram;
-  if (typeof link === "string" && link !== diagram) {
+function setDiagram(link: string) {
+  if (link !== diagram) {
     diagram = link;
+    data = undefined;
+    signature = "";
+    svg.replaceChildren();
+    title.textContent = "Diagram";
+    status.textContent = "Loading…";
+    openBtn.hidden = true;
     void load();
   }
-};
+}
 
 function applyContext(ctx: McpUiHostContext) {
   if (ctx.theme) {
@@ -81,23 +105,31 @@ function applyContext(ctx: McpUiHostContext) {
   }
   if (ctx.styles?.variables) applyHostStyleVariables(ctx.styles.variables);
   if (ctx.displayMode) setDisplayMode(ctx.displayMode);
+  if (ctx.availableDisplayModes) fullBtn.hidden = !ctx.availableDisplayModes.includes("fullscreen");
 }
-app.onhostcontextchanged = applyContext;
 
 refreshBtn.addEventListener("click", () => void load());
-openBtn.addEventListener("click", () => {
-  if (data) void app.openLink({ url: data.url });
+openBtn.addEventListener("click", async () => {
+  try {
+    if (data) await host.openLink(data.url);
+  } catch (error) {
+    status.textContent = (error as Error).message;
+  }
 });
 fullBtn.addEventListener("click", async () => {
   const want = displayMode === "fullscreen" ? "inline" : "fullscreen";
-  const { mode } = await app.requestDisplayMode({ mode: want });
-  setDisplayMode(mode);
+  try {
+    const { mode } = await host.requestDisplayMode(want);
+    setDisplayMode(mode);
+  } catch (error) {
+    status.textContent = (error as Error).message;
+  }
 });
 
-async function start() {
-  await app.connect();
-  const ctx = app.getHostContext();
-  if (ctx) applyContext(ctx);
-  fullBtn.hidden = !ctx?.availableDisplayModes?.includes("fullscreen");
-}
-void start();
+window.addEventListener("pagehide", () => {
+  clearInterval(poll);
+  host.dispose();
+});
+void host.start({ onDiagram: setDiagram, onContext: applyContext }).catch((error: Error) => {
+  status.textContent = `Couldn't connect to the host: ${error.message}`;
+});
