@@ -1,13 +1,12 @@
+import { storedElementSchema } from "../src/shared/schemas.ts";
 // DiagramRoom on fake storage: ops layer, snapshots, merge rule, presence.
 import { describe, expect, it, vi } from "vitest";
-import { AGENT_STROKE, type El } from "../src/shared/protocol.ts";
+import { AGENT_STROKE, type El, type ClientMessage } from "../src/shared/protocol.ts";
 import { DiagramRoom, TOMBSTONE_TTL_MS } from "../src/worker/room.ts";
-import type { Author, Op } from "../src/worker/scene.ts";
+import type { Op } from "../src/worker/scene.ts";
 import { makeEnv, makeRoom, makeRoomCtx, makeWs } from "./helpers/fakes.ts";
 
 /** The socket handlers, called directly with a fake socket. */
-type SocketHandlers = { webSocketMessage: (ws: unknown, raw: string) => Promise<void> };
-type TombstoneCollector = { collectTombstones: (now: number) => number };
 
 function graphOf(room: DiagramRoom) {
   return room.getGraph();
@@ -30,39 +29,43 @@ const rect = (id: string, x: number, y: number, frameId: string | null = null): 
 async function roomWithNode() {
   const { env } = makeEnv();
   const room = await makeRoom(env);
-  const [r] = (await room.applyPatch([{ op: "add_node", label: "X" }], "system" as Author)).results;
+  const [r] = (await room.applyPatch([{ op: "add_node", label: "X" }], "human")).results;
   const cur = (await room.getRaw()).find((e) => e.id === r.id)!;
+
   const send = (el: El) =>
-    (room as unknown as SocketHandlers).webSocketMessage(
-      null,
-      JSON.stringify({ type: "update", elements: [el] }),
-    );
+    room.webSocketMessage(makeWs(), JSON.stringify({ type: "update", elements: [el] }));
+
   const versionOf = async () => (await room.getRaw()).find((e) => e.id === r.id)!;
+
   return { room, cur, send, versionOf };
 }
 
-const collect = (room: DiagramRoom, now: number) =>
-  (room as unknown as TombstoneCollector).collectTombstones(now);
+const collect = (room: DiagramRoom, now: number) => room["collectTombstones"](now);
 
 async function roomWithDelete() {
   const { env } = makeEnv();
   const ctx = makeRoomCtx();
-  const room = new DiagramRoom(ctx.ctx as unknown as DurableObjectState, env);
+  const room = new DiagramRoom(ctx.ctx, env);
   await room.init("d", "D");
+
   const out = await room.applyPatch(
     [
       { op: "add_node", ref: "a", label: "Gone" },
       { op: "add_node", ref: "b", label: "Kept" },
     ],
-    "system" as Author,
+    "human",
   );
+
   const beforeDelete = await room.snapshot("before delete");
   const deletedAt = Date.now();
-  await room.applyPatch([{ op: "remove", target: "Gone" }], "system" as Author);
-  const gone = [...ctx.sql.elements.values()]
-    .map((json) => JSON.parse(json) as El)
-    .filter((e) => e.isDeleted)
-    .map((e) => e.id);
+  await room.applyPatch([{ op: "remove", target: "Gone" }], "human");
+
+  const gone = [...ctx.sql.elements.values()].flatMap((json) => {
+    const element = storedElementSchema.parse(JSON.parse(json));
+
+    return element.isDeleted ? [element.id] : [];
+  });
+
   return { room, ctx, deletedAt, gone, beforeDelete, keptId: out.results[1].id! };
 }
 
@@ -70,18 +73,17 @@ describe("DiagramRoom ops layer", () => {
   it("deactivation closes active tabs, rejects reconnects and ignores late edits", async () => {
     const { env } = makeEnv();
     const ctx = makeRoomCtx();
-    const room = new DiagramRoom(ctx.ctx as unknown as DurableObjectState, env);
+    const room = new DiagramRoom(ctx.ctx, env);
     await room.init("deleted-room", "Deleted");
-    const ws = { ...makeWs(), close: vi.fn() };
+    const ws = makeWs();
+    const close = vi.fn();
+    ws.close = close;
     ctx.addWs(ws);
     await room.deactivate();
-    expect(ws.close).toHaveBeenCalledWith(1008, "Diagram deleted");
+    expect(close).toHaveBeenCalledWith(1008, "Diagram deleted");
     expect(ctx.sql.meta.get("deleted")).toBe("true");
     expect((await room.fetch(new Request("http://localhost"))).status).toBe(410);
-    await room.webSocketMessage(
-      ws as unknown as WebSocket,
-      JSON.stringify({ type: "update", elements: [] }),
-    );
+    await room.webSocketMessage(ws, JSON.stringify({ type: "update", elements: [] }));
     expect(ws.sent).toEqual([]);
   });
 
@@ -95,6 +97,7 @@ describe("DiagramRoom ops layer", () => {
   it("applyPatch draws, auto-snapshots and tints violet", async () => {
     const { env } = makeEnv();
     const room = await makeRoom(env);
+
     const out = await room.applyPatch(
       [
         { op: "add_node", ref: "a", label: "API" },
@@ -103,6 +106,7 @@ describe("DiagramRoom ops layer", () => {
       ],
       "agent",
     );
+
     expect(out.results.every((r) => r.ok)).toBe(true);
     expect(out.snapshotId).toBeDefined();
     expect(out.changed).toBeGreaterThan(0);
@@ -122,7 +126,7 @@ describe("DiagramRoom ops layer", () => {
   it("system patches skip the auto-snapshot", async () => {
     const { env } = makeEnv();
     const room = await makeRoom(env);
-    const out = await room.applyPatch([{ op: "add_node", label: "A" }], "system" as Author);
+    const out = await room.applyPatch([{ op: "add_node", label: "A" }], "human");
     expect(out.snapshotId).toBeUndefined();
     expect(await room.listSnapshots()).toHaveLength(0);
   });
@@ -130,11 +134,13 @@ describe("DiagramRoom ops layer", () => {
   it("names the pre-edit version from user feedback and restores the previous state", async () => {
     const { env } = makeEnv();
     const room = await makeRoom(env);
+
     const out = await room.applyPatch(
       [{ op: "add_node", kind: "device" }],
       "agent",
       "  Model devices separately from users  ",
     );
+
     expect((await room.listSnapshots())[0].name).toBe(
       "Before: Model devices separately from users",
     );
@@ -178,13 +184,14 @@ describe("DiagramRoom ops layer", () => {
     vi.spyOn(room, "snapshot").mockImplementationOnce(async (...args) => {
       const meta = await snapshot(...args);
       const b = (await room.getRaw()).find((e) => e.id === "b")!;
-      await (room as unknown as SocketHandlers).webSocketMessage(
-        null,
+      await room.webSocketMessage(
+        makeWs(),
         JSON.stringify({
           type: "update",
           elements: [{ ...b, version: b.version + 1, strokeColor: "#e03131" }],
         }),
       );
+
       return meta;
     });
     const tidy = await room.tidy();
@@ -205,10 +212,12 @@ describe("DiagramRoom ops layer", () => {
     ]);
     const before = new Map((await room.getRaw()).map((e) => [e.id, e]));
     await room.tidy([null]);
+
     // Only the top-level pair was separated; the framed pair still overlaps.
     const moved = (await room.getRaw()).filter(
       (e) => e.type === "rectangle" && (e.x !== before.get(e.id)!.x || e.y !== before.get(e.id)!.y),
     );
+
     expect(moved.map((e) => e.id).toSorted()).toEqual(["c", "d"]);
   });
 
@@ -218,7 +227,7 @@ describe("DiagramRoom ops layer", () => {
     await room.seed([rect("a", 0, 0), rect("b", 20, 10)]);
     const tidy = await room.tidy();
     expect(tidy.snapshotId).toBeDefined();
-    expect(typeof tidy.changed).toBe("number");
+    expect(tidy.changed).toBeTypeOf("number");
     const layout = await room.layout("LR");
     expect(layout.moved).toBe(2);
     expect(layout.snapshotId).toBeDefined();
@@ -227,9 +236,9 @@ describe("DiagramRoom ops layer", () => {
   it("snapshots restore and undo", async () => {
     const { env } = makeEnv();
     const room = await makeRoom(env);
-    await room.applyPatch([{ op: "add_node", label: "Keep" }], "system" as Author);
+    await room.applyPatch([{ op: "add_node", label: "Keep" }], "human");
     const v1 = await room.snapshot("v1", "named");
-    await room.applyPatch([{ op: "add_node", label: "Later" }], "system" as Author);
+    await room.applyPatch([{ op: "add_node", label: "Later" }], "human");
     const labels = async () => ((await graphOf(room)).nodes ?? []).map((n) => n.label).toSorted();
     expect(await labels()).toEqual(["Keep", "Later"]);
 
@@ -267,7 +276,7 @@ describe("DiagramRoom ops layer", () => {
         { op: "add_node", ref: "b", label: "B" },
         { op: "remove", target: "a" },
       ],
-      "system" as Author,
+      "human",
     );
     expect((await room.getRaw()).every((e) => !e.isDeleted)).toBe(true);
     expect(((await graphOf(room)).nodes ?? []).map((n) => n.label)).toEqual(["B"]);
@@ -280,7 +289,7 @@ describe("failed batch persistence", () => {
     async (author) => {
       const { env } = makeEnv();
       const { ctx, sql, addWs } = makeRoomCtx();
-      const room = new DiagramRoom(ctx as unknown as DurableObjectState, env);
+      const room = new DiagramRoom(ctx, env);
       await room.init("d", "D");
       await room.applyPatch(
         [
@@ -294,6 +303,7 @@ describe("failed batch persistence", () => {
       const storedBefore = new Map(sql.elements);
       const ws = makeWs();
       addWs(ws);
+
       const edit = () =>
         author === "agent"
           ? room.applyPatch([
@@ -301,37 +311,42 @@ describe("failed batch persistence", () => {
               { op: "remove", target: "DB" },
             ])
           : room.webSocketMessage(
-              ws as unknown as WebSocket,
+              ws,
               JSON.stringify({
                 type: "update",
                 elements: before.map((el) => ({ ...el, x: el.x + 100, version: el.version + 1 })),
               }),
             );
+
       const exec = sql.exec.bind(sql);
       let writes = 0;
+
       const spy = vi.spyOn(sql, "exec").mockImplementation((query, ...params) => {
         if (query.startsWith("INSERT OR REPLACE INTO elements") && ++writes === 2)
           throw new Error("injected write failure");
+
         return exec(query, ...params);
       });
+
       try {
         await expect(edit()).rejects.toThrow("injected write failure");
         expect(writes).toBe(2);
         expect(sql.elements).toEqual(storedBefore);
         expect(await room.getRaw()).toEqual(before);
         expect(ws.sent).toEqual([]);
-        const reloaded = new DiagramRoom(ctx as unknown as DurableObjectState, env);
+        const reloaded = new DiagramRoom(ctx, env);
         expect(await reloaded.getRaw()).toEqual(before);
       } finally {
         spy.mockRestore();
       }
+
       const peer = makeWs();
       addWs(peer);
       await edit();
       expect(await room.getRaw()).not.toEqual(before);
       expect(peer.sent).toHaveLength(1);
       expect(JSON.parse(peer.sent[0])).toMatchObject({ type: "update", origin: author });
-      const reloaded = new DiagramRoom(ctx as unknown as DurableObjectState, env);
+      const reloaded = new DiagramRoom(ctx, env);
       expect(await reloaded.getRaw()).toEqual(await room.getRaw());
     },
   );
@@ -360,17 +375,14 @@ describe("concurrent-edit merge rule", () => {
   it("broadcasts human updates to the other tabs", async () => {
     const { env } = makeEnv();
     const { ctx, addWs } = makeRoomCtx();
-    const room = new DiagramRoom(ctx as unknown as DurableObjectState, env);
+    const room = new DiagramRoom(ctx, env);
     await room.init("d", "D");
     const ws1 = makeWs();
     const ws2 = makeWs();
     addWs(ws1);
     addWs(ws2);
     const el: El = { ...rect("ext", 0, 0), versionNonce: 7 };
-    await (room as unknown as SocketHandlers).webSocketMessage(
-      ws1,
-      JSON.stringify({ type: "update", elements: [el] }),
-    );
+    await room.webSocketMessage(ws1, JSON.stringify({ type: "update", elements: [el] }));
     expect(ws1.sent).toHaveLength(0);
     expect(ws2.sent).toHaveLength(1);
     expect(JSON.parse(ws2.sent[0])).toMatchObject({ type: "update", origin: "human" });
@@ -381,16 +393,20 @@ describe("presence and tab RPC", () => {
   it("relays cursors, selections and departures to the other tabs as collaborators", async () => {
     const { env } = makeEnv();
     const { ctx, addWs } = makeRoomCtx();
-    const room = new DiagramRoom(ctx as unknown as DurableObjectState, env);
+    const room = new DiagramRoom(ctx, env);
     await room.init("collab", "Collab");
+
     const a = makeWs(),
       b = makeWs();
+
     a.serializeAttachment({ sid: "a", selection: [], focusedAt: 0 });
     b.serializeAttachment({ sid: "b", selection: [], focusedAt: 0 });
     addWs(a);
     addWs(b);
-    const message = (ws: unknown, msg: unknown) =>
-      room.webSocketMessage(ws as WebSocket, JSON.stringify(msg));
+
+    const message = (ws: WebSocket, msg: ClientMessage) =>
+      room.webSocketMessage(ws, JSON.stringify(msg));
+
     await message(a, { type: "presence", selection: ["x"], focused: true, username: "Ada" });
     await message(a, { type: "pointer", pointer: { x: 1, y: 2, tool: "pointer" }, button: "up" });
     expect(a.sent).toHaveLength(0);
@@ -403,7 +419,7 @@ describe("presence and tab RPC", () => {
         button: "up",
       },
     ]);
-    await room.webSocketClose(a as unknown as WebSocket);
+    await room.webSocketClose(a);
     expect(b.sent.map((m) => JSON.parse(m))).toContainEqual({ type: "collaborator_left", id: "a" });
     // The fake still lists the closing socket; the count must exclude it.
     expect(b.sent.map((m) => JSON.parse(m))).toContainEqual({ type: "peers", count: 1 });
@@ -412,10 +428,12 @@ describe("presence and tab RPC", () => {
   it("broadcasts room name changes to connected tabs", async () => {
     const { env } = makeEnv();
     const { ctx, addWs } = makeRoomCtx();
-    const room = new DiagramRoom(ctx as unknown as DurableObjectState, env);
+    const room = new DiagramRoom(ctx, env);
     await room.init("rename-test", "Before");
+
     const a = makeWs(),
       b = makeWs();
+
     addWs(a);
     addWs(b);
     await room.rename("Route history design");
@@ -425,7 +443,7 @@ describe("presence and tab RPC", () => {
   it("focuses only the active subscriber without editing or snapshotting the diagram", async () => {
     const { env } = makeEnv();
     const { ctx, addWs } = makeRoomCtx();
-    const room = new DiagramRoom(ctx as unknown as DurableObjectState, env);
+    const room = new DiagramRoom(ctx, env);
     await room.init("focus-test", "Focus test");
     await room.applyPatch([{ op: "add_node", kind: "database" }], "human");
     const before = await room.getRaw();
@@ -440,7 +458,7 @@ describe("presence and tab RPC", () => {
     expect(message).toMatchObject({ method: "focus_view", params: { mode: "point" } });
     expect(passive.sent).toHaveLength(0);
     await room.webSocketMessage(
-      active as unknown as WebSocket,
+      active,
       JSON.stringify({
         type: "rpc_result",
         reqId: message.reqId,
@@ -462,19 +480,21 @@ describe("presence and tab RPC", () => {
   it("echoes the attached tab's selection and viewport", async () => {
     const { env } = makeEnv();
     const { ctx, addWs } = makeRoomCtx();
-    const room = new DiagramRoom(ctx as unknown as DurableObjectState, env);
+    const room = new DiagramRoom(ctx, env);
     await room.init("d", "D");
+
     const out = await room.applyPatch(
       [
         { op: "add_node", ref: "a", label: "A" },
         { op: "add_node", label: "B" },
       ],
-      "system" as Author,
+      "human",
     );
+
     const idA = out.results[0].id!;
     const ws = makeWs();
     addWs(ws);
-    const send = (room as unknown as SocketHandlers).webSocketMessage.bind(room);
+    const send = room.webSocketMessage.bind(room);
     await send(
       ws,
       JSON.stringify({
@@ -508,15 +528,17 @@ describe("room-level interview flow", () => {
   it("draws, tidies, checkpoints and reads back a design", async () => {
     const { env } = makeEnv();
     const room = await makeRoom(env, "flow", "URL shortener");
+
     const ops: Op[] = [
       { op: "add_frame", ref: "hld", name: "High-level design" },
-      { op: "add_node", ref: "c", label: "Client", shape: "ellipse", frame: "hld" },
+      { op: "add_node", ref: "c", label: "Client", "shape": "ellipse", frame: "hld" },
       { op: "add_node", ref: "api", label: "API", place: { right_of: "c" } },
-      { op: "add_node", ref: "db", label: "DB", shape: "ellipse", place: { right_of: "api" } },
+      { op: "add_node", ref: "db", label: "DB", "shape": "ellipse", place: { right_of: "api" } },
       { op: "connect", from: "c", to: "api" },
       { op: "connect", from: "api", to: "db" },
       { op: "add_note", text: "QPS ~ 10k", place: { near: "api" } },
     ];
+
     const applied = await room.applyPatch(ops, "agent");
     expect(applied.results.every((r) => r.ok)).toBe(true);
     const tidied = await room.tidy();
@@ -543,6 +565,7 @@ describe("tombstone collection", () => {
     const { room, ctx, deletedAt, gone, keptId } = await roomWithDelete();
     expect(collect(room, deletedAt + DAY)).toBe(0);
     expect(collect(room, deletedAt + TOMBSTONE_TTL_MS + 1000)).toBe(gone.length);
+
     for (const id of gone) expect(ctx.sql.elements.has(id)).toBe(false);
     expect(ctx.sql.tombstones.size).toBe(0);
     expect(ctx.sql.elements.has(keptId)).toBe(true);
@@ -553,6 +576,7 @@ describe("tombstone collection", () => {
     const { room, ctx, deletedAt, gone } = await roomWithDelete();
     ctx.addWs(makeWs());
     expect(collect(room, deletedAt + TOMBSTONE_TTL_MS + 1000)).toBe(0);
+
     for (const id of gone) expect(ctx.sql.elements.has(id)).toBe(true);
   });
 
@@ -561,6 +585,7 @@ describe("tombstone collection", () => {
     await room.restore(beforeDelete.id);
     expect(ctx.sql.tombstones.size).toBe(0);
     expect(collect(room, deletedAt + TOMBSTONE_TTL_MS + 1000)).toBe(0);
+
     for (const id of gone) expect(ctx.sql.elements.has(id)).toBe(true);
     expect(((await graphOf(room)).nodes ?? []).map((n) => n.label).toSorted()).toEqual([
       "Gone",
@@ -571,6 +596,7 @@ describe("tombstone collection", () => {
   it("starts the TTL for tombstones stored before tracking existed, and reloads it", async () => {
     const { env } = makeEnv();
     const ctx = makeRoomCtx();
+
     const old: El = {
       id: "old",
       type: "rectangle",
@@ -582,13 +608,14 @@ describe("tombstone collection", () => {
       versionNonce: 1,
       isDeleted: true,
     };
+
     ctx.sql.elements.set(old.id, JSON.stringify(old));
     const loadedAt = Date.now();
-    const room = new DiagramRoom(ctx.ctx as unknown as DurableObjectState, env);
+    const room = new DiagramRoom(ctx.ctx, env);
     await room.init("d", "D");
     expect(ctx.sql.tombstones.get("old")).toBeGreaterThanOrEqual(loadedAt);
 
-    const reloaded = new DiagramRoom(ctx.ctx as unknown as DurableObjectState, env);
+    const reloaded = new DiagramRoom(ctx.ctx, env);
     expect(collect(reloaded, loadedAt + DAY)).toBe(0);
     expect(collect(reloaded, Date.now() + TOMBSTONE_TTL_MS)).toBe(1);
     expect(ctx.sql.elements.has("old")).toBe(false);

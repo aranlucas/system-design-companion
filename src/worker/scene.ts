@@ -1,15 +1,24 @@
+import { z } from "zod";
+import { elementPoints } from "../shared/schemas.ts";
+import { errorMessage } from "../shared/errors.ts";
 // Scene engine: semantic ops ⇄ Excalidraw elements. Pure logic, no Workers APIs.
 import { graphlib, layout as layoutGraph } from "@dagrejs/dagre";
 import { generateKeyBetween } from "fractional-indexing";
 import { iconElements } from "../shared/icons.ts";
 import { componentByKind } from "../shared/components.ts";
 import { AGENT_STROKE, type El, type Point } from "../shared/protocol.ts";
-import { pointAt, routeOrthogonal, type Route } from "./route-orthogonal.ts";
+import {
+  pointAt,
+  routeOrthogonal,
+  type Route,
+  type RouteRequest,
+  type RouteOptions,
+} from "./route-orthogonal.ts";
 import { solveLayout } from "./solve-layout.ts";
 
 export type Author = "agent" | "human" | "template";
 
-export const COLORS: Record<string, string> = {
+export const COLORS = {
   white: "#ffffff",
   gray: "#e9ecef",
   red: "#ffc9c9",
@@ -21,10 +30,13 @@ export const COLORS: Record<string, string> = {
   yellow: "#ffec99",
   orange: "#ffd8a8",
 };
+
+const colorValues = new Map(Object.entries(COLORS));
+
 const COLOR_NAMES = Object.fromEntries(Object.entries(COLORS).map(([k, v]) => [v, k]));
 
 /** Excalidraw's stroke palette: readable on white and on the fills above. */
-export const TEXT_COLORS: Record<string, string> = {
+export const TEXT_COLORS = {
   black: "#1e1e1e",
   gray: "#868e96",
   red: "#e03131",
@@ -36,16 +48,22 @@ export const TEXT_COLORS: Record<string, string> = {
   yellow: "#f08c00",
   orange: "#e8590c",
 };
+
+const textColorValues = new Map(Object.entries(TEXT_COLORS));
+
 const TEXT_COLOR_NAMES = Object.fromEntries(Object.entries(TEXT_COLORS).map(([k, v]) => [v, k]));
-const textColor = (color: string) => TEXT_COLORS[color] ?? color;
+
+const textColor = (color: string) => textColorValues.get(color) ?? color;
+
 /** How graph() reports a text color: omitted when it is a default (black, or agent violet). */
 const reportTextColor = (text: El | undefined) =>
   text && text.strokeColor !== TEXT_COLORS.black && text.strokeColor !== AGENT_STROKE
     ? { text_color: TEXT_COLOR_NAMES[text.strokeColor] ?? text.strokeColor }
     : {};
 
-export const SHAPES = ["rectangle", "ellipse", "diamond"] as const;
-export type Shape = (typeof SHAPES)[number];
+export const GEOMETRIES = ["rectangle", "ellipse", "diamond"] as const;
+
+export type Geometry = (typeof GEOMETRIES)[number];
 
 export interface Placement {
   right_of?: string;
@@ -63,7 +81,7 @@ export type Op =
       ref?: string;
       kind?: string;
       label?: string;
-      shape?: Shape;
+      "shape"?: Geometry;
       color?: string;
       text_color?: string;
       width?: number;
@@ -87,7 +105,7 @@ export type Op =
       label?: string;
       color?: string;
       text_color?: string;
-      shape?: Shape;
+      "shape"?: Geometry;
       dashed?: boolean;
       width?: number;
       height?: number;
@@ -124,21 +142,86 @@ export interface OpResult {
 }
 
 const FONT_FAMILY = 5; // Excalifont
+
 const LINE_HEIGHT = 1.25;
+
 const CHAR_W = 0.6;
+
 const NODE_MIN_W = 160;
+
 const NODE_MIN_H = 70;
+
 const PAD = 40;
-const SHAPE_TYPES = new Set(["rectangle", "ellipse", "diamond", "image", "embeddable", "iframe"]);
+
+const GEOMETRY_TYPES = new Set([
+  "rectangle",
+  "ellipse",
+  "diamond",
+  "image",
+  "embeddable",
+  "iframe",
+]);
 
 type Box = { x: number; y: number; w: number; h: number };
+
 type Pt = { x: number; y: number };
+
 /** An entry in an element's `boundElements`. */
 type BoundRef = { id: string; type: string };
+
 /** Where tidy last fitted a frame, so a later manual resize can be told apart. */
 type AutoFit = { dx: number; dy: number; w: number; h: number; fw: number; fh: number };
+
+const autoFitSchema: z.ZodType<AutoFit> = z.object({
+  dx: z.number(),
+  dy: z.number(),
+  w: z.number(),
+  h: z.number(),
+  fw: z.number(),
+  fh: z.number(),
+});
+
 /** What tidy may move as one piece: a node, a note, or a user group. */
 type Block = { node?: El; ids: string[]; box: () => Box; move: (dx: number, dy: number) => void };
+
+interface NodeMetadata {
+  author: Author;
+  kind?: string;
+  icon?: string;
+  iconFill?: string;
+}
+
+interface GraphNode {
+  id: string;
+  label: string;
+  "shape": string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  frame?: string;
+  color?: string;
+  text_color?: string;
+  icon?: El["customData"]["icon"];
+  kind?: El["customData"]["kind"];
+  by?: "agent";
+  selected?: boolean;
+}
+
+interface GraphNote {
+  id: string;
+  text: El["text"];
+  x: number;
+  y: number;
+  sticky?: boolean;
+  frame?: string;
+  text_color?: string;
+  by?: "agent";
+  selected?: boolean;
+}
+
+type SelectedEdge = Omit<GraphEdge, "fromId" | "toId"> & { selected?: boolean };
+
 type GraphEdge = {
   id: string;
   from?: string;
@@ -151,6 +234,7 @@ type GraphEdge = {
   inferred?: true;
   text_color?: string;
 };
+
 type Sketch = {
   id: string;
   type: string;
@@ -160,34 +244,54 @@ type Sketch = {
   h: number;
   frame?: string;
 };
+
 /** An arrow binding (as Excalidraw stores it) and the arrow point drawn at that end. */
 type BindingEnd = [ArrowBinding, Point];
+
 type ArrowBinding = { elementId: string; fixedPoint?: Point | null; mode?: string };
+
 type AddNodeOp = Extract<Op, { op: "add_node" }>;
+
 type ConnectOp = Extract<Op, { op: "connect" }>;
+
 type DisconnectOp = Extract<Op, { op: "disconnect" }>;
+
 type UpdateOp = Extract<Op, { op: "update" }>;
+
 type RemoveOp = Extract<Op, { op: "remove" }>;
+
 type AddFrameOp = Extract<Op, { op: "add_frame" }>;
+
 type AddNoteOp = Extract<Op, { op: "add_note" }>;
 
 const rnd = () => Math.floor(Math.random() * 2 ** 31);
+
 const ID_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-";
+
 export function newId(): string {
   let s = "";
+
   for (let i = 0; i < 21; i++) s += ID_CHARS[Math.floor(Math.random() * ID_CHARS.length)];
+
   return s;
 }
 
 const NOTE_WRAP = 64; // chars per line for plain-text notes
+
 // Sticky notes, matching Excalidraw's layout: the label sits inside 16px padding, above a 20px
 // footer that shows the creation date.
 const STICKY_WRAP = 28;
+
 const STICKY_PAD = 16;
+
 const STICKY_INSET_Y = STICKY_PAD * 2 + 20;
+
 const STICKY_MIN = 120;
+
 const STICKY_BG = "#ffdf6b";
+
 const FRAME_GAP = 80;
+
 /** How far an unbound arrow end may sit from a node and still count as connected to it. */
 const ARROW_REACH = 25;
 
@@ -202,6 +306,7 @@ export function wrapText(text: string, max = NOTE_WRAP): string {
       const out: string[] = [];
       let cur = lead;
       let empty = true;
+
       for (const w of line.slice(lead.length).split(/\s+/).filter(Boolean)) {
         if (!empty && cur.length + 1 + w.length > max) {
           out.push(cur);
@@ -209,7 +314,9 @@ export function wrapText(text: string, max = NOTE_WRAP): string {
         } else cur = empty ? cur + w : `${cur} ${w}`;
         empty = false;
       }
+
       out.push(cur);
+
       return out.join("\n");
     })
     .join("\n");
@@ -230,6 +337,7 @@ export interface TidyStats {
 export function measureText(text: string, fontSize: number) {
   const lines = text.split("\n");
   const longest = Math.max(...lines.map((l) => l.length), 1);
+
   return {
     width: Math.ceil(longest * fontSize * CHAR_W),
     height: Math.ceil(lines.length * fontSize * LINE_HEIGHT),
@@ -239,6 +347,7 @@ export function measureText(text: string, fontSize: number) {
 /** The smallest sticky note that fits already-wrapped `text`. */
 function stickySize(text: string, fontSize: number) {
   const m = measureText(text, fontSize);
+
   return {
     width: Math.max(m.width + STICKY_PAD * 2, STICKY_MIN),
     height: Math.max(m.height + STICKY_INSET_Y, STICKY_MIN),
@@ -249,6 +358,7 @@ const boxOf = (e: El): Box => {
   if ((e.type === "arrow" || e.type === "line") && e.points?.length) {
     const xs = e.points.map((p: number[]) => p[0]);
     const ys = e.points.map((p: number[]) => p[1]);
+
     return {
       x: e.x + Math.min(...xs),
       y: e.y + Math.min(...ys),
@@ -256,34 +366,42 @@ const boxOf = (e: El): Box => {
       h: Math.max(...ys) - Math.min(...ys),
     };
   }
+
   return { x: e.x, y: e.y, w: e.width, h: e.height };
 };
+
 const center = (b: Box) => ({ x: b.x + b.w / 2, y: b.y + b.h / 2 });
+
 const overlaps = (a: Box, b: Box, m = 20) =>
   a.x < b.x + b.w + m && b.x < a.x + a.w + m && a.y < b.y + b.h + m && b.y < a.y + a.h + m;
+
 const unionBox = (bs: Box[]): Box | null => {
   if (!bs.length) return null;
   const x = Math.min(...bs.map((b) => b.x));
   const y = Math.min(...bs.map((b) => b.y));
   const r = Math.max(...bs.map((b) => b.x + b.w));
   const btm = Math.max(...bs.map((b) => b.y + b.h));
+
   return { x, y, w: r - x, h: btm - y };
 };
 
 /** Point on the border of `b` in the direction of `toward`, pushed out by `gap`. */
 /** Point on the outline of a shape (rect, ellipse or diamond) toward `toward`, pushed out by `gap`. */
-function borderPoint(b: Box, toward: Pt, gap: number, shape = "rectangle") {
+function borderPoint(b: Box, toward: Pt, gap: number, geometry = "rectangle") {
   const c = center(b);
   const dx = toward.x - c.x;
   const dy = toward.y - c.y;
+
   if (dx === 0 && dy === 0) return c;
   const a = b.w / 2 + gap;
   const bb = b.h / 2 + gap;
   let t: number;
-  if (shape === "ellipse") t = 1 / Math.hypot(dx / a, dy / bb);
-  else if (shape === "diamond") t = 1 / (Math.abs(dx) / a + Math.abs(dy) / bb);
+
+  if (geometry === "ellipse") t = 1 / Math.hypot(dx / a, dy / bb);
+  else if (geometry === "diamond") t = 1 / (Math.abs(dx) / a + Math.abs(dy) / bb);
   else
     t = Math.min(dx !== 0 ? a / Math.abs(dx) : Infinity, dy !== 0 ? bb / Math.abs(dy) : Infinity);
+
   return { x: c.x + dx * t, y: c.y + dy * t };
 }
 
@@ -291,14 +409,18 @@ function borderPoint(b: Box, toward: Pt, gap: number, shape = "rectangle") {
 function clusters<T>(items: T[], key: (t: T) => number, tol: number): T[][] {
   const out: T[][] = [];
   let cur: T[] = [];
+
   for (const t of items.toSorted((a, b) => key(a) - key(b))) {
     if (cur.length && key(t) - key(cur[0]) > tol) {
       if (cur.length > 1) out.push(cur);
       cur = [];
     }
+
     cur.push(t);
   }
+
   if (cur.length > 1) out.push(cur);
+
   return out;
 }
 
@@ -341,9 +463,13 @@ export class Scene {
   changedElements(): El[] {
     this.enforceBindings();
     this.fixLabelOrder();
+
     return [...this.changed]
-      .map((id) => this.els.get(id)!)
-      .filter(Boolean)
+      .flatMap((id) => {
+        const element = this.els.get(id);
+
+        return element ? [element] : [];
+      })
       .toSorted((a, b) =>
         (a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0,
       );
@@ -356,10 +482,12 @@ export class Scene {
   enforceBindings() {
     for (const a of this.live()) {
       if (a.type !== "arrow" || (!a.startBinding && !a.endBinding)) continue;
+
       const touched =
         this.changed.has(a.id) ||
         (a.startBinding && this.changed.has(a.startBinding.elementId)) ||
         (a.endBinding && this.changed.has(a.endBinding.elementId));
+
       if (touched) this.routeArrow(a);
     }
   }
@@ -368,8 +496,10 @@ export class Scene {
   private fixLabelOrder() {
     for (const id of this.changed) {
       const t = this.els.get(id);
+
       if (!t || t.type !== "text" || !t.containerId || t.isDeleted) continue;
       const c = this.els.get(t.containerId);
+
       if (c && c.index && t.index && t.index <= c.index)
         this.mutate(t, { index: generateKeyBetween(this.maxIndex(), null) });
     }
@@ -377,8 +507,10 @@ export class Scene {
 
   private maxIndex(): string | null {
     let max: string | null = null;
+
     for (const e of this.els.values())
       if (e.index && (max === null || e.index > max)) max = e.index;
+
     return max;
   }
 
@@ -386,6 +518,7 @@ export class Scene {
     el.index = generateKeyBetween(this.maxIndex(), null);
     this.els.set(el.id, el);
     this.changed.add(el.id);
+
     return el;
   }
 
@@ -402,6 +535,7 @@ export class Scene {
     el.versionNonce = rnd();
     el.updated = Date.now();
     this.changed.add(el.id);
+
     return el;
   }
 
@@ -458,28 +592,37 @@ export class Scene {
       lineHeight: LINE_HEIGHT,
       ...extra,
     });
+
     return el;
   }
 
   boundText(container: El): El | undefined {
     if (container.customData?.icon) {
       const group = container.groupIds?.at(-1);
+
       const caption = this.live().find(
         (e) => e.customData?.componentLabel && group && e.groupIds?.includes(group),
       );
+
       if (caption) return caption;
     }
+
     const ref = (container.boundElements ?? []).find((b: any) => b.type === "text");
     const t = ref ? this.els.get(ref.id) : undefined;
+
     if (t && !t.isDeleted) return t;
+
     for (const e of this.els.values())
       if (!e.isDeleted && e.type === "text" && e.containerId === container.id) return e;
+
     return undefined;
   }
 
   labelOf(e: El): string {
     if (e.type === "frame" || e.type === "magicframe") return e.name ?? "";
+
     if (e.type === "text") return e.text ?? "";
+
     return this.boundText(e)?.text?.replace(/\n/g, " ") ?? "";
   }
 
@@ -487,28 +630,33 @@ export class Scene {
   nodeAt(p: Pt, nodes: El[]): El | undefined {
     let best: El | undefined;
     let bestKey = [Infinity, Infinity];
+
     for (const n of nodes) {
       const b = boxOf(n);
       const d = distToBox(p, b);
+
       if (d > ARROW_REACH) continue;
       const c = center(b);
       const key = [d, Math.hypot(p.x - c.x, p.y - c.y)];
+
       if (key[0] < bestKey[0] || (key[0] === bestKey[0] && key[1] < bestKey[1])) {
         best = n;
         bestKey = key;
       }
     }
+
     return best;
   }
 
   isNode(e: El) {
-    return !e.isDeleted && !e.customData?.componentPart && SHAPE_TYPES.has(e.type);
+    return !e.isDeleted && !e.customData?.componentPart && GEOMETRY_TYPES.has(e.type);
   }
 
   /** The node an icon piece or caption belongs to; anything else is its own owner. */
   owner(e: El): El {
     if (!e.customData?.componentPart && !e.customData?.componentLabel) return e;
     const group = e.groupIds?.at(-1);
+
     return (
       this.live().find((n) => n.customData?.icon && group && n.groupIds?.at(-1) === group) ?? e
     );
@@ -527,28 +675,36 @@ export class Scene {
 
   resolve(target: string): El {
     const refId = this.refs.get(target);
+
     if (refId) return this.els.get(refId)!;
     const byId = this.els.get(target);
+
     if (byId && !byId.isDeleted) return byId;
     const want = target.trim().toLowerCase();
+
     const matches = this.live().filter(
       (e) =>
         (this.isNode(e) || e.type === "frame" || this.isNote(e)) &&
         this.labelOf(e).trim().toLowerCase() === want,
     );
+
     if (matches.length === 1) return matches[0];
+
     if (matches.length > 1) {
       throw new Error(
         `"${target}" is ambiguous (${matches.length} matches: ${matches.map((m) => m.id).join(", ")}); use an id`,
       );
     }
+
     throw new Error(`no element "${target}" (use an id, a unique label, or a ref from this batch)`);
   }
 
   private frameOf(target: string | undefined | null): El | null {
     if (!target) return null;
     const f = this.resolve(target);
+
     if (f.type !== "frame") throw new Error(`"${target}" is not a frame`);
+
     return f;
   }
 
@@ -567,6 +723,7 @@ export class Scene {
       )
       .map((e) => {
         const label = e.customData?.icon ? this.boundText(e) : undefined;
+
         return label ? unionBox([boxOf(e), boxOf(label)])! : boxOf(e);
       });
   }
@@ -615,12 +772,14 @@ export class Scene {
     } else if (spec?.near) {
       const a = anchor(spec.near);
       const obs = this.obstacles(exclude);
+
       const candidates: Box[] = [
         { x: a.x + a.w + gap, y: a.y + (a.h - h) / 2, w, h },
         { x: a.x + (a.w - w) / 2, y: a.y + a.h + gap, w, h },
         { x: a.x - gap - w, y: a.y + (a.h - h) / 2, w, h },
         { x: a.x + (a.w - w) / 2, y: a.y - gap - h, w, h },
       ];
+
       const free = candidates.find((c) => !obs.some((o) => overlaps(c, o)));
       ({ x, y } = free ?? candidates[0]);
     } else if (frame) {
@@ -640,16 +799,19 @@ export class Scene {
     // Nudge off anything we'd overlap; inside a frame wrap onto new rows.
     const obs = this.obstacles(exclude);
     let box = { x, y, w, h };
+
     for (let i = 0; i < 60 && obs.some((o) => overlaps(box, o)); i++) {
       if (axis === "y") box.y += h + 40;
       else {
         box.x += w + 40;
+
         if (frame && box.x + w > frame.x + frame.width - PAD) {
           box.x = frame.x + PAD;
           box.y += h + 40;
         }
       }
     }
+
     return { x: Math.round(box.x), y: Math.round(box.y), w, h };
   }
 
@@ -670,20 +832,26 @@ export class Scene {
           !(e.containerId && isBoundArrow(this.els.get(e.containerId))),
       )
       .map(boxOf);
+
     const u = unionBox(kids);
+
     if (!u) return false;
-    const auto = frame.customData?.autoFit as AutoFit | undefined;
+    const parsedAuto = autoFitSchema.safeParse(frame.customData?.autoFit);
+    const auto = parsedAuto.success ? parsedAuto.data : undefined;
     const current = { x: frame.x, y: frame.y, w: frame.width, h: frame.height };
+
     // A resize since the last fit means someone chose this size: it becomes the new floor.
     const chosen =
       auto && frame.width === auto.fw && frame.height === auto.fh
         ? { x: frame.x + auto.dx, y: frame.y + auto.dy, w: auto.w, h: auto.h }
         : current;
+
     const floor = shrink ? chosen : current;
     const nx = Math.min(floor.x, u.x - PAD);
     const ny = Math.min(floor.y, u.y - PAD);
     const nr = Math.max(floor.x + floor.w, u.x + u.w + PAD);
     const nb = Math.max(floor.y + floor.h, u.y + u.h + PAD);
+
     if (
       nx === frame.x &&
       ny === frame.y &&
@@ -691,6 +859,7 @@ export class Scene {
       nb === frame.y + frame.height
     )
       return false;
+
     const autoFit = {
       dx: chosen.x - nx,
       dy: chosen.y - ny,
@@ -699,6 +868,7 @@ export class Scene {
       fw: nr - nx,
       fh: nb - ny,
     };
+
     this.mutate(frame, {
       x: nx,
       y: ny,
@@ -707,12 +877,14 @@ export class Scene {
       customData: { ...frame.customData, autoFit },
     });
     this.grownFrames.add(frame.id);
+
     return true;
   }
 
   /** Smallest frame containing the centre of `b`. */
   private frameAt(b: Box, exclude?: string): El | null {
     const c = center(b);
+
     const hits = this.live()
       .filter(
         (f) =>
@@ -724,6 +896,7 @@ export class Scene {
           c.y <= f.y + f.height,
       )
       .toSorted((f1, f2) => f1.width * f1.height - f2.width * f2.height);
+
     return hits[0] ?? null;
   }
 
@@ -731,29 +904,37 @@ export class Scene {
   private impliedFrame(explicit: string | undefined, place: Placement | undefined): El | null {
     if (explicit) return this.frameOf(explicit);
     const anchor = place?.right_of ?? place?.left_of ?? place?.below ?? place?.above ?? place?.near;
+
     if (!anchor) return null;
     const a = this.resolve(anchor);
     const fid = a.type === "frame" ? a.id : a.frameId;
+
     return fid ? (this.els.get(fid) ?? null) : null;
   }
 
   private setFrame(el: El, frame: El | null) {
     if ((el.frameId ?? null) === (frame?.id ?? null)) return;
     this.mutate(el, { frameId: frame?.id ?? null });
+
     for (const part of this.iconParts(el)) this.mutate(part, { frameId: frame?.id ?? null });
     const t = this.boundText(el);
+
     if (t) this.mutate(t, { frameId: frame?.id ?? null });
   }
 
   /** Translate a frame together with everything in it, re-routing arrows that leave it. */
   private moveFrameBy(frame: El, dx: number, dy: number) {
     if (!dx && !dy) return;
+
     const kids = this.live().filter((e) => {
       if (e.frameId !== frame.id || isBoundArrow(e)) return false;
       const c = e.containerId ? this.els.get(e.containerId) : undefined;
+
       return !(c && isBoundArrow(c)); // arrow labels follow their arrow
     });
+
     this.mutate(frame, { x: frame.x + dx, y: frame.y + dy });
+
     for (const k of kids) this.mutate(k, { x: k.x + dx, y: k.y + dy });
     // Bound arrows are re-routed from their shapes by enforceBindings().
   }
@@ -762,18 +943,24 @@ export class Scene {
   private separateFrames(seed: Iterable<string>): number {
     const fixed = new Set(seed);
     let moves = 0;
+
     for (let pass = 0; pass < 30; pass++) {
       const frames = this.live().filter((e) => e.type === "frame");
       let changed = false;
+
       for (const a of frames) {
         if (!fixed.has(a.id)) continue;
+
         for (const b of frames) {
           if (b.id === a.id || !overlaps(boxOf(a), boxOf(b), FRAME_GAP / 2 - 1)) continue;
+
           // Of two seeds, the one later in reading order yields.
           const [anchor, mover] =
             fixed.has(b.id) && (b.y < a.y || (b.y === a.y && b.x < a.x)) ? [b, a] : [a, b];
+
           const right = anchor.x + anchor.width + FRAME_GAP - mover.x;
           const down = anchor.y + anchor.height + FRAME_GAP - mover.y;
+
           if (right <= 0 && down <= 0) continue;
           const byRight = right > 0 && (down <= 0 || right <= down);
           this.moveFrameBy(mover, byRight ? right : 0, byRight ? 0 : down);
@@ -782,8 +969,10 @@ export class Scene {
           changed = true;
         }
       }
+
       if (!changed) break;
     }
+
     return moves;
   }
 
@@ -791,20 +980,25 @@ export class Scene {
 
   private centerLabel(container: El) {
     const t = this.boundText(container);
+
     if (!t) return;
+
     if (container.type === "arrow") {
-      const pts = container.points as Point[];
+      const pts = elementPoints(container);
       const mid = (pts.length - 1) / 2;
       const a = pts[Math.floor(mid)];
       const b = pts[Math.ceil(mid)];
+
       // Excalidraw puts the label at `labelPosition` (a fraction of the path's length) when set.
-      const at =
-        typeof t.labelPosition === "number"
-          ? pointAt(
-              pts.map(([x, y]) => ({ x, y })),
-              t.labelPosition,
-            )
-          : { x: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2 };
+      const labelPosition = z.number().safeParse(t.labelPosition);
+
+      const at = labelPosition.success
+        ? pointAt(
+            pts.map(([x, y]) => ({ x, y })),
+            labelPosition.data,
+          )
+        : { x: (a[0] + b[0]) / 2, y: (a[1] + b[1]) / 2 };
+
       const mx = container.x + at.x;
       const my = container.y + at.y;
       this.mutate(t, {
@@ -854,14 +1048,18 @@ export class Scene {
   private routeArrows(arrows: El[], convert = false): Set<string> {
     const changed = new Set<string>();
     const groups = new Map<string | null, El[]>();
+
     for (const a of arrows) {
       const s0 = this.els.get(a.startBinding?.elementId);
       const t0 = this.els.get(a.endBinding?.elementId);
+
       if (!s0 || !t0 || s0.isDeleted || t0.isDeleted) continue;
       // An arrow bound to an icon's artwork or caption belongs to the icon node.
       const s = this.owner(s0);
       const t = this.owner(t0);
+
       if (s.id === t.id || (!a.elbowed && !convert)) continue;
+
       for (const [side, from, to] of [
         ["startBinding", s0, s],
         ["endBinding", t0, t],
@@ -871,11 +1069,14 @@ export class Scene {
         this.addBound(to, { id: a.id, type: "arrow" });
         this.mutate(a, { [side]: { ...a[side], elementId: to.id } });
       }
+
       const fid = s.frameId && s.frameId === t.frameId ? s.frameId : null;
       groups.set(fid, [...(groups.get(fid) ?? []), a]);
     }
+
     for (const [fid, group] of groups) {
       const frame = fid ? this.els.get(fid) : undefined;
+
       const obstacles = this.live()
         .filter(
           (e) =>
@@ -883,45 +1084,63 @@ export class Scene {
             (!frame || (e.frameId ?? null) === fid),
         )
         .map(boxOf);
+
       // Arrows this pass isn't moving still count: new routes avoid crossing them.
       const ids = new Set(group.map((a) => a.id));
+
       const fixed = this.live()
         .filter((a) => a.type === "arrow" && !ids.has(a.id) && (a.frameId ?? null) === fid)
-        .map((a) => (a.points as Point[]).map(([x, y]) => ({ x: a.x + x, y: a.y + y })));
+        .map((a) => elementPoints(a).map(([x, y]) => ({ x: a.x + x, y: a.y + y })));
+
+      const options: RouteOptions = { fixed };
+
+      if (frame) options.bounds = boxOf(frame);
+
       const routes = routeOrthogonal(
         group.map((a) => {
           const t = this.boundText(a);
-          return {
+
+          const request: RouteRequest = {
             id: a.id,
             from: boxOf(this.els.get(a.startBinding.elementId)!),
             to: boxOf(this.els.get(a.endBinding.elementId)!),
-            ...(t ? { label: { w: t.width, h: t.height } } : {}),
           };
+
+          if (t) request.label = { w: t.width, h: t.height };
+
+          return request;
         }),
         obstacles,
-        { ...(frame ? { bounds: boxOf(frame) } : {}), fixed },
+        options,
       );
+
       for (const a of group) {
         const route = routes.get(a.id);
+
         if (route && this.setRoute(a, route)) changed.add(a.id);
       }
     }
+
     return changed;
   }
 
   /** Do an elbow arrow's ends still sit where its fixed points put them on its shapes? */
   private endsInPlace(arrow: El): boolean {
-    const pts = arrow.points as Point[];
+    const pts = elementPoints(arrow);
+
     const ends: BindingEnd[] = [
       [arrow.startBinding, pts[0]],
       [arrow.endBinding, pts[pts.length - 1]],
     ];
+
     return ends.every(([b, [px, py]]) => {
       const el = this.els.get(b.elementId);
+
       if (!el || el.isDeleted || !Array.isArray(b.fixedPoint)) return false;
       const box = boxOf(el);
       const x = box.x + b.fixedPoint[0] * box.w;
       const y = box.y + b.fixedPoint[1] * box.h;
+
       return Math.abs(arrow.x + px - x) <= 1 && Math.abs(arrow.y + py - y) <= 1;
     });
   }
@@ -932,13 +1151,16 @@ export class Scene {
     const points = route.points.map((p): Point => [p.x - p0.x, p.y - p0.y]);
     const xs = points.map((p) => p[0]);
     const ys = points.map((p) => p[1]);
+
     const fixedPoint = (id: string, p: Pt): Point => {
       const b = boxOf(this.els.get(id)!);
+
       return [
         roundBindingCoordinate((p.x - b.x) / (b.w || 1)),
         roundBindingCoordinate((p.y - b.y) / (b.h || 1)),
       ];
     };
+
     const patch = {
       x: p0.x,
       y: p0.y,
@@ -961,15 +1183,21 @@ export class Scene {
         mode: "orbit",
       },
     };
-    const same = (Object.keys(patch) as (keyof typeof patch)[]).every(
-      (k) => JSON.stringify(arrow[k] ?? null) === JSON.stringify(patch[k] ?? null),
+
+    const same = Object.entries(patch).every(
+      ([key, value]) => JSON.stringify(arrow[key] ?? null) === JSON.stringify(value ?? null),
     );
+
     const text = this.boundText(arrow);
     const labelAt = route.labelAt !== undefined ? Math.round(route.labelAt * 1e4) / 1e4 : null;
     const labelSame = !text || (text.labelPosition ?? null) === labelAt;
+
     if (!same) this.mutate(arrow, patch);
+
     if (text && !labelSame) this.mutate(text, { labelPosition: labelAt });
+
     if (!same || !labelSame) this.centerLabel(arrow);
+
     return !same || !labelSame;
   }
 
@@ -977,9 +1205,11 @@ export class Scene {
   private routeArrow(arrow: El, shiftBends = true) {
     if (arrow.elbowed && arrow.startBinding && arrow.endBinding) {
       if (!this.deferRouting && !this.endsInPlace(arrow)) this.routeArrows([arrow]);
+
       return;
     }
-    const pts = arrow.points as Point[];
+
+    const pts = elementPoints(arrow);
     const absStart = { x: arrow.x + pts[0][0], y: arrow.y + pts[0][1] };
     const absEnd = { x: arrow.x + pts[pts.length - 1][0], y: arrow.y + pts[pts.length - 1][1] };
     const s = arrow.startBinding ? this.els.get(arrow.startBinding.elementId) : undefined;
@@ -988,26 +1218,33 @@ export class Scene {
     const tOk = t && !t.isDeleted ? t : undefined;
     // Aim at the first/last bend when there is one, else at the other shape.
     const firstBend = pts.length > 2 ? { x: arrow.x + pts[1][0], y: arrow.y + pts[1][1] } : null;
+
     const lastBend =
       pts.length > 2
         ? { x: arrow.x + pts[pts.length - 2][0], y: arrow.y + pts[pts.length - 2][1] }
         : null;
+
     const sc = sOk ? center(boxOf(sOk)) : absStart;
     const tc = tOk ? center(boxOf(tOk)) : absEnd;
     let start = sOk ? borderPoint(boxOf(sOk), firstBend ?? tc, 8, sOk.type) : absStart;
     let end = tOk ? borderPoint(boxOf(tOk), lastBend ?? sc, 8, tOk.type) : absEnd;
     // Bends follow the average movement of the two ends. Sub-pixel drift is rounding, not movement.
     const drift = (d: number) => (shiftBends && Math.abs(d) >= 1 ? d : 0);
+
     const shift = {
       x: drift((start.x - absStart.x + end.x - absEnd.x) / 2),
       y: drift((start.y - absStart.y + end.y - absEnd.y) / 2),
     };
+
     // Re-aim the ends at the moved bends, so a second pass finds nothing to fix.
     if (firstBend && lastBend && (shift.x || shift.y)) {
       const moved = (p: Pt) => ({ x: p.x + shift.x, y: p.y + shift.y });
+
       if (sOk) start = borderPoint(boxOf(sOk), moved(firstBend), 8, sOk.type);
+
       if (tOk) end = borderPoint(boxOf(tOk), moved(lastBend), 8, tOk.type);
     }
+
     const abs = [
       start,
       ...pts
@@ -1015,11 +1252,13 @@ export class Scene {
         .map(([px, py]) => ({ x: arrow.x + px + shift.x, y: arrow.y + py + shift.y })),
       end,
     ];
+
     const x0 = Math.round(start.x);
     const y0 = Math.round(start.y);
     const points = abs.map((p): Point => [Math.round(p.x - x0), Math.round(p.y - y0)]);
     const xs = points.map((p) => p[0]);
     const ys = points.map((p) => p[1]);
+
     const patch = {
       x: x0,
       y: y0,
@@ -1027,6 +1266,7 @@ export class Scene {
       width: Math.max(...xs) - Math.min(...xs),
       height: Math.max(...ys) - Math.min(...ys),
     };
+
     if (
       arrow.x === patch.x &&
       arrow.y === patch.y &&
@@ -1042,18 +1282,24 @@ export class Scene {
     if (el.x === box.x && el.y === box.y && el.width === box.w && el.height === box.h) return;
     const previous = boxOf(el);
     this.mutate(el, { x: box.x, y: box.y, width: box.w, height: box.h });
+
     for (const part of this.iconParts(el)) {
       const sx = box.w / previous.w,
         sy = box.h / previous.h;
-      this.mutate(part, {
+
+      const patch: Partial<El> = {
         x: box.x + (part.x - previous.x) * sx,
         y: box.y + (part.y - previous.y) * sy,
         width: part.width * sx,
         height: part.height * sy,
-        ...(part.points ? { points: part.points.map(([x, y]: number[]) => [x * sx, y * sy]) } : {}),
-      });
+      };
+
+      if (part.points) patch.points = elementPoints(part).map(([x, y]) => [x * sx, y * sy]);
+      this.mutate(part, patch);
     }
+
     this.centerLabel(el);
+
     for (const a of this.arrowsBoundTo(el.id)) this.routeArrow(a);
   }
 
@@ -1075,6 +1321,7 @@ export class Scene {
     const caption = !!container.customData?.icon;
     const displayLabel = caption ? wrapText(label, 20) : label;
     const m = measureText(displayLabel, fontSize);
+
     if (existing) {
       this.mutate(existing, {
         text: displayLabel,
@@ -1083,43 +1330,51 @@ export class Scene {
         height: m.height,
       });
     } else {
+      const extra: Partial<El> = {
+        containerId: caption ? null : container.id,
+        frameId: container.frameId ?? null,
+      };
+
+      if (caption)
+        Object.assign(extra, {
+          customData: { componentLabel: true, author },
+          groupIds: container.groupIds,
+          originalText: label,
+          textAlign: "center",
+          strokeColor: "#1e1e1e",
+        });
+
       const t = this.add(
         this.textEl(
           displayLabel,
           { x: container.x, y: container.y, w: m.width, h: m.height },
           author,
           fontSize,
-          {
-            containerId: caption ? null : container.id,
-            ...(caption
-              ? {
-                  customData: { componentLabel: true, author },
-                  groupIds: container.groupIds,
-                  originalText: label,
-                  textAlign: "center",
-                  strokeColor: "#1e1e1e",
-                }
-              : {}),
-            frameId: container.frameId ?? null,
-          },
+          extra,
         ),
       );
+
       if (!caption) this.addBound(container, { id: t.id, type: "text" });
     }
+
     if (container.type !== "arrow" && !caption) {
       const w = Math.max(container.width, m.width + PAD);
       const h = Math.max(container.height, m.height + PAD);
+
       if (w !== container.width || h !== container.height)
         this.moveNode(container, { x: container.x, y: container.y, w, h });
     }
+
     this.centerLabel(container);
   }
 
   /** Color a note, or the label of a node or arrow. */
   private setTextColor(el: El, color: string) {
     const text = el.type === "text" ? el : this.boundText(el);
+
     if (!text) throw new Error("text_color needs a label to color");
     this.mutate(text, { strokeColor: textColor(color) });
+
     // A sticky note's stroke is its ink: Excalidraw keeps it equal to the label's color.
     if (el.type === "stickynote") this.mutate(el, { strokeColor: textColor(color) });
   }
@@ -1127,12 +1382,14 @@ export class Scene {
   /** The invisible binding target covers only artwork, never its caption. */
   private fitIconBounds(node: El) {
     const bounds = unionBox(this.iconParts(node).map(boxOf));
+
     if (bounds) this.mutate(node, { x: bounds.x, y: bounds.y, width: bounds.w, height: bounds.h });
   }
 
   private iconParts(el: El): El[] {
     if (!el.customData?.icon) return [];
     const group = el.groupIds?.at(-1);
+
     return this.live().filter(
       (part) => part.customData?.componentPart && group && part.groupIds?.includes(group),
     );
@@ -1140,16 +1397,21 @@ export class Scene {
 
   private deleteEl(el: El) {
     if (el.isDeleted) return;
+
     for (const part of this.iconParts(el)) this.mutate(part, { isDeleted: true });
     this.mutate(el, { isDeleted: true });
     const t = this.boundText(el);
+
     if (t) this.mutate(t, { isDeleted: true });
+
     if (el.type === "arrow" || el.type === "line") {
       for (const end of [el.startBinding, el.endBinding]) {
         const n = end ? this.els.get(end.elementId) : undefined;
+
         if (n) this.removeBound(n, el.id);
       }
     }
+
     if (el.type === "frame") {
       for (const k of this.live().filter((e) => e.frameId === el.id))
         this.mutate(k, { frameId: null });
@@ -1164,77 +1426,102 @@ export class Scene {
 
   addNode(o: AddNodeOp, author: Author): El {
     const comp = o.kind ? componentByKind.get(o.kind) : undefined;
+
     if (o.kind && !comp) throw new Error(`unknown kind "${o.kind}" (see the components resource)`);
     const label = o.label ?? comp?.label;
+
     if (!label) throw new Error("add_node needs a label or a kind");
     let frame = this.impliedFrame(o.frame, o.place);
     const m = measureText(label, 20);
     const icon = o.shape ? undefined : comp?.icon;
+
     const w = Math.max(
       o.width ?? NODE_MIN_W,
       (icon ? measureText(wrapText(label, 20), 20).width : m.width) + PAD,
     );
+
     const h = Math.max(o.height ?? (icon ? 120 : NODE_MIN_H), m.height + (icon ? 95 : PAD));
     const box = this.place(o.place, w, h, frame);
-    const shape = icon ? "rectangle" : (o.shape ?? comp?.shape ?? "rectangle");
-    const fill = o.color ? (COLORS[o.color] ?? o.color) : (comp?.fill ?? "transparent");
-    const node = this.add(
-      this.base(shape, box, author, {
-        backgroundColor: icon ? "transparent" : fill,
-        ...(icon ? { strokeColor: "transparent", groupIds: [newId()] } : {}),
-        roundness: shape === "rectangle" ? { type: 3 } : shape === "diamond" ? { type: 2 } : null,
-        frameId: frame?.id ?? null,
-        customData: {
-          author,
-          ...(comp ? { kind: comp.kind } : {}),
-          ...(icon ? { icon, iconFill: fill } : {}),
-        },
-      }),
-    );
+    const geometry = icon ? "rectangle" : (o.shape ?? comp?.shape ?? "rectangle");
+    const fill = o.color ? (colorValues.get(o.color) ?? o.color) : (comp?.fill ?? "transparent");
+
+    const metadata: NodeMetadata = { author };
+
+    if (comp) metadata.kind = comp.kind;
+
+    if (icon) {
+      metadata.icon = icon;
+      metadata.iconFill = fill;
+    }
+
+    const extra: Partial<El> = {
+      backgroundColor: icon ? "transparent" : fill,
+      roundness:
+        geometry === "rectangle" ? { type: 3 } : geometry === "diamond" ? { type: 2 } : null,
+      frameId: frame?.id ?? null,
+      customData: metadata,
+    };
+
+    if (icon) {
+      extra.strokeColor = "transparent";
+      extra.groupIds = [newId()];
+    }
+
+    const node = this.add(this.base(geometry, box, author, extra));
+
     if (!frame && (frame = this.frameAt(box))) this.setFrame(node, frame);
+
     if (icon && comp) {
       for (const part of iconElements(comp, w)) {
         const { type, x, y, width = 0, height = 0, ...style } = part;
+
+        const partOptions: Partial<El> = {
+          backgroundColor:
+            type === "line" &&
+            !(
+              style.points?.length &&
+              JSON.stringify(style.points[0]) === JSON.stringify(style.points.at(-1))
+            )
+              ? "transparent"
+              : fill,
+          ...style,
+          groupIds: node.groupIds,
+          frameId: node.frameId,
+          customData: { componentPart: true, author },
+        };
+
+        if (type === "line")
+          Object.assign(partOptions, {
+            lastCommittedPoint: null,
+            startBinding: null,
+            endBinding: null,
+            startArrowhead: null,
+            endArrowhead: null,
+          });
         this.add(
-          this.base(type, { x: box.x + x, y: box.y + y, w: width, h: height }, author, {
-            backgroundColor:
-              type === "line" &&
-              !(
-                style.points?.length &&
-                JSON.stringify(style.points[0]) === JSON.stringify(style.points.at(-1))
-              )
-                ? "transparent"
-                : fill,
-            ...style,
-            groupIds: node.groupIds,
-            frameId: node.frameId,
-            customData: { componentPart: true, author },
-            ...(type === "line"
-              ? {
-                  lastCommittedPoint: null,
-                  startBinding: null,
-                  endBinding: null,
-                  startArrowhead: null,
-                  endArrowhead: null,
-                }
-              : {}),
-          }),
+          this.base(type, { x: box.x + x, y: box.y + y, w: width, h: height }, author, partOptions),
         );
       }
     }
+
     if (icon) this.fitIconBounds(node);
     this.setLabel(node, label, author);
+
     if (o.text_color !== undefined) this.setTextColor(node, o.text_color);
+
     if (frame) this.fitFrame(frame);
     this.lastPlaced = node.id;
     this.setRef(o.ref, node.id);
+
     return node;
   }
 
   connect(o: ConnectOp, author: Author): El {
     const a = this.resolve(o.from);
     const b = this.resolve(o.to);
+
     if (a.id === b.id) throw new Error("cannot connect an element to itself");
+
     const arrow = this.add(
       this.base("arrow", { x: 0, y: 0, w: 0, h: 0 }, author, {
         strokeStyle: o.dashed ? "dashed" : "solid",
@@ -1254,28 +1541,37 @@ export class Scene {
         endIsSpecial: null,
       }),
     );
+
     this.addBound(a, { id: arrow.id, type: "arrow" });
     this.addBound(b, { id: arrow.id, type: "arrow" });
     this.routeArrow(arrow);
+
     if (o.label) this.setLabel(arrow, o.label, author);
+
     if (o.text_color !== undefined) this.setTextColor(arrow, o.text_color);
+
     return arrow;
   }
 
   disconnect(o: DisconnectOp): number {
     const a = this.resolve(o.from);
     const b = this.resolve(o.to);
+
     const between = this.arrowsBoundTo(a.id).filter((e) => {
       const ends = new Set([e.startBinding?.elementId, e.endBinding?.elementId]);
+
       return ends.has(a.id) && ends.has(b.id);
     });
+
     if (!between.length) throw new Error(`no arrow between "${o.from}" and "${o.to}"`);
     between.forEach((e) => this.deleteEl(e));
+
     return between.length;
   }
 
   update(o: UpdateOp, author: Author): El {
     const el = this.resolve(o.target);
+
     if (o.label !== undefined) {
       if (el.type === "frame") this.mutate(el, { name: o.label });
       else if (el.type === "stickynote") this.layoutSticky(el, o.label);
@@ -1288,79 +1584,103 @@ export class Scene {
           width: m.width,
           height: m.height,
         });
+
         if (el.frameId) this.fitFrame(this.els.get(el.frameId)!);
       } else this.setLabel(el, o.label, author);
     }
+
     if (o.text_color !== undefined) this.setTextColor(el, o.text_color);
+
     if (o.color !== undefined) {
-      const color = COLORS[o.color] ?? o.color;
+      const color = colorValues.get(o.color) ?? o.color;
+
       if (el.customData?.icon) {
         this.mutate(el, { customData: { ...el.customData, iconFill: color } });
+
         for (const part of this.iconParts(el))
           if (part.backgroundColor !== "transparent") this.mutate(part, { backgroundColor: color });
       } else this.mutate(el, { backgroundColor: color });
     }
+
     if (o.dashed !== undefined) {
       for (const part of [el, ...this.iconParts(el)])
         this.mutate(part, { strokeStyle: o.dashed ? "dashed" : "solid" });
     }
-    if (o.shape && SHAPE_TYPES.has(el.type)) {
+
+    if (o.shape && GEOMETRY_TYPES.has(el.type)) {
       const caption = this.boundText(el);
+
       if (caption?.customData?.componentLabel) {
         const { componentLabel: _label, ...data } = caption.customData;
         this.mutate(caption, { containerId: el.id, customData: data });
         this.addBound(el, { id: caption.id, type: "text" });
       }
+
       for (const part of this.iconParts(el)) this.mutate(part, { isDeleted: true });
       const { icon: _icon, iconFill, ...data } = el.customData ?? {};
-      this.mutate(el, {
+
+      const patch: Partial<El> = {
         customData: data,
-        ...(iconFill
-          ? {
-              backgroundColor: iconFill,
-              strokeColor: author === "agent" ? AGENT_STROKE : "#1e1e1e",
-            }
-          : {}),
         type: o.shape,
         roundness:
           o.shape === "rectangle" ? { type: 3 } : o.shape === "diamond" ? { type: 2 } : null,
-      });
+      };
+
+      if (iconFill) {
+        patch.backgroundColor = iconFill;
+        patch.strokeColor = author === "agent" ? AGENT_STROKE : "#1e1e1e";
+      }
+
+      this.mutate(el, patch);
       this.centerLabel(el);
     }
+
     if (o.frame !== undefined) {
       const f = o.frame === null ? null : this.frameOf(o.frame);
       this.setFrame(el, f);
+
       if (f && !o.move) {
         const inside =
           el.x >= f.x &&
           el.y >= f.y &&
           el.x + el.width <= f.x + f.width &&
           el.y + el.height <= f.y + f.height;
+
         if (!inside)
           this.moveNode(el, this.place(undefined, el.width, el.height, f, new Set([el.id])));
       }
+
       if (f) this.fitFrame(f);
     }
+
     if (el.type === "frame" && (o.move || o.width || o.height)) {
       const w = o.width ?? el.width;
       const h = o.height ?? el.height;
+
       const box = o.move
         ? this.place(o.move, w, h, null, new Set([el.id]))
         : { x: el.x, y: el.y, w, h };
+
       this.moveFrameBy(el, box.x - el.x, box.y - el.y);
+
       if (w !== el.width || h !== el.height) this.mutate(el, { width: w, height: h });
       this.fitFrame(el);
       this.grownFrames.add(el.id);
     } else if (o.move || o.width || o.height) {
       const w = o.width ?? el.width;
       const h = o.height ?? el.height;
+
       const box = o.move
         ? this.place(o.move, w, h, null, new Set([el.id]))
         : { x: el.x, y: el.y, w, h };
+
       this.moveNode(el, box);
+
       if (el.frameId) this.fitFrame(this.els.get(el.frameId)!);
     }
+
     this.customTag(el, author);
+
     return el;
   }
 
@@ -1372,20 +1692,24 @@ export class Scene {
 
   remove(o: RemoveOp) {
     const el = this.resolve(o.target);
+
     if (this.isNode(el)) for (const a of this.arrowsBoundTo(el.id)) this.deleteEl(a);
     this.deleteEl(el);
+
     return el;
   }
 
   addFrame(o: AddFrameOp, author: Author): El {
     const kids = (o.contains ?? []).map((t) => this.resolve(t));
     let box: Box;
+
     if (kids.length) {
       const u = unionBox(kids.map(boxOf))!;
       box = { x: u.x - PAD, y: u.y - PAD, w: u.w + PAD * 2, h: u.h + PAD * 2 };
     } else {
       box = this.place(o.place, o.width ?? 800, o.height ?? 500, null);
     }
+
     const frame = this.add(
       this.base("frame", box, author, {
         name: o.name,
@@ -1393,25 +1717,31 @@ export class Scene {
         roughness: 0,
       }),
     );
+
     for (const k of kids) {
       this.setFrame(k, frame);
     }
+
     this.setRef(o.ref, frame.id);
+
     return frame;
   }
 
   addNote(o: AddNoteOp, author: Author): El {
     let frame = this.impliedFrame(o.frame, o.place);
     const fontSize = { s: 16, m: 20, l: 28 }[o.size ?? "m"];
+
     const ink =
       o.text_color !== undefined
         ? textColor(o.text_color)
         : author === "agent"
           ? AGENT_STROKE
           : "#1e1e1e";
+
     const { width, height } = stickySize(wrapText(o.text, STICKY_WRAP), fontSize);
     const box = this.place(o.place, width, height, frame);
     frame ??= this.frameAt(box);
+
     const note = this.add(
       this.base("stickynote", box, author, {
         strokeColor: ink,
@@ -1423,6 +1753,7 @@ export class Scene {
         frameId: frame?.id ?? null,
       }),
     );
+
     const t = this.add(
       this.textEl("", box, author, fontSize, {
         containerId: note.id,
@@ -1431,16 +1762,20 @@ export class Scene {
         frameId: frame?.id ?? null,
       }),
     );
+
     this.addBound(note, { id: t.id, type: "text" });
     this.layoutSticky(note, o.text);
+
     if (frame) this.fitFrame(frame);
     this.setRef(o.ref, note.id);
+
     return note;
   }
 
   /** Wrap a sticky note's label and grow the note to fit it; the label stays centred. */
   private layoutSticky(note: El, label: string) {
     const t = this.boundText(note);
+
     if (!t) return;
     const text = wrapText(label, STICKY_WRAP);
     const m = measureText(text, t.fontSize ?? 20);
@@ -1449,6 +1784,7 @@ export class Scene {
     const w = Math.max(note.width, size.width);
     const h = Math.max(note.baseHeight ?? note.height, size.height);
     this.mutate(note, { baseHeight: Math.min(note.baseHeight ?? h, h) });
+
     if (w !== note.width || h !== note.height) this.moveNode(note, { x: note.x, y: note.y, w, h });
     else this.centerLabel(note);
   }
@@ -1456,6 +1792,7 @@ export class Scene {
   apply(ops: Op[], author: Author): OpResult[] {
     const results = this.applyOps(ops, author);
     this.enforceBindings();
+
     return results;
   }
 
@@ -1463,6 +1800,9 @@ export class Scene {
     return ops.map((o, i) => {
       try {
         let el: El | undefined;
+
+        const operation = o.op;
+
         switch (o.op) {
           case "add_node":
             el = this.addNode(o, author);
@@ -1486,11 +1826,12 @@ export class Scene {
             el = this.addNote(o, author);
             break;
           default:
-            throw new Error(`unknown op ${(o as any).op}`);
+            throw new Error(`unknown op ${operation}`);
         }
-        return { i, op: o.op, ok: true, id: el?.id, ref: (o as any).ref };
+
+        return { i, op: o.op, ok: true, id: el?.id, ref: "ref" in o ? o.ref : undefined };
       } catch (err) {
-        return { i, op: o.op, ok: false, error: (err as Error).message };
+        return { i, op: o.op, ok: false, error: errorMessage(err) };
       }
     });
   }
@@ -1500,11 +1841,14 @@ export class Scene {
   /** Frames touched by this Scene's changes (for scoped auto-tidy). null frame = top level. */
   touchedFrames(): Set<string | null> {
     const out = new Set<string | null>();
+
     for (const id of this.changed) {
       const e = this.els.get(id);
+
       if (!e || e.isDeleted) continue;
       out.add(e.type === "frame" ? e.id : (e.frameId ?? null));
     }
+
     return out;
   }
 
@@ -1516,6 +1860,7 @@ export class Scene {
     // What this batch added or edited gives way first; the rest is where someone put it.
     const fresh = new Set(this.changed);
     this.deferRouting = true;
+
     try {
       return this.tidyInner(scope, fresh);
     } finally {
@@ -1535,19 +1880,23 @@ export class Scene {
       framesFitted: 0,
       framesMoved: 0,
     };
+
     const inScope = (fid: string | null | undefined) => !scope || scope.has(fid ?? null);
     const isBlock = (e: El) => this.isNode(e) || this.isNote(e);
 
     // 0. Bind loose arrow ends, so links survive every later move. Only where graph() already
     //    infers the edge (both ends on distinct nodes): tidy makes a connection explicit, never new.
     const nodes0 = this.live().filter((e) => this.isNode(e));
+
     for (const a of this.live()) {
       if (a.type !== "arrow" || !inScope(a.frameId) || (a.startBinding && a.endBinding)) continue;
-      const pts = a.points as Point[];
+      const pts = elementPoints(a);
       const end = (p: Point) => this.nodeAt({ x: a.x + p[0], y: a.y + p[1] }, nodes0);
       const from = a.startBinding ? this.els.get(a.startBinding.elementId) : end(pts[0]);
       const to = a.endBinding ? this.els.get(a.endBinding.elementId) : end(pts[pts.length - 1]);
+
       if (!from || !to || from.id === to.id) continue;
+
       for (const [side, n] of [
         ["startBinding", from],
         ["endBinding", to],
@@ -1563,6 +1912,7 @@ export class Scene {
     for (const e of this.live()) {
       if (!isBlock(e) || e.frameId) continue;
       const f = this.frameAt(boxOf(e));
+
       if (f && inScope(f.id)) {
         this.setFrame(e, f);
         stats.adopted++;
@@ -1574,10 +1924,12 @@ export class Scene {
       if (arrow.type !== "arrow") continue;
       const source = this.els.get(arrow.startBinding?.elementId);
       const target = this.els.get(arrow.endBinding?.elementId);
+
       const frame =
         source?.frameId && source.frameId === target?.frameId
           ? this.els.get(source.frameId)
           : undefined;
+
       if (frame && inScope(frame.id) && arrow.frameId !== frame.id) this.setFrame(arrow, frame);
     }
 
@@ -1585,6 +1937,7 @@ export class Scene {
     for (const e of this.live()) {
       if (e.type !== "text" || e.containerId || e.groupIds?.length || !inScope(e.frameId)) continue;
       const wrapped = wrapText(e.text ?? "");
+
       if (wrapped !== e.text) {
         const m = measureText(wrapped, e.fontSize ?? 20);
         this.mutate(e, {
@@ -1606,6 +1959,7 @@ export class Scene {
     for (const blocks of byFrame.values()) {
       for (let round = 0; round < 4; round++) {
         let changed = 0;
+
         const moves = solveLayout(
           blocks.map((b) => ({
             box: b.box(),
@@ -1614,9 +1968,11 @@ export class Scene {
           })),
           { gap: 24, alignTolerance: 16 },
         );
+
         moves.forEach((m, i) => {
           if (!m.dx && !m.dy) return;
           blocks[i].move(m.dx, m.dy);
+
           if (m.aligned) stats.aligned++;
           else stats.separated++;
           changed++;
@@ -1625,6 +1981,7 @@ export class Scene {
         const others = (e: El) => blocks.filter((b) => b.node !== e).map((b) => b.box());
         const spaced = this.spaceEvenly(nodes, others);
         stats.spaced += spaced;
+
         if (!changed && !spaced) break;
       }
     }
@@ -1632,6 +1989,7 @@ export class Scene {
     // 5. Fit frames around their contents, then 6. pull overlapping frames apart.
     //    Before routing, so connections are routed within the frames' final boxes.
     const frames = this.live().filter((f) => f.type === "frame" && inScope(f.id));
+
     for (const f of frames) if (this.fitFrame(f, true)) stats.framesFitted++;
     stats.framesMoved = this.separateFrames(
       scope ? [...this.grownFrames, ...frames.map((f) => f.id)] : frames.map((f) => f.id),
@@ -1643,9 +2001,11 @@ export class Scene {
     const connections = this.live().filter(
       (a) => a.type === "arrow" && a.startBinding && a.endBinding && inScope(a.frameId),
     );
+
     const rerouted = this.routeArrows(connections, true);
     // Loose arrows with only one bound end keep their shape and just follow that end.
     this.deferRouting = false;
+
     for (const a of this.live())
       if (
         a.type === "arrow" &&
@@ -1655,6 +2015,7 @@ export class Scene {
       )
         this.routeArrow(a);
     stats.rerouted = rerouted.size;
+
     return stats;
   }
 
@@ -1664,17 +2025,22 @@ export class Scene {
    */
   private tidyBlocks(inScope: (fid: string | null | undefined) => boolean) {
     const out = new Map<string | null, Block[]>();
+
     const add = (fid: string | null | undefined, b: Block) =>
       out.set(fid ?? null, [...(out.get(fid ?? null) ?? []), b]);
+
     const isBlock = (e: El) => this.isNode(e) || this.isNote(e);
     const live = this.live();
+
     // An icon's own group (parts + caption) is the icon node; only groups around it count.
     const seen = new Set(
       live.flatMap((e) => (e.customData?.icon && e.groupIds?.length === 1 ? e.groupIds : [])),
     );
+
     for (const e of live) {
       if (!inScope(e.frameId) || e.customData?.componentPart) continue;
       const gid = e.groupIds?.at(-1);
+
       if (!gid || (e.customData?.icon && e.groupIds.length === 1)) {
         if (!isBlock(e)) continue;
         add(e.frameId, {
@@ -1688,25 +2054,32 @@ export class Scene {
         });
         continue;
       }
+
       if (seen.has(gid)) continue;
       seen.add(gid);
       const members = live.filter((m) => m.groupIds?.includes(gid));
+
       if (!members.some(isBlock)) continue; // a pure sketch: left alone, like ungrouped ones
       const ids = new Set(members.map((m) => m.id));
+
       const labels = members.flatMap((m) => {
         const t = this.boundText(m);
+
         return t && !ids.has(t.id) ? [t] : [];
       });
+
       add(e.frameId, {
         ids: [...ids],
         box: () => unionBox(members.map(boxOf))!,
         move: (dx, dy) => {
           for (const m of [...members, ...labels]) this.mutate(m, { x: m.x + dx, y: m.y + dy });
+
           for (const m of members)
             for (const a of this.arrowsBoundTo(m.id)) if (!ids.has(a.id)) this.routeArrow(a);
         },
       });
     }
+
     return out;
   }
 
@@ -1717,6 +2090,7 @@ export class Scene {
    */
   private spaceEvenly(nodes: El[], others: (e: El) => Box[]): number {
     let moved = 0;
+
     for (const axis of ["y", "x"] as const) {
       const size = axis === "y" ? "height" : "width";
       const along = axis === "y" ? "x" : "y";
@@ -1724,27 +2098,35 @@ export class Scene {
       const mid = (e: El) => e[axis] + e[size] / 2;
       const across = (e: El) => e[along] + e[len] / 2;
       const pinned = (e: El) => nodes.some((o) => o !== e && Math.abs(across(o) - across(e)) <= 1);
+
       for (const row of clusters(nodes, mid, 1)) {
         row.sort((a, b) => a[along] - b[along]);
         const runs: El[][] = [[row[0]]];
+
         for (const e of row.slice(1)) {
           runs.at(-1)!.push(e);
+
           if (pinned(e)) runs.push([e]);
         }
+
         for (const run of runs) {
           if (run.length < 3) continue;
           const gaps = run.slice(1).map((e, i) => e[along] - (run[i][along] + run[i][len]));
           const lo = Math.min(...gaps);
           const hi = Math.max(...gaps);
+
           if (lo <= 0 || hi > 3 * lo || hi - lo <= 2) continue;
           const even = gaps.reduce((a, b) => a + b, 0) / gaps.length;
           let widths = 0;
+
           for (let i = 1; i < run.length - 1; i++) {
             const e = run[i];
             widths += run[i - 1][len];
             const target = Math.round(run[0][along] + widths + i * even);
+
             if (target === e[along]) continue;
             const box = { ...boxOf(e), [along]: target };
+
             if (others(e).some((o) => overlaps(box, o, 23))) continue;
             this.moveNode(e, box);
             moved++;
@@ -1752,6 +2134,7 @@ export class Scene {
         }
       }
     }
+
     return moved;
   }
 
@@ -1760,9 +2143,11 @@ export class Scene {
   /** Auto-layout nodes with dagre. Scope: a frame (its children) or all top-level nodes. */
   layout(direction: "LR" | "TB", scopeFrame?: string) {
     const frame = this.frameOf(scopeFrame);
+
     const nodes = this.live().filter(
       (e) => this.isNode(e) && (frame ? e.frameId === frame.id : !e.frameId),
     );
+
     if (!nodes.length) throw new Error("nothing to lay out");
     const ids = new Set(nodes.map((n) => n.id));
     const before = unionBox(nodes.map(boxOf))!;
@@ -1775,10 +2160,13 @@ export class Scene {
       marginy: 0,
     });
     g.setDefaultEdgeLabel(() => ({}));
+
     for (const n of nodes) g.setNode(n.id, { width: n.width, height: n.height });
+
     for (const e of this.graph().rawEdges)
       if (ids.has(e.fromId ?? "") && ids.has(e.toId ?? "")) g.setEdge(e.fromId!, e.toId!);
     layoutGraph(g);
+
     for (const n of nodes) {
       const p = g.node(n.id);
       this.moveNode(n, {
@@ -1788,7 +2176,9 @@ export class Scene {
         h: n.height,
       });
     }
+
     if (frame) this.fitFrame(frame);
+
     return nodes.length;
   }
 
@@ -1799,11 +2189,14 @@ export class Scene {
       .toSorted((a, b) =>
         (a.index ?? "") < (b.index ?? "") ? -1 : (a.index ?? "") > (b.index ?? "") ? 1 : 0,
       );
+
     const u = unionBox(live.map(boxOf));
+
     if (!u) return 0;
     const target = this.place(undefined, u.w, u.h, null);
     const dx = target.x - u.x;
     const dy = target.y - u.y;
+
     for (const e of live) {
       const el: El = {
         ...e,
@@ -1814,19 +2207,23 @@ export class Scene {
         updated: Date.now(),
         customData: { ...e.customData, author },
       };
+
       if (author === "agent" && el.type !== "text" && el.strokeColor !== "transparent")
         el.strokeColor = AGENT_STROKE;
       this.add(el);
     }
+
     return live.length;
   }
 
   /** Replace the whole scene with `target`, bumping versions so every client converges. */
   restoreTo(target: El[]) {
     const want = new Map(target.map((e) => [e.id, e]));
+
     for (const cur of this.els.values()) {
       if (!want.has(cur.id) && !cur.isDeleted) this.mutate(cur, { isDeleted: true });
     }
+
     for (const t of want.values()) {
       const cur = this.els.get(t.id);
       const v = Math.max(cur?.version ?? 0, t.version ?? 0);
@@ -1842,18 +2239,24 @@ export class Scene {
     const live = this.live().filter((e) => !e.customData?.componentPart);
     const nodes = live.filter((e) => this.isNode(e));
     const frames = live.filter((e) => e.type === "frame");
+
     const frameName = (id: string | null | undefined) =>
       id ? (this.els.get(id)?.name ?? id) : undefined;
+
     const labelCounts = new Map<string, number>();
+
     for (const n of nodes) {
       const l = this.labelOf(n);
       labelCounts.set(l, (labelCounts.get(l) ?? 0) + 1);
     }
+
     const display = (e: El | undefined) => {
       if (!e) return undefined;
       const l = this.labelOf(e);
+
       return l && labelCounts.get(l) === 1 ? l : `${l || e.type}#${e.id}`;
     };
+
     const hit = (p: Pt) => this.nodeAt(p, nodes);
 
     const edges: GraphEdge[] = [];
@@ -1861,14 +2264,16 @@ export class Scene {
 
     for (const e of live) {
       if (e.type !== "arrow" && e.type !== "line") continue;
-      const pts = e.points as Point[];
+      const pts = elementPoints(e);
       let from = e.startBinding ? this.els.get(e.startBinding.elementId) : undefined;
       let to = e.endBinding ? this.els.get(e.endBinding.elementId) : undefined;
       let inferred = false;
+
       if (!from) {
         from = hit({ x: e.x + pts[0][0], y: e.y + pts[0][1] });
         inferred ||= !!from;
       }
+
       if (!to) {
         to = hit({
           x: e.x + pts[pts.length - 1][0],
@@ -1876,21 +2281,28 @@ export class Scene {
         });
         inferred ||= !!to;
       }
+
       if (from && to && from.id !== to.id) {
         const labelEl = this.boundText(e);
         const label = labelEl?.text;
-        edges.push({
+
+        const edge: GraphEdge = {
           id: e.id,
           from: display(from),
           to: display(to),
           fromId: from.id,
           toId: to.id,
-          ...(label ? { label } : {}),
           ...reportTextColor(labelEl),
-          ...(e.strokeStyle !== "solid" ? { dashed: true as const } : {}),
-          ...(e.startArrowhead && e.endArrowhead ? { both: true as const } : {}),
-          ...(inferred ? { inferred: true as const } : {}),
-        });
+        };
+
+        if (label) edge.label = label;
+
+        if (e.strokeStyle !== "solid") edge.dashed = true;
+
+        if (e.startArrowhead && e.endArrowhead) edge.both = true;
+
+        if (inferred) edge.inferred = true;
+        edges.push(edge);
       } else {
         sketches.push({
           id: e.id,
@@ -1903,6 +2315,7 @@ export class Scene {
         });
       }
     }
+
     for (const e of live) {
       if (e.type === "freedraw" || e.type === "image") {
         sketches.push({
@@ -1918,6 +2331,7 @@ export class Scene {
     }
 
     const sel = selection && selection.size ? selection : undefined;
+
     return {
       frames: frames.map((f) => ({
         id: f.id,
@@ -1927,49 +2341,63 @@ export class Scene {
         w: Math.round(f.width),
         h: Math.round(f.height),
       })),
-      nodes: nodes.map((n) => ({
-        id: n.id,
-        label: this.labelOf(n),
-        shape: n.type,
-        x: Math.round(n.x),
-        y: Math.round(n.y),
-        w: Math.round(n.width),
-        h: Math.round(n.height),
-        ...(n.frameId ? { frame: frameName(n.frameId) } : {}),
-        ...((n.customData?.iconFill ?? n.backgroundColor) &&
-        (n.customData?.iconFill ?? n.backgroundColor) !== "transparent"
-          ? {
-              color:
-                COLOR_NAMES[n.customData?.iconFill ?? n.backgroundColor] ??
-                n.customData?.iconFill ??
-                n.backgroundColor,
-            }
-          : {}),
-        ...reportTextColor(this.boundText(n)),
-        ...(n.customData?.icon ? { icon: n.customData.icon } : {}),
-        ...(n.customData?.kind ? { kind: n.customData.kind } : {}),
-        ...(n.customData?.author === "agent" ? { by: "agent" } : {}),
-        ...(sel?.has(n.id) ? { selected: true } : {}),
-      })),
-      edges: edges.map(({ fromId: _fromId, toId: _toId, ...rest }) => ({
-        ...rest,
-        ...(sel?.has(rest.id) ? { selected: true } : {}),
-      })),
+      nodes: nodes.map((n): GraphNode => {
+        const node: GraphNode = {
+          id: n.id,
+          label: this.labelOf(n),
+          "shape": n.type,
+          x: Math.round(n.x),
+          y: Math.round(n.y),
+          w: Math.round(n.width),
+          h: Math.round(n.height),
+        };
+
+        if (n.frameId) node.frame = frameName(n.frameId);
+        const fill = n.customData?.iconFill ?? n.backgroundColor;
+
+        if (fill && fill !== "transparent") node.color = COLOR_NAMES[fill] ?? fill;
+        Object.assign(node, reportTextColor(this.boundText(n)));
+
+        if (n.customData?.icon) node.icon = n.customData.icon;
+
+        if (n.customData?.kind) node.kind = n.customData.kind;
+
+        if (n.customData?.author === "agent") node.by = "agent";
+
+        if (sel?.has(n.id)) node.selected = true;
+
+        return node;
+      }),
+      edges: edges.map(({ fromId: _fromId, toId: _toId, ...rest }): SelectedEdge => {
+        const edge: SelectedEdge = rest;
+
+        if (sel?.has(rest.id)) edge.selected = true;
+
+        return edge;
+      }),
       notes: live
         .filter((e) => this.isNote(e))
         .map((n) => {
           const t = n.type === "stickynote" ? this.boundText(n) : n;
-          return {
+
+          const note: GraphNote = {
             id: n.id,
             text: n.type === "stickynote" ? (t?.originalText ?? t?.text ?? "") : n.text,
             x: Math.round(n.x),
             y: Math.round(n.y),
-            ...(n.type === "stickynote" ? { sticky: true } : {}),
-            ...(n.frameId ? { frame: frameName(n.frameId) } : {}),
-            ...(t ? reportTextColor(t) : {}),
-            ...(n.customData?.author === "agent" ? { by: "agent" } : {}),
-            ...(sel?.has(n.id) ? { selected: true } : {}),
           };
+
+          if (n.type === "stickynote") note.sticky = true;
+
+          if (n.frameId) note.frame = frameName(n.frameId);
+
+          if (t) Object.assign(note, reportTextColor(t));
+
+          if (n.customData?.author === "agent") note.by = "agent";
+
+          if (sel?.has(n.id)) note.selected = true;
+
+          return note;
         }),
       sketches,
       rawEdges: edges,
@@ -1983,7 +2411,17 @@ export type GraphView = Partial<Omit<ReturnType<Scene["graph"]>, "rawEdges">>;
 /** Compact graph for the agent (drops the internal raw edge list). */
 export function graphView(scene: Scene, selection?: Set<string>): GraphView {
   const { rawEdges: _rawEdges, ...g } = scene.graph(selection);
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(g)) if (v.length) out[k] = v;
+  const out: GraphView = {};
+
+  if (g.frames.length) out.frames = g.frames;
+
+  if (g.nodes.length) out.nodes = g.nodes;
+
+  if (g.edges.length) out.edges = g.edges;
+
+  if (g.notes.length) out.notes = g.notes;
+
+  if (g.sketches.length) out.sketches = g.sketches;
+
   return out;
 }

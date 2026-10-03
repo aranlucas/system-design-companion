@@ -16,6 +16,7 @@ export interface IconPart {
 /** Native primitives keep icons editable and portable in exported diagrams. */
 export function iconElements(c: Component, width: number): IconPart[] {
   const x = (width - 80) / 2;
+
   switch (c.icon) {
     case "database":
       return [
@@ -128,7 +129,7 @@ export function iconElements(c: Component, width: number): IconPart[] {
           points: [
             [0, 0],
             [38, 0],
-          ] as Point[],
+          ] satisfies Point[],
         },
       ]);
     case "cache":
@@ -142,7 +143,7 @@ export function iconElements(c: Component, width: number): IconPart[] {
             points: [
               [0, 0],
               [0, 10],
-            ] as Point[],
+            ] satisfies Point[],
           },
           {
             type: "line" as const,
@@ -151,7 +152,7 @@ export function iconElements(c: Component, width: number): IconPart[] {
             points: [
               [0, 0],
               [0, 10],
-            ] as Point[],
+            ] satisfies Point[],
           },
           {
             type: "line" as const,
@@ -160,7 +161,7 @@ export function iconElements(c: Component, width: number): IconPart[] {
             points: [
               [0, 0],
               [10, 0],
-            ] as Point[],
+            ] satisfies Point[],
           },
           {
             type: "line" as const,
@@ -169,7 +170,7 @@ export function iconElements(c: Component, width: number): IconPart[] {
             points: [
               [0, 0],
               [10, 0],
-            ] as Point[],
+            ] satisfies Point[],
           },
         ]),
       ];

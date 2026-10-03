@@ -1,5 +1,7 @@
 import { Scene, graphView } from "../src/worker/scene.ts";
+
 const s = new Scene([]);
+
 const r = s.apply(
   [
     {
@@ -10,13 +12,13 @@ const r = s.apply(
       width: 1200,
       height: 600,
     },
-    { op: "add_node", ref: "c", label: "Client", shape: "ellipse", frame: "hld" },
+    { op: "add_node", ref: "c", label: "Client", "shape": "ellipse", frame: "hld" },
     { op: "add_node", ref: "lb", label: "Load Balancer", place: { right_of: "c" }, frame: "hld" },
     { op: "add_node", ref: "api", label: "API Service", place: { right_of: "lb" }, color: "blue" },
     {
       op: "add_node",
       label: "Postgres",
-      shape: "ellipse",
+      "shape": "ellipse",
       place: { below: "api" },
       color: "green",
     },
@@ -34,17 +36,26 @@ const r = s.apply(
   ],
   "agent",
 );
+
 console.log(r.filter((x) => !x.ok));
+
 console.log(JSON.stringify(graphView(s), null, 1));
+
 console.log("layout", s.layout("LR", "hld"));
+
 s.apply([{ op: "remove", target: "Postgres" }], "agent");
-const g = graphView(s) as any;
+
+const g = graphView(s);
+
+if (!g.nodes || !g.edges) throw new Error("The smoke scene must retain nodes and edges");
+
 console.log(
   "after remove edges:",
   g.edges.length,
   "nodes:",
   g.nodes.map((n: any) => n.label),
 );
+
 console.log(
   "changed",
   s.changedElements().length,

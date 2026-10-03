@@ -15,6 +15,7 @@ export interface El {
   versionNonce: number;
   isDeleted: boolean;
   index?: string | null;
+  // eslint-disable-next-line anti-slop/no-unsafe-dictionary-type -- Versioned Excalidraw wire extensions are intentionally opaque and forwarded losslessly; only the named core fields are validated here. This index does not establish extension-field safety.
   [key: string]: any;
 }
 
@@ -58,7 +59,9 @@ export type ServerMessage =
   | { type: "init"; elements: El[]; name: string }
   | { type: "rename"; name: string }
   | { type: "update"; elements: El[]; origin: "human" | "agent" | "system" }
-  | { type: "rpc"; reqId: string; method: TabRpcMethod; params: any }
+  | { type: "rpc"; reqId: string; method: "screenshot"; params: ScreenshotParams }
+  | { type: "rpc"; reqId: string; method: "mermaid"; params: MermaidParams }
+  | { type: "rpc"; reqId: string; method: "focus_view"; params: FocusViewParams }
   | { type: "peers"; count: number }
   /** Another tab's presence; relayed so Excalidraw can draw its cursor and selection. */
   | {
@@ -74,13 +77,16 @@ export type ServerMessage =
 export interface ScreenshotParams {
   elementIds?: string[];
 }
+
 export interface ScreenshotResult {
   base64: string;
   mimeType: string;
 }
+
 export interface MermaidParams {
   source: string;
 }
+
 export interface MermaidResult {
   elements: El[];
 }

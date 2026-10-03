@@ -1,12 +1,16 @@
+import { pointListSchema } from "../shared/schemas.ts";
 // Draws Excalidraw elements as a static, hand-drawn SVG (rough.js), without bundling Excalidraw.
 import rough from "roughjs";
 import type { Options } from "roughjs/bin/core";
 import type { El } from "../shared/protocol.ts";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+
 const PAD = 24;
+
 const HAND = `Excalifont, "Chalkboard SE", "Comic Sans MS", "Segoe Print", cursive`;
-const FONTS: Record<number, string> = {
+
+const FONTS = {
   1: HAND,
   2: `Helvetica, Arial, sans-serif`,
   3: `"Cascadia Code", Menlo, monospace`,
@@ -15,6 +19,8 @@ const FONTS: Record<number, string> = {
   8: `"Comic Shanns", "Comic Sans MS", cursive`,
 };
 
+const fontNames = new Map(Object.entries(FONTS).map(([id, name]) => [Number(id), name]));
+
 type Pt = [number, number];
 
 function node<K extends keyof SVGElementTagNameMap>(
@@ -22,15 +28,18 @@ function node<K extends keyof SVGElementTagNameMap>(
   attrs: Record<string, string | number> = {},
 ): SVGElementTagNameMap[K] {
   const el = document.createElementNS(SVG_NS, tag);
+
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+
   return el;
 }
 
 const absPoints = (e: El): Pt[] =>
-  ((e.points as Pt[] | undefined) ?? [[0, 0]]).map(([px, py]) => [e.x + px, e.y + py]);
+  pointListSchema.parse(e.points ?? [[0, 0]]).map(([px, py]) => [e.x + px, e.y + py]);
 
 function bounds(els: El[]) {
   let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
+
   for (const e of els) {
     const pts: Pt[] =
       e.type === "arrow" || e.type === "line" || e.type === "freedraw"
@@ -39,7 +48,9 @@ function bounds(els: El[]) {
             [e.x, e.y],
             [e.x + e.width, e.y + e.height],
           ];
+
     if (e.type === "frame") pts.push([e.x, e.y - 24]); // frame title sits above the frame
+
     for (const [x, y] of pts) {
       x0 = Math.min(x0, x);
       y0 = Math.min(y0, y);
@@ -47,12 +58,14 @@ function bounds(els: El[]) {
       y1 = Math.max(y1, y);
     }
   }
+
   return { x: x0 - PAD, y: y0 - PAD, w: x1 - x0 + PAD * 2, h: y1 - y0 + PAD * 2 };
 }
 
 function roughOptions(e: El): Options {
   const sw = e.strokeWidth ?? 2;
   const filled = e.backgroundColor && e.backgroundColor !== "transparent";
+
   return {
     seed: e.seed ?? 1,
     roughness: e.roughness ?? 1,
@@ -76,7 +89,9 @@ function roughOptions(e: El): Options {
 /** Excalidraw's corner radius for rounded rectangles (adaptive = type 3, proportional = type 2). */
 function cornerRadius(e: El) {
   const x = Math.min(e.width, e.height);
+
   if (e.roundness?.type === 3) return x <= 128 ? x * 0.25 : 32;
+
   return x * 0.25;
 }
 
@@ -96,14 +111,18 @@ function arrowhead(
   const size = Math.min(kind === "arrow" ? 30 : 15, len / 2);
   const ux = (tx - from[0]) / len;
   const uy = (ty - from[1]) / len;
+
   const wing = (deg: number): Pt => {
     const a = (deg * Math.PI) / 180;
+
     return [
       tx - size * (ux * Math.cos(a) - uy * Math.sin(a)),
       ty - size * (uy * Math.cos(a) + ux * Math.sin(a)),
     ];
   };
+
   const plain = { ...o, fill: undefined, strokeLineDash: undefined };
+
   switch (kind) {
     case "triangle":
     case "triangle_outline":
@@ -135,16 +154,20 @@ function arrowhead(
 function midpoint(pts: Pt[]): Pt {
   const segs = pts.slice(1).map((p, i) => Math.hypot(p[0] - pts[i][0], p[1] - pts[i][1]));
   let half = segs.reduce((a, b) => a + b, 0) / 2;
+
   for (let i = 0; i < segs.length; i++) {
     if (half <= segs[i]) {
       const t = segs[i] ? half / segs[i] : 0;
+
       return [
         pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t,
         pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t,
       ];
     }
+
     half -= segs[i];
   }
+
   return pts[0];
 }
 
@@ -159,16 +182,19 @@ function drawText(e: El, byId: Map<string, El>, fits: (() => void)[]): SVGGEleme
   let anchor: "start" | "middle" | "end" = "start";
   let x = e.x;
   let top = e.y;
+
   if (container) {
     const [cx, cy] =
       container.type === "arrow" || container.type === "line"
         ? midpoint(absPoints(container))
         : [container.x + container.width / 2, container.y + container.height / 2];
+
     anchor = "middle";
     x = cx;
     top = container.customData?.icon
       ? container.y + container.height - lines.length * lh - 5
       : cy - (lines.length * lh) / 2;
+
     if (container.type === "arrow" || container.type === "line")
       g.append(
         node("rect", {
@@ -188,12 +214,13 @@ function drawText(e: El, byId: Map<string, El>, fits: (() => void)[]): SVGGEleme
   }
 
   const text = node("text", {
-    "font-family": FONTS[e.fontFamily as number] ?? HAND,
+    "font-family": fontNames.get(Number(e.fontFamily)) ?? HAND,
     "font-size": fontSize,
     fill: e.strokeColor ?? "#1e1e1e",
     "text-anchor": anchor,
     "dominant-baseline": "middle",
   });
+
   lines.forEach((line, i) => {
     const span = node("tspan", { x, y: top + lh * i + lh / 2 });
     span.textContent = line;
@@ -206,12 +233,14 @@ function drawText(e: El, byId: Map<string, El>, fits: (() => void)[]): SVGGEleme
   fits.push(() => {
     for (const span of text.querySelectorAll("tspan")) {
       const w = span.getComputedTextLength();
+
       if (max > 0 && w > max * 1.02) {
         span.setAttribute("textLength", String(max));
         span.setAttribute("lengthAdjust", "spacingAndGlyphs");
       }
     }
   });
+
   return g;
 }
 
@@ -229,6 +258,7 @@ function drawFrame(e: El): SVGGElement {
       "stroke-width": 1,
     }),
   );
+
   const label = node("text", {
     x: e.x + 4,
     y: e.y - 8,
@@ -236,14 +266,20 @@ function drawFrame(e: El): SVGGElement {
     "font-size": 14,
     fill: "#868e96",
   });
+
   label.textContent = e.name ?? "Frame";
   g.append(label);
+
   return g;
 }
 
-function drawShape(rc: ReturnType<typeof rough.svg>, e: El): SVGGElement | SVGGElement[] | null {
+function drawPrimitive(
+  rc: ReturnType<typeof rough.svg>,
+  e: El,
+): SVGGElement | SVGGElement[] | null {
   const o = roughOptions(e);
   const { x, y, width: w, height: h } = e;
+
   switch (e.type) {
     case "rectangle":
       return e.roundness
@@ -264,18 +300,26 @@ function drawShape(rc: ReturnType<typeof rough.svg>, e: El): SVGGElement | SVGGE
     case "arrow":
     case "line": {
       const pts = absPoints(e);
+
       if (pts.length < 2) return null;
+
       const line =
         e.roundness && !e.elbowed && pts.length > 2
           ? rc.curve(pts, { ...o, fill: undefined })
           : rc.linearPath(pts, { ...o, fill: undefined });
+
       const out = [line];
+
       if (e.endArrowhead) out.push(...arrowhead(rc, e.endArrowhead, pts.at(-1)!, pts.at(-2)!, o));
+
       if (e.startArrowhead) out.push(...arrowhead(rc, e.startArrowhead, pts[0], pts[1], o));
+
       return out;
     }
+
     case "freedraw": {
       const pts = absPoints(e);
+
       const path = node("path", {
         d: `M ${pts.map(([px, py]) => `${px} ${py}`).join(" L ")}`,
         fill: "none",
@@ -284,10 +328,13 @@ function drawShape(rc: ReturnType<typeof rough.svg>, e: El): SVGGElement | SVGGE
         "stroke-linecap": "round",
         "stroke-linejoin": "round",
       });
+
       const g = node("g");
       g.append(path);
+
       return g;
     }
+
     case "image":
     case "embeddable":
     case "iframe":
@@ -299,6 +346,7 @@ function drawShape(rc: ReturnType<typeof rough.svg>, e: El): SVGGElement | SVGGE
 
 async function fitWhenFontsLoad(fits: (() => void)[]) {
   await document.fonts.ready;
+
   for (const fit of fits) fit();
 }
 
@@ -306,6 +354,7 @@ async function fitWhenFontsLoad(fits: (() => void)[]) {
 export function renderScene(svg: SVGSVGElement, elements: El[]) {
   svg.replaceChildren();
   const els = elements.filter((e) => !e.isDeleted);
+
   if (!els.length) return;
   const byId = new Map(els.map((e) => [e.id, e]));
   const b = bounds(els);
@@ -315,15 +364,20 @@ export function renderScene(svg: SVGSVGElement, elements: El[]) {
 
   const rc = rough.svg(svg);
   const fits: (() => void)[] = [];
+
   // Frames go underneath everything, like Excalidraw.
   for (const e of els) if (e.type === "frame" || e.type === "magicframe") svg.append(drawFrame(e));
+
   for (const e of els) {
     if (e.type === "frame" || e.type === "magicframe") continue;
-    const drawn = e.type === "text" ? drawText(e, byId, fits) : drawShape(rc, e);
+    const drawn = e.type === "text" ? drawText(e, byId, fits) : drawPrimitive(rc, e);
+
     if (!drawn) continue;
     const g = node("g");
     g.append(...(Array.isArray(drawn) ? drawn : [drawn]));
+
     if ((e.opacity ?? 100) < 100) g.setAttribute("opacity", String(e.opacity / 100));
+
     if (e.angle)
       g.setAttribute(
         "transform",
@@ -331,5 +385,6 @@ export function renderScene(svg: SVGSVGElement, elements: El[]) {
       );
     svg.append(g);
   }
+
   void fitWhenFontsLoad(fits);
 }

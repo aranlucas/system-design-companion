@@ -14,6 +14,7 @@ export function CopyRow({ label, text }: CopyRowProps) {
     },
     [],
   );
+
   return (
     <div className="row copy-row">
       {label && <span className="copy-label">{label}</span>}
@@ -23,6 +24,7 @@ export function CopyRow({ label, text }: CopyRowProps) {
         aria-label={label ? `Copy ${label} command` : "Copy text"}
         onClick={async () => {
           if (timer.current) clearTimeout(timer.current);
+
           try {
             await navigator.clipboard.writeText(text);
             setState("copied");

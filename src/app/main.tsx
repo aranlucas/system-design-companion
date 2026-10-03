@@ -10,6 +10,7 @@ const Canvas = lazy(() => import("./canvas.tsx").then((module) => ({ default: mo
 const queryClient = new QueryClient();
 
 const m = location.pathname.match(/^\/d\/([A-Za-z0-9_-]+)/);
+
 const key = new URLSearchParams(location.search).get("k");
 
 createRoot(document.getElementById("root")!).render(

@@ -1,5 +1,22 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": ["worker-configuration.d.ts", "public/mcp-view.html", "pnpm-lock.yaml"],
-  "printWidth": 100
+  "ignorePatterns": [
+    "worker-configuration.d.ts",
+    "public/mcp-view.html",
+    "pnpm-lock.yaml",
+    ".agent/**",
+    ".agents/**",
+    ".claude/**",
+    ".codex/**",
+    ".continue/**",
+    ".cursor/**",
+    ".gemini/**",
+    ".opencode/**",
+    ".pi/**",
+    ".roo/**",
+    ".windsurf/**",
+    "tools/oxlint/anti-slop/**"
+  ],
+  "printWidth": 100,
+  "quoteProps": "preserve"
 }

@@ -3,11 +3,13 @@ import { describe, expect, it } from "vitest";
 import { solveLayout, type Box, type LayoutItem } from "../src/worker/solve-layout.ts";
 
 const GAP = 24;
+
 const opts = { gap: GAP, alignTolerance: 16 };
 
 function crowd(n: number, seed: number): LayoutItem[] {
   let r = seed;
   const rand = () => (r = (r * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+
   return Array.from({ length: n }, () => ({
     box: {
       x: Math.round(rand() * 700),
@@ -28,13 +30,16 @@ const apply = (items: LayoutItem[]) =>
 
 const tooClose = (bs: Box[]) => {
   let n = 0;
+
   for (let i = 0; i < bs.length; i++)
     for (let j = i + 1; j < bs.length; j++) {
       const [a, b] = [bs[i], bs[j]];
       const m = GAP - 1;
+
       if (a.x < b.x + b.w + m && b.x < a.x + a.w + m && a.y < b.y + b.h + m && b.y < a.y + a.h + m)
         n++;
     }
+
   return n;
 };
 
@@ -53,6 +58,7 @@ describe("solveLayout", () => {
   // A solve can bring a node within snapping range of a row, so tidy repeats it (up to 4 rounds).
   it.each([3, 9])("settles within four rounds with alignment on (seed %i)", (seed) => {
     let items = crowd(40, seed);
+
     for (let round = 0; round < 4; round++) items = apply(items);
     expect(solveLayout(items, opts).every((m) => !m.dx && !m.dy)).toBe(true);
     expect(tooClose(items.map((item) => item.box))).toBe(0);
@@ -63,6 +69,7 @@ describe("solveLayout", () => {
       { box: { x: 0, y: 0, w: 160, h: 70 }, alignable: true, weight: 1 },
       { box: { x: 400, y: 300, w: 160, h: 70 }, alignable: true, weight: 1 },
     ];
+
     expect(solveLayout(items, opts)).toEqual([
       { dx: 0, dy: 0, aligned: false },
       { dx: 0, dy: 0, aligned: false },
@@ -74,6 +81,7 @@ describe("solveLayout", () => {
       { box: { x: 0, y: 0, w: 200, h: 100 }, alignable: true, weight: 1 },
       { box: { x: 400, y: 20, w: 160, h: 70 }, alignable: true, weight: 1 },
     ];
+
     // The big box's centre is y=50; the small one's is 55, so it moves up 5.
     expect(solveLayout(items, opts)[1]).toEqual({ dx: 0, dy: -5, aligned: true });
   });
@@ -83,6 +91,7 @@ describe("solveLayout", () => {
       { box: { x: 0, y: 0, w: 200, h: 100 }, alignable: true, weight: 1 },
       { box: { x: 400, y: 20, w: 160, h: 70 }, alignable: false, weight: 1 },
     ];
+
     expect(solveLayout(items, opts)[1]).toEqual({ dx: 0, dy: 0, aligned: false });
   });
 });

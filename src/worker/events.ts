@@ -1,3 +1,4 @@
+import type { JsonValue } from "../shared/schemas.ts";
 // MCP Events: the catalog, subscription storage, and signed webhook delivery.
 //
 // ChatGPT is the only client that speaks this today, and it only speaks webhook
@@ -18,13 +19,18 @@ import { ensureSchema, parseLink, sha256, verifyKey } from "./store.ts";
 
 /** Implementation-defined JSON-RPC codes from the MCP Events draft. */
 const ERR_NOT_FOUND = -32011;
+
 const ERR_FORBIDDEN = -32012;
+
 const ERR_CALLBACK = -32015;
+
 const ERR_INVALID_PARAMS = -32602;
 
 /** Finite subscription lifetimes bound how long the grant can authorize delivery. */
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000;
+
 const MIN_TTL_MS = 5 * 60 * 1000;
+
 const MAX_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** A (principal, callback URL) pair that answered a challenge is not asked again for this long. */
@@ -32,8 +38,11 @@ const VERIFICATION_TTL_MS = 60 * 60 * 1000;
 
 /** One request per delivery, this many attempts, this much backoff between them. */
 const MAX_ATTEMPTS = 3;
+
 const DELIVERY_TIMEOUT_MS = 5_000;
+
 const RETRY_BASE_MS = 500;
+
 const MAX_BODY_BYTES = 256 * 1024;
 
 /** One event type, as `events/list` describes it. */
@@ -41,8 +50,8 @@ interface EventType {
   name: string;
   description: string;
   delivery: string[];
-  inputSchema: Record<string, unknown>;
-  payloadSchema: Record<string, unknown>;
+  inputSchema: z.core.JSONSchema.JSONSchema;
+  payloadSchema: z.core.JSONSchema.JSONSchema;
 }
 
 /** A stored webhook subscription. The secret is the client's, chosen at subscribe time. */
@@ -63,13 +72,28 @@ interface Subscription {
 }
 
 /** The body POSTed to a callback: an event occurrence, or a control envelope. */
+export interface DiagramEventData {
+  diagram_id: string;
+  origin?: "human" | "agent" | "system";
+  changed_count?: number;
+  name?: string;
+  snapshot_id?: string;
+}
+
+interface ProtocolErrorData {
+  kind?: string;
+  name?: string;
+  reason?: string;
+  url?: string;
+}
+
 type DeliveryBody =
   | { type: "verification"; challenge: string }
   | {
       eventId: string;
       name: string;
       timestamp: string;
-      data: Record<string, unknown>;
+      data: DiagramEventData;
       cursor: null;
     };
 
@@ -94,13 +118,13 @@ type SubscriptionRow = {
 type PostResult = { status: number; body: string } | null;
 
 /** What a callback must return to prove it wants deliveries. */
-type ChallengeEcho = { challenge?: unknown };
+const challengeEchoSchema = z.object({ challenge: z.string() });
 
 const str = z.string();
 
 const subscribeParams = z.looseObject({
   name: str,
-  arguments: z.record(z.string(), z.unknown()).optional(),
+  arguments: z.record(z.string(), z.json()).optional(),
   delivery: z.object({ mode: z.literal("webhook"), url: str, secret: str.optional() }),
   cursor: z.string().nullable().optional(),
   ttlMs: z.number().int().positive().nullable().optional(),
@@ -108,24 +132,27 @@ const subscribeParams = z.looseObject({
 
 const unsubscribeParams = z.looseObject({
   name: str,
-  arguments: z.record(z.string(), z.unknown()).optional(),
+  arguments: z.record(z.string(), z.json()).optional(),
   delivery: z.object({ mode: z.literal("webhook"), url: str }),
 });
 
 const listParams = z.looseObject({ cursor: z.string().optional() });
 
 type SubscribeRequest = z.infer<typeof subscribeParams>;
+
 type UnsubscribeRequest = z.infer<typeof unsubscribeParams>;
 
 const diagramArguments = z.strictObject({
   diagram: z.string().min(1).describe("The diagram share link, e.g. https://…/d/<id>?k=<key>."),
 });
+
 const changedArguments = diagramArguments.extend({
   include_agent: z
     .boolean()
     .optional()
     .describe("Include agent edits. Off by default to avoid feedback loops."),
 });
+
 type EventArguments = z.infer<typeof changedArguments>;
 
 export const EVENT_TYPES: EventType[] = [
@@ -189,6 +216,7 @@ export function registerEvents(server: McpServer, env: Env, principal: McpPrinci
     { params: listParams, result: z.looseObject({ events: z.array(z.unknown()) }) },
     async () => {
       requireRead(principal);
+
       return { events: EVENT_TYPES };
     },
   );
@@ -206,12 +234,15 @@ export function registerEvents(server: McpServer, env: Env, principal: McpPrinci
 
 async function subscribe(env: Env, principal: McpPrincipal, params: SubscribeRequest) {
   requireRead(principal);
+
   if (!byName.has(params.name))
     throw protocolError(ERR_NOT_FOUND, "NotFound", { kind: "event", name: params.name });
 
   const { url, secret } = params.delivery;
+
   if (!secret) throw invalidParams("delivery.secret is required for webhook delivery");
   validateCallbackUrl(url);
+
   if (!callbackAllowed(env, url))
     throw protocolError(ERR_CALLBACK, "CallbackEndpointError", {
       reason: "host_not_allowed",
@@ -221,12 +252,14 @@ async function subscribe(env: Env, principal: McpPrincipal, params: SubscribeReq
 
   const args = validateArguments(params.name, params.arguments);
   const parsed = parseLink(args.diagram)!;
+
   if (!(await verifyKey(env, parsed.id, parsed.key)))
     throw protocolError(ERR_FORBIDDEN, "Forbidden", { reason: "diagram link is not valid" });
   const diagramId = parsed.id;
   const keyHash = await sha256(parsed.key);
   const includeAgent = args.include_agent === true;
   await ensureSchema(env);
+
   const sub: Subscription = {
     id: await subscriptionId(principal, url, params.name, diagramId, keyHash, includeAgent),
     userId: principal.userId,
@@ -258,6 +291,7 @@ async function subscribe(env: Env, principal: McpPrincipal, params: SubscribeReq
   const previous = await env.DB.prepare("SELECT * FROM mcp_event_subscriptions WHERE id = ?")
     .bind(sub.id)
     .first<SubscriptionRow>();
+
   if (previous?.secret !== secret && previous && previous.expires_at > Date.now()) {
     sub.previousSecret = previous.secret;
     sub.previousSecretUntil = Date.now() + 5 * 60 * 1000;
@@ -265,6 +299,7 @@ async function subscribe(env: Env, principal: McpPrincipal, params: SubscribeReq
     sub.previousSecret = previous.previous_secret;
     sub.previousSecretUntil = previous.previous_secret_until;
   }
+
   await env.DB.prepare(
     `INSERT INTO mcp_event_subscriptions
       (id, user_id, event_name, diagram_id, callback_url, secret, include_agent, expires_at,
@@ -301,10 +336,12 @@ async function subscribe(env: Env, principal: McpPrincipal, params: SubscribeReq
 
 async function unsubscribe(env: Env, principal: McpPrincipal, params: UnsubscribeRequest) {
   requireRead(principal);
+
   if (!byName.has(params.name))
     throw protocolError(ERR_NOT_FOUND, "NotFound", { kind: "event", name: params.name });
   const args = validateArguments(params.name, params.arguments);
   const parsed = parseLink(args.diagram)!;
+
   const id = await subscriptionId(
     principal,
     params.delivery.url,
@@ -313,7 +350,9 @@ async function unsubscribe(env: Env, principal: McpPrincipal, params: Unsubscrib
     await sha256(parsed.key),
     args.include_agent === true,
   );
+
   await removeSubscription(env, id);
+
   return {};
 }
 
@@ -339,12 +378,15 @@ async function subscriptionId(
     keyHash,
     includeAgent,
   ]);
+
   return `sub_${(await sha256(canonical)).slice(0, 24)}`;
 }
 
 function grantTtl(requested: number | null | undefined): number {
   // A null ttlMs asks for no expiry, which we decline by granting a finite one.
-  const wanted = typeof requested === "number" && requested > 0 ? requested : DEFAULT_TTL_MS;
+  const wanted =
+    requested !== null && requested !== undefined && requested > 0 ? requested : DEFAULT_TTL_MS;
+
   return Math.min(Math.max(wanted, MIN_TTL_MS), MAX_TTL_MS);
 }
 
@@ -358,9 +400,10 @@ export async function deliverDiagramEvent(
   env: Env,
   diagramId: string,
   name: string,
-  data: Record<string, unknown>,
+  data: DiagramEventData,
 ): Promise<void> {
   const subs = await subscriptionsFor(env, diagramId, name);
+
   const event: DeliveryBody = {
     eventId: `evt_${crypto.randomUUID()}`,
     name,
@@ -368,6 +411,7 @@ export async function deliverDiagramEvent(
     data,
     cursor: null,
   };
+
   await Promise.all(
     subs.map(async (sub) => {
       // Agent edits are withheld unless this subscriber asked for them, so an
@@ -380,12 +424,14 @@ export async function deliverDiagramEvent(
 
 async function subscriptionsFor(env: Env, diagramId: string, name: string) {
   await ensureSchema(env);
+
   const { results } = await env.DB.prepare(
     `SELECT * FROM mcp_event_subscriptions
       WHERE diagram_id = ? AND event_name = ? AND expires_at > ?`,
   )
     .bind(diagramId, name, Date.now())
     .all<SubscriptionRow>();
+
   return results.map(rowToSubscription);
 }
 
@@ -412,26 +458,35 @@ async function sendWithBackoff(env: Env, sub: Subscription, body: DeliveryBody):
   // event delivery is identified by its eventId while a control envelope uses
   // msg_<type>_<random>. The id is stable across retries, so the receiver can dedupe.
   const msgId = "eventId" in body ? body.eventId : `msg_${body.type}_${crypto.randomUUID()}`;
+
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     // oxlint-disable-next-line no-await-in-loop -- one attempt at a time, by design
     const active = await activeSubscription(env, sub);
+
     if (!active) return false;
     // oxlint-disable-next-line no-await-in-loop -- sign a fresh attempt after checking access
     const res = await post(env, active, msgId, body);
+
     if (res && res.status >= 200 && res.status < 300) return true;
+
     // 410 and 413 are the endpoint saying never to retry this delivery.
     if (res?.status === 410) {
       // oxlint-disable-next-line no-await-in-loop -- a gone callback cancels this subscription
       await removeSubscription(env, sub.id);
+
       return false;
     }
+
     if (res?.status === 413) return false;
+
     if (res && res.status < 500 && res.status !== 408 && res.status !== 429) return false;
+
     if (attempt < MAX_ATTEMPTS) {
       // oxlint-disable-next-line no-await-in-loop -- backoff is the point
       await sleep(RETRY_BASE_MS * 2 ** (attempt - 1));
     }
   }
+
   return false;
 }
 
@@ -444,13 +499,18 @@ async function post(
 ): Promise<PostResult> {
   validateCallbackUrl(sub.callbackUrl);
   const text = JSON.stringify(body);
+
   if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) {
     console.error("mcp events: payload too large", msgId);
+
     return null;
   }
+
   const timestamp = Math.floor(Date.now() / 1000);
+
   try {
     await checkCallbackDestination(env, sub.callbackUrl);
+
     const res = await fetch(sub.callbackUrl, {
       method: "POST",
       // A redirect can point at an internal address that the subscribe-time check missed.
@@ -465,10 +525,13 @@ async function post(
       },
       body: text,
     });
+
     if (!("type" in body)) {
       await res.body?.cancel();
+
       return { status: res.status, body: "" };
     }
+
     return { status: res.status, body: await boundedResponse(res) };
   } catch {
     return null;
@@ -478,19 +541,22 @@ async function post(
 /** Ask the endpoint to prove it wants deliveries before we start sending them. */
 async function verifyCallback(env: Env, sub: Subscription): Promise<boolean> {
   const challenge = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
+
   const res = await post(env, sub, `msg_verification_${crypto.randomUUID()}`, {
     type: "verification",
     challenge,
   });
+
   if (!res || res.status < 200 || res.status >= 300) return false;
   // The echo has to come back and match, compared in constant time.
-  let echoed: unknown;
+  let echoed: string;
+
   try {
-    echoed = (JSON.parse(res.body) as ChallengeEcho).challenge;
+    echoed = challengeEchoSchema.parse(JSON.parse(res.body)).challenge;
   } catch {
     return false;
   }
-  if (typeof echoed !== "string") return false;
+
   // Web Crypto verifies MACs in constant time on both Workers and Node.
   const key = await crypto.subtle.importKey(
     "raw",
@@ -499,23 +565,30 @@ async function verifyCallback(env: Env, sub: Subscription): Promise<boolean> {
     false,
     ["sign", "verify"],
   );
+
   const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(challenge));
+
   return crypto.subtle.verify("HMAC", key, signature, new TextEncoder().encode(echoed));
 }
 
 function wasVerified(userId: string, url: string): boolean {
   const key = JSON.stringify([userId, url]);
   const until = verified.get(key);
+
   if (until === undefined) return false;
+
   if (until < Date.now()) {
     verified.delete(key);
+
     return false;
   }
+
   return true;
 }
 
 function markVerified(userId: string, url: string) {
   for (const [key, until] of verified) if (until < Date.now()) verified.delete(key);
+
   if (verified.size >= 1024) verified.delete(verified.keys().next().value!);
   verified.set(JSON.stringify([userId, url]), Date.now() + VERIFICATION_TTL_MS);
 }
@@ -529,16 +602,19 @@ function redacted(url: string): string {
 
 function decodeSecret(secret: string): Uint8Array {
   if (!/^whsec_[A-Za-z0-9+/]+={0,2}$/.test(secret)) throw new Error("missing whsec_ prefix");
+
   return Uint8Array.from(atob(secret.slice("whsec_".length)), (c) => c.charCodeAt(0));
 }
 
 function assertSecretLength(secret: string): void {
   let bytes: Uint8Array;
+
   try {
     bytes = decodeSecret(secret);
   } catch {
     throw invalidParams("delivery.secret must be whsec_ followed by base64 of 24-64 bytes");
   }
+
   if (bytes.length < 24 || bytes.length > 64)
     throw invalidParams("delivery.secret must be whsec_ followed by base64 of 24-64 bytes");
 }
@@ -557,17 +633,19 @@ async function sign(
     false,
     ["sign"],
   );
+
   const mac = await crypto.subtle.sign(
     "HMAC",
     key,
     new TextEncoder().encode(`${msgId}.${timestamp}.${body}`),
   );
+
   return `v1,${btoa(String.fromCharCode(...new Uint8Array(mac)))}`;
 }
 
 // ---------- errors and small helpers ----------
 
-function protocolError(code: number, message: string, data?: unknown): ProtocolError {
+function protocolError(code: number, message: string, data?: ProtocolErrorData): ProtocolError {
   return new ProtocolError(code, message, data);
 }
 
@@ -583,11 +661,14 @@ type KeyHashRow = { key_hash: string };
 
 function validateArguments(
   name: string,
-  args: Record<string, unknown> | undefined,
+  args: Record<string, JsonValue> | undefined,
 ): EventArguments {
   const result = (name === "diagram.changed" ? changedArguments : diagramArguments).safeParse(args);
+
   if (!result.success) throw invalidParams("arguments do not match the event inputSchema");
+
   if (!parseLink(result.data.diagram)) throw invalidParams("diagram must be a valid share link");
+
   return result.data;
 }
 
@@ -598,12 +679,15 @@ function requireRead(principal: McpPrincipal): void {
 
 function validateCallbackUrl(value: string): void {
   let url: URL;
+
   try {
     url = new URL(value);
   } catch {
     throw invalidParams("delivery.url must be an HTTPS URL");
   }
+
   const host = url.hostname.toLowerCase().replace(/\.$/, "");
+
   // Global fetch uses Cloudflare's public network (global_fetch_strictly_public).
   // Reject literal IPs and local hostnames as well, and never follow redirects.
   if (
@@ -630,6 +714,7 @@ async function signatures(
   body: string,
 ): Promise<string> {
   const current = await sign(sub.secret, id, at, body);
+
   return sub.previousSecret && sub.previousSecretUntil > Date.now()
     ? `${current} ${await sign(sub.previousSecret, id, at, body)}`
     : current;
@@ -645,20 +730,26 @@ async function activeSubscription(env: Env, sub: Subscription): Promise<Subscrip
   const current = await env.DB.prepare("SELECT * FROM mcp_event_subscriptions WHERE id = ?")
     .bind(sub.id)
     .first<SubscriptionRow>();
+
   if (!current || current.expires_at <= Date.now()) return null;
+
   const key = await env.DB.prepare(
     "SELECT key_hash FROM diagrams WHERE id = ? AND NOT EXISTS (SELECT 1 FROM deleted_diagrams WHERE diagram_id = ?)",
   )
     .bind(sub.diagramId, sub.diagramId)
     .first<KeyHashRow>();
+
   const { eventAuthorizationActive } = await import("./oauth.ts");
+
   if (
     !key ||
     key.key_hash !== sub.keyHash ||
     !(await eventAuthorizationActive(env, sub.userId, sub.authorizationId, sub.resource))
   ) {
     await removeSubscription(env, sub.id);
+
     return null;
   }
+
   return rowToSubscription(current);
 }
