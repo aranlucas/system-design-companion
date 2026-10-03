@@ -11,6 +11,7 @@ function fresh(): Scene {
 function applyOk(s: Scene, ops: Op[], author: Author = "agent") {
   const res = s.apply(ops, author);
   expect(res.every((r) => r.ok)).toBe(true);
+
   return res;
 }
 
@@ -56,15 +57,18 @@ describe("add_node", () => {
       { op: "connect", from: "a", to: "b" },
     ]);
     const root = s.resolve("a");
+
     const art = s
       .live()
       .filter((e) => e.customData?.componentPart && e.groupIds.includes(root.groupIds[0]));
+
     const right = Math.max(
       ...art.map(
         (e) =>
           e.x + (e.type === "line" ? Math.max(...e.points.map((p: number[]) => p[0])) : e.width),
       ),
     );
+
     const arrow = s.live().find((e) => e.type === "arrow")!;
     expect(arrow.x).toBeLessThanOrEqual(right + 10);
     expect(root.width).toBeLessThanOrEqual(84);
@@ -111,9 +115,11 @@ describe("add_node", () => {
       { op: "connect", from: "api", to: "db" },
     ]);
     const root = s.resolve("db");
+
     const parts = s
       .live()
       .filter((e) => e.customData?.componentPart && e.groupIds.includes(root.groupIds[0]));
+
     const previous = { x: root.x, y: root.y, w: root.width, h: root.height };
     const positions = parts.map((p) => ({ x: p.x, y: p.y }));
     applyOk(s, [
@@ -192,6 +198,7 @@ describe("connect / disconnect", () => {
 
   it("rejects self-connections and unknown endpoints", () => {
     const s = fresh();
+
     const res = s.apply(
       [
         { op: "add_node", ref: "a", label: "A" },
@@ -200,6 +207,7 @@ describe("connect / disconnect", () => {
       ],
       "agent",
     );
+
     expect(res[1].ok).toBe(false);
     expect(res[1].error).toMatch("itself");
     expect(res[2].ok).toBe(false);
@@ -225,7 +233,7 @@ describe("update / remove", () => {
   it("renames, recolors and reshapes", () => {
     const s = fresh();
     applyOk(s, [{ op: "add_node", ref: "a", label: "A" }]);
-    applyOk(s, [{ op: "update", target: "a", label: "B", color: "blue", shape: "ellipse" }]);
+    applyOk(s, [{ op: "update", target: "a", label: "B", color: "blue", "shape": "ellipse" }]);
     const g = graph(s);
     expect(g.nodes[0].label).toBe("B");
     expect(g.nodes[0].color).toBe("blue");
@@ -289,6 +297,7 @@ describe("add_frame / add_note", () => {
     const label = s.boundText(note)!;
     expect(label).toMatchObject({ containerId: note.id, originalText: long, baseFontSize: 20 });
     expect(label.text).toContain("\n");
+
     for (const line of label.text.split("\n")) expect(line.length).toBeLessThanOrEqual(28);
     // The label sits inside the note, clear of the date footer.
     expect(label.x).toBeGreaterThanOrEqual(note.x + 16);
@@ -314,9 +323,11 @@ describe("add_frame / add_note", () => {
     // reading order, here the note, and its label must come along.
     applyOk(s, [{ op: "add_node", ref: "b", label: "Box", place: { at: { x: 600, y: 0 } } }]);
     const box = s.resolve("b");
+
     const s2 = new Scene(
       s.live().map((e) => (e.id === box.id ? { ...e, x: note.x - 10, y: note.y - 10 } : e)),
     );
+
     const before = { ...s2.resolve(note.id) };
     const offset = { x: label.x - note.x, y: label.y - note.y };
     expect(s2.tidy().separated).toBeGreaterThan(0);
@@ -349,12 +360,14 @@ describe("add_frame / add_note", () => {
 describe("text_color", () => {
   it("colors node, arrow and note text by name or hex, and reports it", () => {
     const s = fresh();
+
     const [a, , arrow, note] = applyOk(s, [
       { op: "add_node", ref: "a", label: "A", text_color: "red" },
       { op: "add_node", ref: "b", label: "B" },
       { op: "connect", from: "a", to: "b", label: "writes", text_color: "#123456" },
       { op: "add_note", text: "Hot path", text_color: "blue" },
     ]);
+
     expect(textOf(s, a.id!)?.strokeColor).toBe("#e03131");
     expect(textOf(s, arrow.id!)?.strokeColor).toBe("#123456");
     expect(textOf(s, note.id!)?.strokeColor).toBe("#1971c2");
@@ -370,12 +383,14 @@ describe("text_color", () => {
 
   it("recolors a component caption, a note and an arrow label with update", () => {
     const s = fresh();
+
     const [db, , , note] = applyOk(s, [
       { op: "add_node", ref: "db", kind: "sql_db" },
       { op: "add_node", ref: "api", label: "API" },
       { op: "connect", from: "api", to: "db", label: "reads" },
       { op: "add_note", ref: "n", text: "Note" },
     ]);
+
     applyOk(s, [
       { op: "update", target: "db", text_color: "green" },
       { op: "update", target: "n", text_color: "orange" },
@@ -403,10 +418,12 @@ describe("text_color", () => {
 describe("target resolution", () => {
   it("resolves ids, refs and case-insensitive labels", () => {
     const s = fresh();
+
     const [r] = applyOk(s, [
       { op: "add_node", ref: "api", label: "API Service" },
       { op: "update", target: "api service", label: "API Service v2" },
     ]);
+
     expect(graph(s).nodes[0].label).toBe("API Service v2");
     expect(s.resolve(r.id!).id).toBe(r.id);
   });
@@ -424,6 +441,7 @@ describe("target resolution", () => {
 
   it("continues the batch after a failed op", () => {
     const s = fresh();
+
     const res = s.apply(
       [
         { op: "add_node", ref: "good", label: "Good" },
@@ -432,6 +450,7 @@ describe("target resolution", () => {
       ],
       "agent",
     );
+
     expect(res.map((r) => r.ok)).toEqual([true, false, true]);
     expect(graph(s).nodes).toHaveLength(2);
   });

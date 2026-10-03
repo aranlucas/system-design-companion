@@ -15,12 +15,17 @@ const out = await build({
 });
 
 const results = Array.isArray(out) ? out : [out];
+
 const chunk = results
   .flatMap((r) => ("output" in r ? r.output : []))
   .find((o) => o.type === "chunk");
+
 if (!chunk || chunk.type !== "chunk") throw new Error("view build produced no JS chunk");
 
 const js = chunk.code.replaceAll("</script", "<\\/script");
+
 const html = readFileSync("src/view/index.html", "utf8").replace("/* VIEW_SCRIPT */", () => js);
+
 writeFileSync("public/mcp-view.html", html);
+
 console.log(`view: public/mcp-view.html (${(html.length / 1024).toFixed(1)} KiB)`);

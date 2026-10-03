@@ -1,3 +1,4 @@
+import { z } from "zod";
 // OAuth 2.1 authorization for the MCP endpoint.
 //
 // The canvas itself stays capability-link based: /d/:id?k=… is unchanged, so the
@@ -25,28 +26,38 @@ import {
   TOKEN_ENDPOINT,
   REGISTRATION_ENDPOINT,
 } from "./oauth-paths.ts";
-import { toMcpPrincipal, type OAuthHandlerContext } from "./principal.ts";
+import { toMcpPrincipal, oauthContextSchema } from "./principal.ts";
 
 /** Everything the authorization server can grant. */
 const SCOPES_SUPPORTED = ["mcp:read", "mcp:write"];
+
 /** The minimum for any MCP access, so clients ask for it first. */
 const REQUIRED_SCOPES = ["mcp:read"];
 
 /** Plain-language descriptions shown next to each scope on the consent page. */
-const SCOPE_BLURB: Record<string, string> = {
+const SCOPE_BLURB = {
   "mcp:read": "read and watch diagrams whose share links you give this agent",
   "mcp:write": "create diagrams and edit diagrams shared with this agent",
 };
 
+const scopeDescriptions = new Map(Object.entries(SCOPE_BLURB));
+
 const GITHUB_AUTHORIZE = "https://github.com/login/oauth/authorize";
+
 const GITHUB_TOKEN = "https://github.com/login/oauth/access_token";
+
 const GITHUB_USER = "https://api.github.com/user";
 
 /** The subset of the GitHub user API this deployment reads. */
 type GithubUser = { id: number };
 
 /** What the GitHub token exchange returns. */
-type GithubTokenResponse = { access_token?: string; error?: string };
+const githubTokenSchema = z.object({
+  access_token: z.string().optional(),
+  error: z.string().optional(),
+});
+
+const githubUserSchema = z.object({ id: z.number().refine(Number.isSafeInteger).positive() });
 
 /** State carried through the GitHub round trip; the verifier is never sent to GitHub. */
 type UpstreamState = { verifier: string };
@@ -67,9 +78,11 @@ const providers = new Map<string, OAuthProvider<Env>>();
  */
 export function oauthProvider(origin: string, app: ExportedHandler<Env>) {
   const cached = providers.get(origin);
+
   if (cached) return cached;
   const provider = new OAuthProvider<Env>(providerOptions(origin, app));
   providers.set(origin, provider);
+
   return provider;
 }
 
@@ -104,10 +117,12 @@ function providerOptions(
  */
 const mcpApiHandler: McpApiHandler = {
   async fetch(request, env, ctx) {
-    const context = ctx as unknown as OAuthHandlerContext;
+    const context = oauthContextSchema.parse(ctx);
+
     if (!context.auth.scope.includes("mcp:read"))
       return insufficientScope(context.auth, ["mcp:read"]);
     const { handleMcp } = await import("./mcp.ts");
+
     // The provider puts `auth` on the context at runtime; its own
     // ExportedHandler type does not declare it.
     return handleMcp(request, env, toMcpPrincipal(context));
@@ -122,25 +137,33 @@ export function oauthConfigured(env: Env): boolean {
 /** The /authorize and /github/callback routes, mounted by index.ts. */
 export async function oauthRoutes(request: Request, env: Env): Promise<Response> {
   const origin = new URL(request.url).origin;
+
   if (!oauthConfigured(env)) return notConfigured(origin);
   // The provider object is only a vehicle for the helpers, so a throwaway one
   // is enough: nothing here dispatches through it.
   const oauth = getOAuthApi(providerOptions(origin, app), env);
   const { pathname } = new URL(request.url);
+
   try {
     if (pathname === CALLBACK_PATH) {
       if (request.method !== "GET")
         return new Response(null, { status: 405, headers: { Allow: "GET" } });
+
       return await callback(request, env, origin, oauth);
     }
+
     if (request.method === "POST") return await decide(request, env, origin, oauth);
+
     if (request.method === "GET") return await startAuthorization(request, origin, oauth);
+
     return new Response(null, { status: 405, headers: { Allow: "GET, POST" } });
   } catch (error) {
     if (error instanceof AuthorizationError) {
       if (error.redirectTo) return Response.redirect(error.redirectTo, 302);
+
       return renderMessage(400, error.description);
     }
+
     throw error;
   }
 }
@@ -158,6 +181,7 @@ async function startAuthorization(
   const consent = await oauth.describeConsent(authRequest);
   const { handle, headers } = await oauth.beginConsent(authRequest);
   headers.set("content-type", "text/html; charset=utf-8");
+
   return new Response(consentPage(consent, handle, origin), { headers });
 }
 
@@ -169,24 +193,32 @@ async function decide(
   oauth: OAuthHelpers,
 ): Promise<Response> {
   const form = await request.formData();
-  const handle = form.get("handle");
-  if (typeof handle !== "string" || !handle) return renderMessage(400, "Malformed consent form.");
+  const parsedHandle = z.string().min(1).safeParse(form.get("handle"));
+
+  if (!parsedHandle.success) return renderMessage(400, "Malformed consent form.");
+  const handle = parsedHandle.data;
+
   if (form.get("decision") !== "allow") {
     const { redirectTo, headers } = await oauth.denyConsent(request, handle);
     headers.set("Location", redirectTo);
+
     return new Response(null, { status: 302, headers });
   }
+
   // The page decides the scope, but only from what the server supports.
   const scope = form
     .getAll("scope")
     .map(String)
     .filter((s) => SCOPES_SUPPORTED.includes(s));
+
   const approved = await oauth.approveConsent(request, handle, { scope });
   const verifier = crypto.randomUUID() + crypto.randomUUID();
+
   const { state, headers } = await oauth.beginUpstream(approved.request, {
     data: { verifier } satisfies UpstreamState,
     headers: approved.headers,
   });
+
   const { clientId } = githubConfig(env);
   const url = new URL(GITHUB_AUTHORIZE);
   url.searchParams.set("client_id", clientId);
@@ -197,6 +229,7 @@ async function decide(
   url.searchParams.set("code_challenge", await s256(verifier));
   url.searchParams.set("code_challenge_method", "S256");
   headers.set("Location", url.href);
+
   return new Response(null, { status: 302, headers });
 }
 
@@ -212,14 +245,19 @@ async function callback(
     data,
     headers,
   } = await oauth.finishUpstream<UpstreamState>(request);
+
   if (new URL(request.url).searchParams.get("error")) {
     headers.set("Location", authorizationErrorRedirect(authRequest, "access_denied"));
+
     return new Response(null, { status: 302, headers });
   }
+
   const code = new URL(request.url).searchParams.get("code");
+
   if (!code) return renderMessage(400, "GitHub did not return an authorization code.");
 
   const { clientId, clientSecret } = githubConfig(env);
+
   const res = await fetch(GITHUB_TOKEN, {
     redirect: "error",
     signal: AbortSignal.timeout(10_000),
@@ -233,7 +271,9 @@ async function callback(
       code_verifier: data.verifier,
     }),
   });
-  const exchanged = (await res.json()) as GithubTokenResponse;
+
+  const exchanged = githubTokenSchema.parse(await res.json());
+
   if (!res.ok || !exchanged.access_token)
     return renderMessage(
       502,
@@ -241,9 +281,11 @@ async function callback(
     );
 
   const user = await fetchGithubUser(exchanged.access_token);
+
   if (!user) return renderMessage(502, "Could not read your GitHub profile.");
 
   const authorizationId = crypto.randomUUID();
+
   const { redirectTo } = await oauth.completeAuthorization({
     request: authRequest,
     // Namespaced so a GitHub id can never collide with another provider's subject.
@@ -252,14 +294,18 @@ async function callback(
     scope: authRequest.scope,
     props: { authorizationId },
   });
+
   headers.set("Location", redirectTo);
+
   return new Response(null, { status: 302, headers });
 }
 
 function githubConfig(env: Env) {
   const { GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET } = env;
+
   if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET)
     throw new Error("GitHub sign-in is not configured");
+
   return { clientId: GITHUB_CLIENT_ID, clientSecret: GITHUB_CLIENT_SECRET };
 }
 
@@ -273,13 +319,16 @@ async function fetchGithubUser(accessToken: string): Promise<GithubUser | null> 
     redirect: "error",
     signal: AbortSignal.timeout(10_000),
   });
+
   if (!res.ok) return null;
-  const user = (await res.json()) as GithubUser;
-  return Number.isSafeInteger(user.id) && user.id > 0 ? user : null;
+  const user = githubUserSchema.safeParse(await res.json());
+
+  return user.success ? user.data : null;
 }
 
 async function s256(verifier: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+
   return btoa(String.fromCharCode(...new Uint8Array(digest)))
     .replaceAll("+", "-")
     .replaceAll("/", "_")
@@ -300,6 +349,7 @@ function renderMessage(status: number, message: string): Response {
     `<body style="font:15px/1.5 system-ui;max-width:34rem;margin:4rem auto;padding:0 1rem">` +
     `<h1 style="font-size:1.2rem">Sign-in problem</h1><p>${escape(message)}</p>` +
     `<p><a href="/">Back to System Design Companion</a></p>`;
+
   return new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
@@ -309,6 +359,7 @@ function consentPage(consent: ConsentDescription, handle: string, origin: string
   const who = consent.clientDomain
     ? `<strong>${escape(consent.clientDomain)}</strong>`
     : `<strong>${escape(consent.clientName)}</strong>`;
+
   return `<!doctype html><html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Authorize ${escape(consent.clientName)}</title>
@@ -342,7 +393,7 @@ function consentPage(consent: ConsentDescription, handle: string, origin: string
     .map(
       (s) =>
         `<label class="scope"><input type="checkbox" name="scope" value="${escape(s)}" checked />` +
-        `<span><code>${escape(s)}</code> <span class="muted">${escape(SCOPE_BLURB[s] ?? "")}</span></span></label>`,
+        `<span><code>${escape(s)}</code> <span class="muted">${escape(scopeDescriptions.get(s) ?? "")}</span></span></label>`,
     )
     .join("\n  ")}
   <div class="row">
@@ -372,9 +423,11 @@ export async function eventAuthorizationActive(
 ): Promise<boolean> {
   const oauth = getOAuthApi(providerOptions(new URL(resource).origin, app), env);
   let cursor: string | undefined;
+
   do {
     // oxlint-disable-next-line no-await-in-loop -- follow the provider's pagination
     const grants = await oauth.listUserGrants(userId, { cursor, limit: 100 });
+
     if (
       grants.items.some(
         (grant) =>
@@ -388,5 +441,6 @@ export async function eventAuthorizationActive(
       return true;
     cursor = grants.cursor;
   } while (cursor);
+
   return false;
 }

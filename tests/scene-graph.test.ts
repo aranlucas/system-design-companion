@@ -4,6 +4,7 @@ import type { El, Point } from "../src/shared/protocol.ts";
 import { Scene, graphView, type Op } from "../src/worker/scene.ts";
 
 let seq = 0;
+
 const idx = () => `a${String(seq++).padStart(6, "0")}`;
 
 function rect(id: string, x: number, y: number, w = 160, h = 70): El {
@@ -24,6 +25,7 @@ function rect(id: string, x: number, y: number, w = 160, h = 70): El {
 
 function boundLabel(id: string, container: El, label: string): El {
   container.boundElements = [{ id, type: "text" }];
+
   return {
     id,
     type: "text",
@@ -51,7 +53,7 @@ function arrow(
   startId?: string,
   endId?: string,
 ): El {
-  return {
+  const element: El = {
     id,
     type: "arrow",
     x,
@@ -64,11 +66,13 @@ function arrow(
     index: idx(),
     points: pts,
     strokeStyle: "solid",
-    ...(startId
-      ? { startBinding: { elementId: startId, focus: 0, gap: 8, fixedPoint: null } }
-      : {}),
-    ...(endId ? { endBinding: { elementId: endId, focus: 0, gap: 8, fixedPoint: null } } : {}),
   };
+
+  if (startId) element.startBinding = { elementId: startId, focus: 0, gap: 8, fixedPoint: null };
+
+  if (endId) element.endBinding = { elementId: endId, focus: 0, gap: 8, fixedPoint: null };
+
+  return element;
 }
 
 function view(s: Scene, sel?: Set<string>) {
@@ -79,6 +83,7 @@ function build(ops: Op[]): Scene {
   const s = new Scene([]);
   const res = s.apply(ops, "agent");
   expect(res.every((r) => r.ok)).toBe(true);
+
   return s;
 }
 
@@ -95,6 +100,7 @@ describe("graph()", () => {
       { op: "connect", from: "a", to: "b", label: "reads" },
       { op: "add_note", text: "note here", frame: "f" },
     ]);
+
     const g = view(s);
     expect(g.frames![0].name).toBe("HLD");
     expect(g.nodes).toHaveLength(2);
@@ -111,6 +117,7 @@ describe("graph()", () => {
       { op: "add_node", ref: "b", label: "API" },
       { op: "connect", from: "a", to: "b" },
     ]);
+
     const g = view(s);
     const aId = s.resolve("a").id;
     const bId = s.resolve("b").id;
@@ -123,6 +130,7 @@ describe("graph()", () => {
       { op: "add_node", ref: "a", label: "A" },
       { op: "add_node", ref: "b", label: "B" },
     ]);
+
     const g = view(s, new Set([s.resolve("a").id]));
     expect(g.nodes!.find((n) => n.label === "A")!.selected).toBe(true);
     expect(g.nodes!.find((n) => n.label === "B")!.selected).toBeUndefined();
@@ -133,6 +141,7 @@ describe("graph()", () => {
     const b = rect("b", 300, 0);
     const t1 = boundLabel("t1", a, "Alpha");
     const t2 = boundLabel("t2", b, "Beta");
+
     const s = new Scene([
       a,
       b,
@@ -143,6 +152,7 @@ describe("graph()", () => {
         [340, 0],
       ]),
     ]);
+
     const g = view(s);
     expect(g.edges).toHaveLength(1);
     expect(g.edges![0]).toMatchObject({ from: "Alpha", to: "Beta", inferred: true });
@@ -156,6 +166,7 @@ describe("graph()", () => {
       ]),
       { ...rect("scribble", 6000, 6000), type: "freedraw" },
     ]);
+
     const g = view(s);
     expect(g.edges ?? []).toHaveLength(0);
     expect(g.sketches!.map((x) => x.id).toSorted()).toEqual(["lonely", "scribble"]);
@@ -167,7 +178,8 @@ describe("graph()", () => {
       { op: "add_node", ref: "b", label: "B" },
       { op: "connect", from: "a", to: "b" },
     ]);
+
     expect("rawEdges" in view(s)).toBe(false);
-    expect("rawEdges" in (s.graph() as Record<string, unknown>)).toBe(true);
+    expect("rawEdges" in s.graph()).toBe(true);
   });
 });

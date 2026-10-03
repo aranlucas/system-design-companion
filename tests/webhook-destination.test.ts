@@ -3,15 +3,19 @@ import { callbackAllowed, checkCallbackDestination } from "../src/worker/webhook
 import { makeEnv } from "./helpers/fakes.ts";
 
 const CALLBACK = "https://receiver.example.com/events";
+
 type DnsRecord = { type: number; data: string };
 
 function resolver(records: DnsRecord[]) {
   const fetch = vi.fn(async (input: URL) => {
     expect(input.hostname).toBe("cloudflare-dns.com");
     expect(input.searchParams.get("name")).toBe("receiver.example.com");
+
     return Response.json({ Status: 0, TC: false, Answer: records });
   });
+
   vi.stubGlobal("fetch", fetch);
+
   return fetch;
 }
 
@@ -32,10 +36,12 @@ describe("callback destination policy", () => {
 
   it("resolves both address families again for every attempt", async () => {
     const { env } = makeEnv();
+
     const fetch = resolver([
       { type: 1, data: "8.8.8.8" },
       { type: 28, data: "2606:4700:4700::1111" },
     ]);
+
     await checkCallbackDestination(env, CALLBACK);
     await checkCallbackDestination(env, CALLBACK);
     expect(fetch).toHaveBeenCalledTimes(4);

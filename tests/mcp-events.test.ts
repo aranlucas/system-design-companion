@@ -1,3 +1,12 @@
+import {
+  rpcReplySchema,
+  grantSchema,
+  toolsListSchema,
+  eventsListSchema,
+} from "./helpers/response-schemas.ts";
+import type { JsonInput } from "./helpers/response-schemas.ts";
+import { z } from "zod";
+import { eventBodySchema } from "./helpers/response-schemas.ts";
 // MCP Events: the catalog, the subscribe/unsubscribe contract, and signed delivery.
 //
 // The OAuth gate is covered in http.test.ts; these tests drive the MCP surface
@@ -19,7 +28,9 @@ import {
 } from "./helpers/fakes.ts";
 
 const PROTOCOL_VERSION = "2026-07-28";
+
 const CALLBACK = "https://receiver.example.com/hooks/abc";
+
 /** A Standard Webhooks secret: whsec_ plus base64 of 24 bytes. */
 const SECRET = `whsec_${btoa("0123456789abcdef01234567")}`;
 
@@ -52,7 +63,8 @@ interface Delivery {
 type EventData = { diagram_id?: string; name?: string; snapshot_id?: string };
 
 /** The body of one delivered event, as a test reads it. */
-interface EventBody extends Record<string, unknown> {
+interface EventBody {
+  challenge?: string;
   eventId?: string;
   name?: string;
   timestamp?: string;
@@ -79,6 +91,7 @@ type ListedTool = {
     openWorldHint?: boolean;
   };
 };
+
 type ToolsListResult = { tools: ListedTool[] };
 
 /** One entry of the events/list catalog. */
@@ -86,7 +99,7 @@ type ListedEvent = {
   name: string;
   description: string;
   delivery: string[];
-  inputSchema: { required: string[]; properties: Record<string, unknown> };
+  inputSchema: { required: string[]; properties: Record<string, JsonInput> };
   payloadSchema: { type: string };
 };
 
@@ -110,17 +123,23 @@ class Receiver {
 
   fetch = vi.fn(async (input: string | URL, init?: RequestInit) => {
     // The server always serializes the body once and signs those exact bytes.
-    const body = JSON.parse(init?.body as string) as EventBody;
+    const body = eventBodySchema.parse(
+      JSON.parse(z.string().parse(init?.body)),
+    ) satisfies EventBody;
+
     this.deliveries.push({
       url: String(input),
       headers: Object.fromEntries(new Headers(init?.headers)),
       body,
-      raw: init?.body as string,
+      raw: z.string().parse(init?.body),
     });
+
     if (body.type === "verification") {
       if (!this.echoChallenge) return new Response("nope", { status: 400 });
+
       return Response.json({ challenge: body.challenge });
     }
+
     return new Response(null, { status: this.eventStatus });
   });
 
@@ -131,6 +150,7 @@ class Receiver {
 }
 
 let env: TestEnv;
+
 let receiver: Receiver;
 
 beforeEach(() => {
@@ -142,6 +162,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", async (input: string | URL, init?: RequestInit) => {
     if (new URL(input).hostname === "cloudflare-dns.com")
       return Response.json({ Status: 0, TC: false, Answer: [{ type: 1, data: "8.8.8.8" }] });
+
     return receiver.fetch(input, init);
   });
 });
@@ -151,11 +172,7 @@ afterEach(() => {
 });
 
 /** Send one JSON-RPC request on the 2026-07-28 era and return its result or error. */
-async function rpc<T extends Record<string, unknown>>(
-  method: string,
-  params: Record<string, unknown>,
-  principal = testPrincipal(),
-): Promise<RpcReply<T>> {
+async function rpc(method: string, params: Record<string, JsonInput>, principal = testPrincipal()) {
   const response = await handleMcp(
     new Request("https://design.example/mcp", {
       method: "POST",
@@ -183,38 +200,64 @@ async function rpc<T extends Record<string, unknown>>(
     env.env,
     principal,
   );
+
   const text = await response.text();
+
   // The handler answers over SSE, so the payload is in a data: frame.
   const frame = text
     .split("\n")
     .find((line) => line.startsWith("data: "))
     ?.slice("data: ".length);
-  return JSON.parse(frame ?? text) as RpcReply<T>;
+
+  return rpcReplySchema.parse(JSON.parse(frame ?? text));
 }
+
+async function rpcParsed<T>(
+  schema: z.ZodType<T>,
+  ...args: Parameters<typeof rpc>
+): Promise<RpcReply<T>> {
+  const { result, ...reply } = await rpc(...args);
+
+  return result === undefined ? reply : { ...reply, result: schema.parse(result) };
+}
+
+const rpcGrant = (...args: Parameters<typeof rpc>): Promise<RpcReply<Grant>> =>
+  rpcParsed(grantSchema, ...args);
+
+const rpcTools = (...args: Parameters<typeof rpc>): Promise<RpcReply<ToolsListResult>> =>
+  rpcParsed(toolsListSchema, ...args);
+
+const rpcEvents = (...args: Parameters<typeof rpc>): Promise<RpcReply<EventsListResult>> =>
+  rpcParsed(eventsListSchema, ...args);
 
 async function newDiagram(name = "Board") {
   const d = await createDiagram(env.env, name);
+
   return { ...d, link: shareLink("https://design.example", d.id, d.key) };
 }
 
 describe("public MCP tool metadata", () => {
   it("advertises explicit safety hints for every tool, including the app-only view", async () => {
-    const reply = await rpc<ToolsListResult>("tools/list", {});
+    const reply = await rpcTools("tools/list", {});
     expect(reply.error).toBeUndefined();
     const tools = reply.result!.tools;
     expect(tools).toHaveLength(16);
+
     for (const tool of tools) {
-      expect(typeof tool.annotations?.readOnlyHint, tool.name).toBe("boolean");
-      expect(typeof tool.annotations?.destructiveHint, tool.name).toBe("boolean");
-      expect(typeof tool.annotations?.openWorldHint, tool.name).toBe("boolean");
+      expect(tool.annotations?.readOnlyHint, tool.name).toBeTypeOf("boolean");
+      expect(tool.annotations?.destructiveHint, tool.name).toBeTypeOf("boolean");
+      expect(tool.annotations?.openWorldHint, tool.name).toBeTypeOf("boolean");
+
       if (tool.annotations?.readOnlyHint) expect(tool.annotations.destructiveHint).toBe(false);
     }
+
     for (const name of ["apply_patch", "restore", "tidy", "layout"]) {
       expect(tools.find((tool) => tool.name === name)?.annotations).toMatchObject({
         readOnlyHint: false,
         destructiveHint: true,
       });
     }
+
     expect(tools.find((tool) => tool.name === "render_scene")?.annotations).toMatchObject({
       readOnlyHint: true,
       destructiveHint: false,
@@ -227,7 +270,7 @@ describe("public MCP tool metadata", () => {
 });
 
 /** The subscribe params every test shares. */
-function subscribeParams(link: string, overrides: Record<string, unknown> = {}) {
+function subscribeParams(link: string, overrides: Record<string, JsonInput> = {}) {
   return {
     name: "diagram.changed",
     arguments: { diagram: link },
@@ -238,14 +281,16 @@ function subscribeParams(link: string, overrides: Record<string, unknown> = {}) 
 
 describe("events/list", () => {
   it("advertises the catalog with schemas and webhook delivery", async () => {
-    const { result } = await rpc<EventsListResult>("events/list", {});
+    const { result } = await rpcEvents("events/list", {});
     const names = result!.events.map((e) => e.name);
     expect(names).toEqual(["diagram.changed", "diagram.renamed", "diagram.checkpointed"]);
+
     for (const event of result!.events) {
       expect(event.delivery).toEqual(["webhook"]);
       expect(event.inputSchema).toMatchObject({ required: ["diagram"] });
       expect(event.payloadSchema).toMatchObject({ type: "object" });
     }
+
     const changed = result!.events[0];
     expect(changed.description).toMatch(/edited/i);
     // Agent edits are opt-in, so the model can see the loop is closed by default.
@@ -256,7 +301,7 @@ describe("events/list", () => {
 describe("events/subscribe", () => {
   it("verifies the callback, stores the subscription and grants a TTL", async () => {
     const d = await newDiagram();
-    const { result } = await rpc<Grant>("events/subscribe", subscribeParams(d.link));
+    const { result } = await rpcGrant("events/subscribe", subscribeParams(d.link));
     expect(result!.id).toMatch(/^sub_/);
     expect(result!.cursor).toBeNull();
     expect(Date.parse(result!.refreshBefore)).toBeGreaterThan(Date.now());
@@ -297,13 +342,15 @@ describe("events/subscribe", () => {
 
   it("is idempotent for the same identity and refreshes the grant", async () => {
     const d = await newDiagram();
-    const first = await rpc<Grant>("events/subscribe", subscribeParams(d.link));
-    const second = await rpc<Grant>(
+    const first = await rpcGrant("events/subscribe", subscribeParams(d.link));
+
+    const second = await rpcGrant(
       "events/subscribe",
       subscribeParams(d.link, {
         ttlMs: 60 * 60 * 1000,
       }),
     );
+
     expect(second.result!.id).toBe(first.result!.id);
     expect(env.db.event_subscriptions.size).toBe(1);
   });
@@ -311,35 +358,42 @@ describe("events/subscribe", () => {
   it("rejects a secret that is not a Standard Webhooks key", async () => {
     const d = await newDiagram();
     const bad = ["nope", `whsec_${btoa("short")}`, "whsec_!!!not-base64!!!"];
+
     const errors = await Promise.all(
       bad.map(async (secret) => {
         const { error } = await rpc(
           "events/subscribe",
           subscribeParams(d.link, { delivery: { mode: "webhook", url: CALLBACK, secret } }),
         );
+
         return error!.code;
       }),
     );
+
     expect(errors).toEqual([-32602, -32602, -32602]);
   });
 
   it("rejects a non-https callback", async () => {
     const d = await newDiagram();
+
     const { error } = await rpc(
       "events/subscribe",
       subscribeParams(d.link, {
         delivery: { mode: "webhook", url: "http://x.example", secret: SECRET },
       }),
     );
+
     expect(error!.code).toBe(-32602);
   });
 
   it("refuses a diagram link the caller cannot open", async () => {
     const d = await newDiagram();
+
     const { error } = await rpc(
       "events/subscribe",
       subscribeParams(shareLink("https://design.example", d.id, "wrong-key")),
     );
+
     expect(error!.code).toBe(-32012);
   });
 
@@ -363,6 +417,7 @@ describe("events/unsubscribe", () => {
       arguments: { diagram: d.link },
       delivery: { mode: "webhook", url: CALLBACK },
     };
+
     expect((await rpc("events/unsubscribe", params)).result).toBeDefined();
     expect(env.db.event_subscriptions.size).toBe(0);
     // Unsubscribing again changes nothing.
@@ -379,15 +434,16 @@ interface Watched {
 }
 
 /** Subscribe to one event on a fresh diagram, then hand back a room for it. */
-async function watched(name = "diagram.changed", args: Record<string, unknown> = {}) {
+async function watched(name = "diagram.changed", args: Record<string, JsonInput> = {}) {
   const d = await newDiagram();
   await rpc("events/subscribe", {
     ...subscribeParams(d.link, { name }),
     arguments: { diagram: d.link, ...args },
   });
   const ctx = makeRoomCtx();
-  const room = new DiagramRoom(ctx.ctx as unknown as DurableObjectState, env.env);
+  const room = new DiagramRoom(ctx.ctx, env.env);
   await room.init(d.id, d.name);
+
   return { d, room, ctx } satisfies Watched;
 }
 
@@ -395,7 +451,7 @@ describe("delivery", () => {
   it("delivers a human edit as a signed event", async () => {
     const { d, room, ctx } = await watched();
     // A person editing arrives over the socket, not through the ops layer.
-    const socket = makeWs() as unknown as WebSocket;
+    const socket = makeWs();
     await room.webSocketMessage(
       socket,
       JSON.stringify({ type: "update", elements: [rect("web", 10, 20)] }),
@@ -410,7 +466,7 @@ describe("delivery", () => {
       data: { diagram_id: d.id, origin: "human", changed_count: 1 },
     });
     expect(events[0].body.eventId).toMatch(/^evt_/);
-    expect(Date.parse(events[0].body.timestamp as string)).toBeGreaterThan(0);
+    expect(Date.parse(z.string().parse(events[0].body.timestamp))).toBeGreaterThan(0);
     // Signed per Standard Webhooks, with the subscription id for routing.
     expect(events[0].headers["webhook-id"]).toMatch(/^evt_/);
     expect(events[0].headers["webhook-signature"]).toMatch(/^v1,/);
@@ -506,10 +562,13 @@ async function validSignature(delivery: Delivery, secret = SECRET): Promise<bool
     false,
     ["verify"],
   );
+
   const signed = new TextEncoder().encode(
     `${delivery.headers["webhook-id"]}.${delivery.headers["webhook-timestamp"]}.${delivery.raw}`,
   );
+
   const signatures = delivery.headers["webhook-signature"].split(" ");
+
   const results = await Promise.all(
     signatures.map((signature) =>
       crypto.subtle.verify(
@@ -520,22 +579,26 @@ async function validSignature(delivery: Delivery, secret = SECRET): Promise<bool
       ),
     ),
   );
+
   return results.some(Boolean);
 }
 
 describe("subscription validation and isolation", () => {
   it("rejects arguments that differ from the advertised schemas", async () => {
     const d = await newDiagram();
+
     const invalid = [
       { diagram: d.link, include_agent: "yes" },
       { diagram: d.link, unexpected: true },
       { diagram: 12 },
     ];
+
     const replies = await Promise.all(
       invalid.map((arguments_) =>
         rpc("events/subscribe", subscribeParams(d.link, { arguments: arguments_ })),
       ),
     );
+
     expect(replies.map((reply) => reply.error?.code)).toEqual([-32602, -32602, -32602]);
     expect(
       (
@@ -553,6 +616,7 @@ describe("subscription validation and isolation", () => {
 
   it("rejects malformed URLs, credentials, IP literals and local destinations before fetching", async () => {
     const d = await newDiagram();
+
     const urls = [
       "https://",
       "https://localhost/cb",
@@ -563,6 +627,7 @@ describe("subscription validation and isolation", () => {
       "https://user:pass@receiver.example.com/cb",
       `${CALLBACK}#fragment`,
     ];
+
     const replies = await Promise.all(
       urls.map((url) =>
         rpc(
@@ -571,6 +636,7 @@ describe("subscription validation and isolation", () => {
         ),
       ),
     );
+
     expect(replies.map((reply) => reply.error?.code)).toEqual(urls.map(() => -32602));
     expect(receiver.fetch).not.toHaveBeenCalled();
   });
@@ -578,49 +644,59 @@ describe("subscription validation and isolation", () => {
   it("enforces TTL boundaries and rejects negative, zero and fractional lifetimes", async () => {
     const d = await newDiagram();
     const now = Date.now();
-    const short = await rpc<Grant>("events/subscribe", subscribeParams(d.link, { ttlMs: 1 }));
+    const short = await rpcGrant("events/subscribe", subscribeParams(d.link, { ttlMs: 1 }));
     expect(Date.parse(short.result!.refreshBefore) - now).toBeGreaterThanOrEqual(5 * 60 * 1000);
-    const capped = await rpc<Grant>(
+
+    const capped = await rpcGrant(
       "events/subscribe",
       subscribeParams(d.link, { ttlMs: 30 * 86400_000 }),
     );
+
     expect(Date.parse(capped.result!.refreshBefore) - Date.now()).toBeLessThanOrEqual(
       7 * 86400_000,
     );
-    const finite = await rpc<Grant>("events/subscribe", subscribeParams(d.link, { ttlMs: null }));
+    const finite = await rpcGrant("events/subscribe", subscribeParams(d.link, { ttlMs: null }));
     expect(finite.result!.refreshBefore).not.toBeNull();
+
     const replies = await Promise.all(
       [-1, 0, 1.5].map((ttlMs) => rpc("events/subscribe", subscribeParams(d.link, { ttlMs }))),
     );
+
     expect(replies.map((reply) => reply.error?.code)).toEqual([-32602, -32602, -32602]);
   });
 
   it("normalizes argument order and omitted defaults", async () => {
     const d = await newDiagram();
-    const first = await rpc<Grant>("events/subscribe", subscribeParams(d.link));
-    const second = await rpc<Grant>(
+    const first = await rpcGrant("events/subscribe", subscribeParams(d.link));
+
+    const second = await rpcGrant(
       "events/subscribe",
       subscribeParams(d.link, {
         arguments: { include_agent: false, diagram: d.link },
       }),
     );
+
     expect(second.result!.id).toBe(first.result!.id);
   });
 
   it("isolates subscriptions by user and consent grant", async () => {
     const d = await newDiagram();
-    const own = await rpc<Grant>("events/subscribe", subscribeParams(d.link));
-    const other = await rpc<Grant>(
+    const own = await rpcGrant("events/subscribe", subscribeParams(d.link));
+
+    const other = await rpcGrant(
       "events/subscribe",
       subscribeParams(d.link),
       testPrincipal({ authorizationId: "other-installation" }),
     );
+
     expect(other.result!.id).not.toBe(own.result!.id);
+
     const params = {
       name: "diagram.changed",
       arguments: { diagram: d.link },
       delivery: { mode: "webhook", url: CALLBACK },
     };
+
     await rpc("events/unsubscribe", params, testPrincipal({ userId: "someone-else" }));
     expect(env.db.event_subscriptions.size).toBe(2);
     await rpc("events/unsubscribe", params);
@@ -632,11 +708,13 @@ describe("subscription validation and isolation", () => {
     const d = await newDiagram();
     await rpc("events/subscribe", subscribeParams(d.link));
     env.db.deleted.add(d.id);
+
     const reply = await rpc("events/unsubscribe", {
       name: "diagram.changed",
       arguments: { diagram: d.link },
       delivery: { mode: "webhook", url: CALLBACK },
     });
+
     expect(reply.result).toBeDefined();
     expect(env.db.event_subscriptions.size).toBe(0);
   });
@@ -663,13 +741,15 @@ describe("webhook delivery lifecycle", () => {
     const { d, room, ctx } = await watched("diagram.renamed");
     const replacement = `whsec_${btoa("abcdefghijklmnopqrstuvwx")}`;
     const originalId = [...env.db.event_subscriptions.keys()][0];
-    const refreshed = await rpc<Grant>(
+
+    const refreshed = await rpcGrant(
       "events/subscribe",
       subscribeParams(d.link, {
         name: "diagram.renamed",
         delivery: { mode: "webhook", url: CALLBACK, secret: replacement },
       }),
     );
+
     expect(refreshed.result!.id).toBe(originalId);
     await room.rename("Rotated");
     await ctx.drain();
@@ -764,6 +844,7 @@ describe("webhook delivery lifecycle", () => {
         arguments: { diagram: d.link },
         delivery: { mode: "webhook", url: CALLBACK },
       });
+
       return new Response(null, { status: 503 });
     });
     await room.rename("Cancelled");

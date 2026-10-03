@@ -1,22 +1,24 @@
-interface ValidationIssue {
-  message: string;
-}
+import {
+  assertBoundary,
+  isText,
+  isValidationError,
+  isIssues,
+  type ApiFailure,
+} from "./validation.ts";
 
-interface ValidationError {
-  message: string;
-}
-
-export interface ApiFailure {
-  error?: string | ValidationError;
-}
+export type { ApiFailure } from "./validation.ts";
 
 export function apiErrorMessage(response: ApiFailure, fallback: string): string {
   const error = response.error;
-  if (typeof error === "string") return error || fallback;
-  if (!error) return fallback;
-  // ZodError serializes its issues as JSON in message.
+
+  if (isText(error)) return error || fallback;
+
+  if (!isValidationError(error)) return fallback;
+
   try {
-    const issues = JSON.parse(error.message) as ValidationIssue[];
+    const issues: unknown = JSON.parse(error.message);
+    assertBoundary(issues, isIssues);
+
     return issues[0]?.message || fallback;
   } catch {
     return fallback;

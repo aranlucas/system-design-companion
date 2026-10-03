@@ -1,3 +1,8 @@
+import { isApiFailure } from "./validation.ts";
+import type { RemoteExcalidrawElement } from "@excalidraw/excalidraw/data/reconcile";
+import { serverMessageSchema } from "../shared/schemas.ts";
+import { z } from "zod/mini";
+import { errorMessage } from "../shared/errors.ts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getJson } from "./queries.ts";
 import {
@@ -12,6 +17,7 @@ import {
   isInvisiblySmallElement,
   LiveCollaborationTrigger,
   MainMenu,
+  MIME_TYPES,
   newElementWith,
   Sidebar,
   reconcileElements,
@@ -19,9 +25,12 @@ import {
   WelcomeScreen,
 } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
-import type { ExcalidrawElement, FileId } from "@excalidraw/excalidraw/element/types";
 import type {
-  BinaryFileData,
+  ExcalidrawElement,
+  ExcalidrawImageElement,
+  FileId,
+} from "@excalidraw/excalidraw/element/types";
+import type {
   Collaborator,
   DataURL,
   ExcalidrawImperativeAPI,
@@ -33,14 +42,19 @@ import {
   AGENT_STROKE,
   type ClientMessage,
   type El,
-  type FocusViewParams,
-  type MermaidParams,
-  type ScreenshotParams,
   type ServerMessage,
 } from "../shared/protocol.ts";
-import { apiErrorMessage, type ApiFailure } from "./api-error.ts";
+import { apiErrorMessage } from "./api-error.ts";
 import { CopyRow } from "./copy-row.tsx";
 import { displayName, linkFor, remember, setDisplayName, setupCommands } from "./local.ts";
+
+declare global {
+  interface Window {
+    excalidrawAPI: ExcalidrawImperativeAPI | null;
+  }
+}
+
+type CollaboratorUpdate = { -readonly [K in keyof Collaborator]?: Collaborator[K] };
 
 interface CanvasRecoveryProps {
   message: string;
@@ -70,6 +84,18 @@ interface DiagramMetadata {
   name: string;
 }
 
+const metadataSchema = z.object({ id: z.string(), name: z.string() });
+
+const snapshotsSchema = z.array(
+  z.object({
+    id: z.string(),
+    name: z.string(),
+    kind: z.enum(["auto", "named"]),
+    createdAt: z.number(),
+    elements: z.number(),
+  }),
+);
+
 interface CanvasProps {
   id: string;
   k: string;
@@ -77,8 +103,10 @@ interface CanvasProps {
 
 /** The heart gesture being drawn: where, and when it started (it fades out). */
 type Heart = { x: number; y: number; startedAt: number };
+
 type RpcMessage = Extract<ServerMessage, { type: "rpc" }>;
-type RenameResult = { name: string } & ApiFailure;
+
+const renameResultSchema = z.object({ name: z.string() });
 
 interface SharePanelProps {
   link: string;
@@ -108,7 +136,33 @@ interface Snapshot {
 }
 
 /** Collaborator id for the agent's transient cursor and selection outline. */
-const AGENT = "agent" as SocketId;
+function socketId(value: string): SocketId {
+  // SAFETY: Excalidraw's SocketId is only a nominal string brand; the caller supplies a validated server id or our reserved local "agent" id.
+  return value as SocketId;
+}
+
+function restoreWireElements(elements: El[]) {
+  // SAFETY: restoreElements is Excalidraw's importer/normalizer for serialized elements. This bridge supplies core-validated wire records; callers only consume the library's restored output, not the asserted input.
+  const restored = restoreElements(elements as ExcalidrawElement[], null);
+
+  // SAFETY: These library-normalized elements arrived from the server. RemoteExcalidrawElement adds only the provenance brand needed by reconciliation.
+  return restored as RemoteExcalidrawElement[];
+}
+
+const imageMimeSchema = z.enum([
+  MIME_TYPES.svg,
+  MIME_TYPES.png,
+  MIME_TYPES.jpg,
+  MIME_TYPES.gif,
+  MIME_TYPES.webp,
+  MIME_TYPES.bmp,
+  MIME_TYPES.ico,
+  MIME_TYPES.avif,
+  MIME_TYPES.jfif,
+  MIME_TYPES.binary,
+]);
+
+const AGENT = socketId("agent");
 
 const icon = (d: string) => (
   <svg
@@ -125,17 +179,22 @@ const icon = (d: string) => (
     <path d={d} />
   </svg>
 );
+
 const historyIcon = icon("M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 3");
+
 const shareIcon = icon(
   "M18 8a3 3 0 1 0-3-3M6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm12 7a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM8.6 13.5l6.8 4M15.4 6.5l-6.8 4",
 );
+
 const libraryIcon = icon("M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z");
 
 const blobToBase64 = (b: Blob) =>
   new Promise<string>((resolve, reject) => {
     const r = new FileReader();
     r.addEventListener("load", () => {
-      if (typeof r.result === "string") resolve(r.result.split(",")[1]);
+      const result = z.string().safeParse(r.result);
+
+      if (result.success) resolve(result.data.split(",")[1]);
       else reject(new Error("Expected a data URL from FileReader"));
     });
     r.addEventListener("error", () => reject(r.error));
@@ -157,15 +216,21 @@ export function Canvas({ id, k }: CanvasProps) {
     [],
   );
   const canvasRoot = useRef<HTMLDivElement>(null);
+
   const access = useQuery({
     queryKey: ["diagram", id, k],
     queryFn: ({ signal }) =>
-      getJson<DiagramMetadata>(`/api/d/${id}?k=${encodeURIComponent(k)}`, signal),
+      getJson<DiagramMetadata>(
+        `/api/d/${id}?k=${encodeURIComponent(k)}`,
+        signal,
+        isDiagramMetadata,
+      ),
     retry: 1,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
+
   const retryAccess = access.refetch;
   useEffect(() => {
     api?.updateScene({
@@ -185,17 +250,22 @@ export function Canvas({ id, k }: CanvasProps) {
   }, [api, loaded, access.error, retryAccess]);
   useEffect(() => {
     const root = canvasRoot.current;
+
     if (!api || !root) return undefined;
+
     // MainMenu retains its native trigger, but this version exposes no prop for its label.
     // Keep the integration scoped to the canvas and account for responsive remounts.
     const labelMenu = () => {
       const trigger = root.querySelector<HTMLButtonElement>(".main-menu-trigger");
+
       if (trigger?.getAttribute("aria-label") !== "Canvas menu")
         trigger?.setAttribute("aria-label", "Canvas menu");
     };
+
     labelMenu();
     const observer = new MutationObserver(labelMenu);
     observer.observe(root, { childList: true, subtree: true });
+
     return () => observer.disconnect();
   }, [api]);
   useEffect(() => {
@@ -227,10 +297,11 @@ export function Canvas({ id, k }: CanvasProps) {
   // Publish committed handles before the socket's effects can deliver events.
   useLayoutEffect(() => {
     apiRef.current = api;
-    (window as any).excalidrawAPI = api; // handy for debugging from the console
+    window.excalidrawAPI = api; // handy for debugging from the console
+
     return () => {
       apiRef.current = null;
-      (window as any).excalidrawAPI = null;
+      window.excalidrawAPI = null;
     };
   }, [api]);
 
@@ -239,10 +310,13 @@ export function Canvas({ id, k }: CanvasProps) {
     setNotice(message);
     noticeTimer.current = setTimeout(() => setNotice(null), 2500);
   };
+
   const loadLibrary = async () => {
     const currentApi = apiRef.current;
+
     if (!currentApi || libraryRequested.current) return;
     libraryRequested.current = true;
+
     try {
       await currentApi.updateLibrary({
         libraryItems: import("./library.ts").then(({ componentLibrary }) => componentLibrary()),
@@ -254,14 +328,17 @@ export function Canvas({ id, k }: CanvasProps) {
       flash("Could not load components. Close and reopen the library to retry.");
     }
   };
+
   // Share and Versions are tabs in Excalidraw's default sidebar, next to the library.
   const open = (tab: "share" | "versions" | "library") =>
     apiRef.current?.toggleSidebar({ name: "default", tab, force: true });
+
   const openRename = () => apiRef.current?.toggleSidebar({ name: "rename", force: true });
 
   /** Excalidraw draws each collaborator's cursor, selection outline and avatar. */
   const setCollaborator = useCallback((peer: SocketId, patch: Partial<Collaborator> | null) => {
     const map = collaborators.current;
+
     if (patch) map.set(peer, { ...map.get(peer), id: peer, socketId: peer, ...patch });
     else map.delete(peer);
     apiRef.current?.updateScene({ collaborators: new Map(map) });
@@ -274,11 +351,14 @@ export function Canvas({ id, k }: CanvasProps) {
   const sendPresence = useCallback(
     (force = false) => {
       const a = apiRef.current;
+
       if (!a) return;
       const st = a.getAppState();
+
       const selection = Object.keys(st.selectedElementIds).filter(
         (key) => st.selectedElementIds[key],
       );
+
       const viewport = {
         x: Math.round(-st.scrollX),
         y: Math.round(-st.scrollY),
@@ -286,9 +366,11 @@ export function Canvas({ id, k }: CanvasProps) {
         height: Math.round(st.height / st.zoom.value),
         zoom: st.zoom.value,
       };
+
       const focused = document.hasFocus();
       const username = displayName() || undefined;
       const sig = JSON.stringify([selection, focused, username]);
+
       if (!force && sig === lastPresence.current) return;
       lastPresence.current = sig;
       send({ type: "presence", selection, viewport, focused, username });
@@ -303,16 +385,19 @@ export function Canvas({ id, k }: CanvasProps) {
       gesture: "dot" | "heart" = "dot",
     ) => {
       const a = apiRef.current;
+
       if (!a || !targets.length) return false;
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       const groups = new Set(targets.flatMap((e) => e.groupIds));
       const ids = new Set(targets.map((e) => e.id));
+
       const elements = [
         ...targets,
         ...a
           .getSceneElements()
           .filter((e) => !ids.has(e.id) && e.groupIds.some((groupId) => groups.has(groupId))),
       ];
+
       if (mode === "focus")
         a.setViewport({ target: elements, fit: "scale-down", animation: false });
       // Wait for the viewport change to be applied before positioning the temporary pointer.
@@ -321,18 +406,23 @@ export function Canvas({ id, k }: CanvasProps) {
       const [left, top, right, bottom] = getCommonBounds(elements);
       const x = (left + right) / 2;
       const y = (top + bottom) / 2;
+
       const screen = {
         x: (x + state.scrollX) * state.zoom.value + state.offsetLeft,
         y: (y + state.scrollY) * state.zoom.value + state.offsetTop,
       };
+
       const visible =
         screen.x >= state.offsetLeft &&
         screen.x <= state.offsetLeft + state.width &&
         screen.y >= state.offsetTop &&
         screen.y <= state.offsetTop + state.height;
+
       if (gestureTimer.current) clearTimeout(gestureTimer.current);
+
       if (gesture === "heart") {
         setHeart(visible ? { ...screen, startedAt: performance.now() } : null);
+
         if (visible) gestureTimer.current = setTimeout(() => setHeart(null), 2400);
       } else {
         setCollaborator(AGENT, {
@@ -343,6 +433,7 @@ export function Canvas({ id, k }: CanvasProps) {
         });
         gestureTimer.current = setTimeout(() => setCollaborator(AGENT, null), 2400);
       }
+
       return visible;
     },
     [setCollaborator],
@@ -353,11 +444,14 @@ export function Canvas({ id, k }: CanvasProps) {
   const handleRpc = useCallback(
     async (msg: RpcMessage) => {
       const a = apiRef.current;
+
       try {
         if (!a) throw new Error("canvas not ready");
+
         if (msg.method === "screenshot") {
-          const { elementIds } = msg.params as ScreenshotParams;
+          const { elementIds } = msg.params;
           let elements = a.getSceneElements();
+
           if (elementIds?.length) {
             const want = new Set(elementIds);
             elements = elements.filter(
@@ -367,7 +461,9 @@ export function Canvas({ id, k }: CanvasProps) {
                 ("containerId" in e && e.containerId && want.has(e.containerId)),
             );
           }
+
           if (!elements.length) throw new Error("nothing to render");
+
           const blob = await exportToBlob({
             elements,
             appState: {
@@ -381,6 +477,7 @@ export function Canvas({ id, k }: CanvasProps) {
             maxWidthOrHeight: 1600,
             exportPadding: 24,
           });
+
           send({
             type: "rpc_result",
             reqId: msg.reqId,
@@ -388,9 +485,10 @@ export function Canvas({ id, k }: CanvasProps) {
             data: { base64: await blobToBase64(blob), mimeType: "image/png" },
           });
         } else if (msg.method === "focus_view") {
-          const { elementIds, mode, gesture } = msg.params as FocusViewParams;
+          const { elementIds, mode, gesture } = msg.params;
           const ids = new Set(elementIds);
           const elements = a.getSceneElements().filter((e) => ids.has(e.id));
+
           if (!elements.length) throw new Error("Target no longer exists in this tab");
           const visible = await showFocus(elements, mode, gesture);
           send({
@@ -400,9 +498,10 @@ export function Canvas({ id, k }: CanvasProps) {
             data: { mode, visible, elementIds: elements.map((e) => e.id) },
           });
         } else if (msg.method === "mermaid") {
-          const { source } = msg.params as MermaidParams;
+          const { source } = msg.params;
           const { parseMermaidToExcalidraw } = await import("@excalidraw/mermaid-to-excalidraw");
           const { elements, files } = await parseMermaidToExcalidraw(source);
+
           // Diagram types Excalidraw can't draw natively come back as an image; keep its bytes
           // here so this tab uploads them once the room adds the element.
           if (files) apiRef.current?.addFiles(Object.values(files));
@@ -410,7 +509,7 @@ export function Canvas({ id, k }: CanvasProps) {
           send({ type: "rpc_result", reqId: msg.reqId, ok: true, data: { elements: converted } });
         }
       } catch (e) {
-        send({ type: "rpc_result", reqId: msg.reqId, ok: false, error: (e as Error).message });
+        send({ type: "rpc_result", reqId: msg.reqId, ok: false, error: errorMessage(e) });
       }
     },
     [send, showFocus],
@@ -433,6 +532,7 @@ export function Canvas({ id, k }: CanvasProps) {
       // Peers re-announce themselves on reconnect.
       collaborators.current.clear();
       api?.updateScene({ collaborators: new Map() });
+
       if (event.code === 1008) {
         setIsOffline(false);
         api?.updateScene({
@@ -441,23 +541,26 @@ export function Canvas({ id, k }: CanvasProps) {
             errorMessage: unavailableCanvasMessage(),
           },
         });
+
         return;
       }
+
       if (offline.current) return;
       offline.current = true;
       setIsOffline(true);
     },
     onMessage: (ev) => {
       if (!api) return;
-      const msg = JSON.parse(ev.data) as ServerMessage;
+      const msg: ServerMessage = serverMessageSchema.parse(JSON.parse(ev.data));
+
       if (msg.type === "init") {
         setName(msg.name);
         remember({ id, key: k, name: msg.name });
-        const remote = restoreElements(msg.elements as any, null);
+        const remote = restoreWireElements(msg.elements);
         const local = api.getSceneElementsIncludingDeleted();
-        const merged = local.length
-          ? reconcileElements(local, remote as any, api.getAppState())
-          : remote;
+
+        const merged = local.length ? reconcileElements(local, remote, api.getAppState()) : remote;
+
         for (const e of msg.elements) synced.current.set(e.id, e.version);
         api.updateScene({
           elements: merged,
@@ -465,6 +568,7 @@ export function Canvas({ id, k }: CanvasProps) {
           captureUpdate: CaptureUpdateAction.NEVER,
         });
         fetchFiles();
+
         // Fitting an empty board would zoom to Excalidraw's 3000% maximum.
         if (!local.length && msg.elements.some((e) => !e.isDeleted))
           api.setViewport({
@@ -483,9 +587,10 @@ export function Canvas({ id, k }: CanvasProps) {
         // Like init: agent-built elements may lack fields Excalidraw fills in on restore.
         const merged = reconcileElements(
           api.getSceneElementsIncludingDeleted(),
-          restoreElements(msg.elements as any, null) as any,
+          restoreWireElements(msg.elements),
           api.getAppState(),
         );
+
         for (const e of msg.elements)
           synced.current.set(e.id, Math.max(e.version, synced.current.get(e.id) ?? 0));
         api.updateScene({
@@ -494,11 +599,13 @@ export function Canvas({ id, k }: CanvasProps) {
           captureUpdate: CaptureUpdateAction.NEVER,
         });
         fetchFiles();
+
         if (msg.origin === "agent") {
           flash(
             `Agent updated ${msg.elements.length} element${msg.elements.length === 1 ? "" : "s"}`,
           );
           const changedIds = new Set(msg.elements.map((e) => e.id));
+
           const changed = merged.filter(
             (e) =>
               changedIds.has(e.id) &&
@@ -506,12 +613,15 @@ export function Canvas({ id, k }: CanvasProps) {
               !e.customData?.componentPart &&
               !e.customData?.componentLabel,
           );
+
           const components = changed.filter(
             (e) =>
               !["frame", "arrow", "line"].includes(e.type) && !(e.type === "text" && e.containerId),
           );
+
           // Prefer actual components over an enlarged frame or a rerouted long connection.
           const targets = components.length ? components : changed;
+
           const removed = msg.elements.filter(
             (e) =>
               e.isDeleted &&
@@ -519,10 +629,11 @@ export function Canvas({ id, k }: CanvasProps) {
               !e.customData?.componentLabel &&
               e.type !== "text",
           );
+
           void showFocus(
             targets.length
               ? targets
-              : (removed.map((e) => ({ ...e, isDeleted: false })) as ExcalidrawElement[]),
+              : restoreWireElements(removed.map((e) => ({ ...e, isDeleted: false }))),
             "focus",
           );
         }
@@ -532,22 +643,28 @@ export function Canvas({ id, k }: CanvasProps) {
         setPeers(msg.count);
       } else if (msg.type === "collaborator") {
         const { id: peer, selection, username, pointer, button } = msg;
-        setCollaborator(peer as SocketId, {
-          ...(selection
-            ? {
-                username,
-                selectedElementIds: Object.fromEntries(selection.map((e) => [e, true])),
-              }
-            : {}),
-          ...(pointer ? { pointer, button } : {}),
-        });
+        const update: CollaboratorUpdate = {};
+
+        if (selection) {
+          update.username = username;
+          update.selectedElementIds = Object.fromEntries(selection.map((e) => [e, true]));
+        }
+
+        if (pointer) {
+          update.pointer = pointer;
+          update.button = button;
+        }
+
+        setCollaborator(socketId(peer), update);
       } else if (msg.type === "collaborator_left") {
-        setCollaborator(msg.id as SocketId, null);
+        setCollaborator(socketId(msg.id), null);
       }
     },
   });
+
   useLayoutEffect(() => {
     ws.current = socket;
+
     return () => {
       ws.current = null;
     };
@@ -558,17 +675,21 @@ export function Canvas({ id, k }: CanvasProps) {
   const flush = () => {
     pendingSend.current = null;
     const a = apiRef.current;
+
     if (!a || ws.current?.readyState !== WebSocket.OPEN) return;
     uploadFiles();
     const changed: El[] = [];
+
     for (const e of a.getSceneElementsIncludingDeleted()) {
       // A click with a drawing tool leaves a zero-size element; send it once it has a size.
       if (!e.isDeleted && isInvisiblySmallElement(e)) continue;
+
       if (e.version > (synced.current.get(e.id) ?? 0)) {
         changed.push(e);
         synced.current.set(e.id, e.version);
       }
     }
+
     if (changed.length) send({ type: "update", elements: changed });
   };
 
@@ -582,36 +703,45 @@ export function Canvas({ id, k }: CanvasProps) {
 
   const setImageStatus = (fileId: string, status: "saved" | "error") => {
     const a = apiRef.current;
+
     if (!a) return;
     const els = a.getSceneElementsIncludingDeleted();
-    const stale = (e: ExcalidrawElement) =>
+
+    const stale = (e: ExcalidrawElement): e is ExcalidrawImageElement =>
       e.type === "image" && e.fileId === fileId && e.status !== status;
+
     if (!els.some(stale)) return;
     a.updateScene({
-      elements: els.map((e) => (stale(e) ? newElementWith(e as any, { status }) : e)),
+      elements: els.map((e) => (stale(e) ? newElementWith(e, { status }) : e)),
       captureUpdate: CaptureUpdateAction.NEVER,
     });
   };
 
   const uploadFiles = () => {
     const a = apiRef.current;
+
     if (!a) return;
     const have = a.getFiles();
+
     for (const e of a.getSceneElementsIncludingDeleted()) {
       if (e.type !== "image" || e.isDeleted || !e.fileId) continue;
       const fileId = e.fileId;
       const file = have[fileId];
+
       if (!file || uploadedFiles.current.has(fileId)) continue;
       uploadedFiles.current.add(fileId);
       void (async () => {
         try {
           const body = await (await fetch(file.dataURL)).blob();
+
           const res = await fetch(fileUrl(fileId), {
             method: "PUT",
             headers: { "Content-Type": file.mimeType },
             body,
           });
+
           if (res.ok) return setImageStatus(fileId, "saved");
+
           // The room refused the file (too large, not an image); retrying won't help.
           if (res.status === 413 || res.status === 415) {
             setImageStatus(fileId, "error");
@@ -620,8 +750,10 @@ export function Canvas({ id, k }: CanvasProps) {
                 ? "Image is too large to share (4 MB max)"
                 : "Only images can be shared",
             );
+
             return;
           }
+
           uploadedFiles.current.delete(fileId);
         } catch {
           uploadedFiles.current.delete(fileId); // offline: the next flush retries
@@ -632,35 +764,44 @@ export function Canvas({ id, k }: CanvasProps) {
 
   const fetchFiles = () => {
     const a = apiRef.current;
+
     if (!a) return;
     const have = a.getFiles();
-    const missing = new Set<string>();
+    const missing = new Set<FileId>();
+
     for (const e of a.getSceneElementsIncludingDeleted())
       if (e.type === "image" && !e.isDeleted && e.fileId && e.status === "saved" && !have[e.fileId])
         missing.add(e.fileId);
+
     for (const fileId of missing) {
       if (fetchingFiles.current.has(fileId)) continue;
       fetchingFiles.current.add(fileId);
       void (async () => {
         try {
           const res = await fetch(fileUrl(fileId));
+
           if (!res.ok) throw new Error(`file ${fileId}: ${res.status}`);
           const blob = await res.blob();
+
           const dataURL = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
             reader.addEventListener("load", () => {
-              if (typeof reader.result === "string") resolve(reader.result);
+              const result = z.string().safeParse(reader.result);
+
+              if (result.success) resolve(result.data);
               else reject(new Error("Expected a data URL from FileReader"));
             });
             reader.addEventListener("error", () => reject(reader.error));
             reader.readAsDataURL(blob);
           });
+
           uploadedFiles.current.add(fileId);
           apiRef.current?.addFiles([
             {
-              id: fileId as FileId,
+              id: fileId,
+              // SAFETY: FileReader.readAsDataURL above produced this string from the Blob; DataURL adds only Excalidraw's nominal representation brand.
               dataURL: dataURL as DataURL,
-              mimeType: blob.type as BinaryFileData["mimeType"],
+              mimeType: imageMimeSchema.parse(blob.type),
               created: Date.now(),
             },
           ]);
@@ -683,6 +824,7 @@ export function Canvas({ id, k }: CanvasProps) {
     window.addEventListener("focus", onFocus);
     window.addEventListener("blur", onFocus);
     document.addEventListener("visibilitychange", onFocus);
+
     return () => {
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("blur", onFocus);
@@ -696,6 +838,7 @@ export function Canvas({ id, k }: CanvasProps) {
     // With a selection, tidy only the frames it touches (null = the top level).
     const editor = apiRef.current;
     const selected = editor?.getAppState().selectedElementIds ?? {};
+
     const frames = [
       ...new Set(
         (editor?.getSceneElements() ?? [])
@@ -703,23 +846,34 @@ export function Canvas({ id, k }: CanvasProps) {
           .map((e) => (e.type === "frame" ? e.id : e.frameId)),
       ),
     ];
+
     const r = await fetch(`/api/d/${id}/tidy?k=${encodeURIComponent(k)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ frames }),
     });
-    const d = (await r.json()) as TidyResult;
+
+    const body: unknown = await r.json();
+
+    if (!r.ok) {
+      flash(
+        `Tidy failed: ${apiErrorMessage(isApiFailure(body) ? body : {}, "Could not tidy the diagram.")}`,
+      );
+
+      return;
+    }
+
+    const d = tidyResultSchema.parse(body);
     const where = frames.length ? "Selection" : "Diagram";
     flash(
-      r.ok
-        ? d.changed
-          ? `${where} tidied: ${tidySummary(d)}. Undo in Versions.`
-          : `${where} is already tidy`
-        : `Tidy failed: ${apiErrorMessage(d, "Could not tidy the diagram.")}`,
+      d.changed
+        ? `${where} tidied: ${tidySummary(d)}. Undo in Versions.`
+        : `${where} is already tidy`,
     );
   };
 
   const shareLink = linkFor(id, k);
+
   const copy = async (text: string, what: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -775,6 +929,7 @@ export function Canvas({ id, k }: CanvasProps) {
         onPointerDown={() => sendPresence()}
         onPointerUpdate={({ pointer, button }) => {
           const now = performance.now();
+
           if (now - lastPointer.current < 40) return;
           lastPointer.current = now;
           send({
@@ -925,6 +1080,7 @@ export function Canvas({ id, k }: CanvasProps) {
 
 function SharePanel({ link, copy, onName }: SharePanelProps) {
   const [me, setMe] = useState(displayName);
+
   return (
     <div className="sd-panel">
       <h3>Share &amp; connect</h3>
@@ -972,27 +1128,34 @@ function RenamePanel({ name, id, diagramKey, onRenamed }: RenamePanelProps) {
     input.current?.focus();
     input.current?.select();
   }, []);
+
   return (
     <form
       className="sd-panel"
       aria-label="Rename diagram"
       onSubmit={async (event) => {
         event.preventDefault();
+
         if (!draft.trim() || busy) return;
         setBusy(true);
         setError("");
+
         try {
           const response = await fetch(`/api/d/${id}/rename?k=${encodeURIComponent(diagramKey)}`, {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ name: draft.trim() }),
           });
-          const result = (await response.json()) as RenameResult;
+
+          const body: unknown = await response.json();
+
           if (!response.ok)
-            throw new Error(apiErrorMessage(result, "Could not rename the diagram."));
-          onRenamed(result.name);
+            throw new Error(
+              apiErrorMessage(isApiFailure(body) ? body : {}, "Could not rename the diagram."),
+            );
+          onRenamed(renameResultSchema.parse(body).name);
         } catch (err) {
-          setError((err as Error).message);
+          setError(errorMessage(err));
           setBusy(false);
         }
       }}
@@ -1015,8 +1178,20 @@ function RenamePanel({ name, id, diagramKey, onRenamed }: RenamePanelProps) {
   );
 }
 
-type TidyResult = { changed?: number } & ApiFailure &
-  Partial<Record<keyof typeof TIDY_WORDS, number>>;
+const tidyResultSchema = z.object({
+  changed: z.optional(z.number()),
+  aligned: z.optional(z.number()),
+  spaced: z.optional(z.number()),
+  separated: z.optional(z.number()),
+  adopted: z.optional(z.number()),
+  wrapped: z.optional(z.number()),
+  bound: z.optional(z.number()),
+  rerouted: z.optional(z.number()),
+  framesFitted: z.optional(z.number()),
+  framesMoved: z.optional(z.number()),
+});
+
+type TidyResult = z.infer<typeof tidyResultSchema>;
 
 const TIDY_WORDS = {
   aligned: "aligned",
@@ -1032,24 +1207,34 @@ const TIDY_WORDS = {
 
 /** "3 aligned · 2 separated · 1 frames moved", from the stats the server returns. */
 function tidySummary(d: TidyResult) {
-  const parts = Object.entries(TIDY_WORDS)
-    .filter(([key]) => d[key as keyof typeof TIDY_WORDS])
-    .map(([key, word]) => `${d[key as keyof typeof TIDY_WORDS]} ${word}`);
+  const counts = new Map(Object.entries(d));
+
+  const parts = Object.entries(TIDY_WORDS).flatMap(([key, word]) => {
+    const count = counts.get(key);
+
+    return count ? [`${count} ${word}`] : [];
+  });
+
   return parts.join(" · ") || `${d.changed} changes`;
 }
 
-type VersionChange = { path: string; body: unknown };
+type VersionPayload = { name: string } | { snapshotId: string };
+
+type VersionChange = { path: string; body: VersionPayload };
 
 function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
   const queryClient = useQueryClient();
   const [label, setLabel] = useState("");
   const q = `?k=${encodeURIComponent(k)}`;
   const queryKey = ["snapshots", id, k];
+
   const snapshots = useQuery({
     queryKey,
-    queryFn: ({ signal }) => getJson<Snapshot[]>(`/api/d/${id}/snapshots${q}`, signal),
+    queryFn: ({ signal }) => getJson<Snapshot[]>(`/api/d/${id}/snapshots${q}`, signal, isSnapshots),
   });
+
   const snaps = snapshots.data;
+
   const mutation = useMutation({
     mutationFn: async ({ path, body }: VersionChange) => {
       const response = await fetch(`/api/d/${id}${path}${q}`, {
@@ -1057,15 +1242,22 @@ function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      const result = (await response.json()) as ApiFailure;
-      if (!response.ok) throw new Error(apiErrorMessage(result, "Could not save this change."));
+
+      const result: unknown = await response.json();
+
+      if (!response.ok)
+        throw new Error(
+          apiErrorMessage(isApiFailure(result) ? result : {}, "Could not save this change."),
+        );
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey }),
     onError: (error) => flash(error.message),
   });
-  const post = async (path: string, body: unknown) => {
+
+  const post = async (path: string, body: VersionPayload) => {
     try {
       await mutation.mutateAsync({ path, body });
+
       return true;
     } catch {
       return false;
@@ -1082,6 +1274,7 @@ function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
         className="row"
         onSubmit={async (e) => {
           e.preventDefault();
+
           if (!(await post("/snapshots", { name: label || "checkpoint" }))) return;
           setLabel("");
           flash("Saved version");
@@ -1099,9 +1292,14 @@ function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
         className="row"
         onSubmit={async (e) => {
           e.preventDefault();
-          const field = e.currentTarget.elements.namedItem("tpl") as HTMLInputElement;
+          const field = e.currentTarget.elements.namedItem("tpl");
+
+          if (!(field instanceof HTMLInputElement))
+            throw new Error("Template name field is missing");
           const input = field.value.trim();
+
           if (!input) return;
+
           if (!(await post("/template", { name: input }))) return;
           flash("Saved as template");
           field.value = "";
@@ -1150,4 +1348,12 @@ function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
       </ul>
     </div>
   );
+}
+
+function isDiagramMetadata(value: unknown): value is DiagramMetadata {
+  return metadataSchema.safeParse(value).success;
+}
+
+function isSnapshots(value: unknown): value is Snapshot[] {
+  return snapshotsSchema.safeParse(value).success;
 }

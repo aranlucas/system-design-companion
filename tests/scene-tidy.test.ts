@@ -9,10 +9,12 @@ import { layoutReport } from "./helpers/layout-report.ts";
 
 /** Where a test drags a node; y defaults to where it is. */
 type DragTarget = { x: number; y?: number };
+
 /** A named scene for the table-driven regression checks. */
 type Case = [name: string, make: () => Scene];
 
 let seq = 0;
+
 const el = (
   id: string,
   type: string,
@@ -36,8 +38,10 @@ const el = (
   frameId: null,
   ...extra,
 });
+
 const rect = (id: string, x: number, y: number, extra: Partial<El> = {}) =>
   el(id, "rectangle", x, y, 160, 70, extra);
+
 const arrow = (id: string, from: Point, to: Point, extra: Partial<El> = {}) =>
   el(id, "arrow", from[0], from[1], Math.abs(to[0] - from[0]), Math.abs(to[1] - from[1]), {
     points: [
@@ -46,11 +50,13 @@ const arrow = (id: string, from: Point, to: Point, extra: Partial<El> = {}) =>
     ],
     ...extra,
   });
+
 const bound = (id: string) => ({ elementId: id, focus: 0, gap: 8, fixedPoint: null });
 
 const idempotent = (s: Scene) => {
   const again = new Scene(s.live());
   again.tidy();
+
   return again.changedElements().length;
 };
 
@@ -59,18 +65,22 @@ const drag = (s: Scene, id: string, to: DragTarget) => {
   const node = s.resolve(id);
   const dx = to.x - node.x;
   const dy = (to.y ?? node.y) - node.y;
+
   for (const e of [node, s.boundText(node)!]) s.mutate(e, { x: e.x + dx, y: e.y + dy });
 };
 
 function grownFrame() {
   const s = new Scene([]);
+
   const ops: Op[] = [
     { op: "add_frame", ref: "f", name: "F", place: { at: { x: 0, y: 0 } } },
     { op: "add_node", ref: "n", label: "N", frame: "f", place: { at: { x: 1200, y: 100 } } },
   ];
+
   expect(s.apply(ops, "agent").every((r) => r.ok)).toBe(true);
   const f = s.resolve("f");
   expect(f.width).toBeGreaterThan(800); // grew to hold N
+
   return { s, f, n: s.resolve("n") };
 }
 
@@ -89,7 +99,9 @@ function messy(n: number) {
   let r = 7;
   const rand = () => (r = (r * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
   const ops: Op[] = [];
+
   for (let f = 0; f < 4; f++) ops.push({ op: "add_frame", ref: `f${f}`, name: `F${f}` });
+
   for (let i = 0; i < n; i++)
     ops.push({
       op: "add_node",
@@ -98,13 +110,17 @@ function messy(n: number) {
       frame: `f${i % 4}`,
       place: { at: { x: (i % 4) * 3000 + (i % 10) * 200, y: Math.floor(i / 10) * 150 } },
     });
+
   for (let i = 0; i < n * 1.5; i++) {
     const a = Math.floor(rand() * n);
     const b = Math.floor(rand() * n);
+
     if (a !== b && a % 4 === b % 4) ops.push({ op: "connect", from: `n${a}`, to: `n${b}` });
   }
+
   const s = new Scene([]);
   expect(s.apply(ops, "template").every((x) => x.ok)).toBe(true);
+
   return new Scene(
     s.live().map((e) =>
       s.isNode(e)
@@ -127,6 +143,7 @@ describe("tidy: binding loose arrow ends", () => {
       rect("C", 600, 0),
       arrow("x", [600, 35], [80, 76]),
     ]);
+
     expect(s.tidy().bound).toBe(2);
     expect(s.resolve("x").startBinding.elementId).toBe("C");
     expect(s.resolve("x").endBinding.elementId).toBe("A");
@@ -145,6 +162,7 @@ describe("tidy: binding loose arrow ends", () => {
       rect("C", 600, 0),
       arrow("x", [168, 35], [590, 35], { startBinding: bound("A") }),
     ]);
+
     expect(s.tidy().bound).toBe(1);
     expect(s.resolve("x").endBinding.elementId).toBe("C");
   });
@@ -187,10 +205,12 @@ describe("tidy: groups", () => {
       el("g2", "text", 20, 80, 120, 25, { groupIds: ["G"], text: "caption", fontSize: 20 }),
       rect("n", 40, 20),
     ]);
+
     const offset = () => [
       s.resolve("g2").x - s.resolve("g1").x,
       s.resolve("g2").y - s.resolve("g1").y,
     ];
+
     const before = offset();
     s.tidy();
     expect(offset()).toEqual(before);
@@ -203,6 +223,7 @@ describe("tidy: groups", () => {
       arrow("l1", [10, 10], [100, 60], { type: "line", groupIds: ["G"] }),
       arrow("l2", [100, 60], [10, 60], { type: "line", groupIds: ["G"] }),
     ]);
+
     s.tidy();
     expect(s.changedElements()).toEqual([]);
   });
@@ -228,6 +249,7 @@ describe("tidy: even spacing", () => {
       rect("c", 470, 0),
       rect("d", 200, 300),
     ]);
+
     s.tidy();
     expect(s.resolve("b").x).toBe(200);
   });
@@ -291,6 +313,7 @@ describe("tidy: no regressions", () => {
       () => {
         const s = new Scene([]);
         s.apply(t.ops, "template");
+
         return new Scene(s.live());
       },
     ]),
@@ -301,6 +324,7 @@ describe("tidy: no regressions", () => {
     const before = layoutReport(s);
     s.tidy();
     const after = layoutReport(s);
+
     for (const k of [
       "brokenArrows",
       "crossings",

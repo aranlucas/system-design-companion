@@ -1,16 +1,30 @@
+import type { JsonInput } from "./helpers/response-schemas.ts";
+import {
+  apiFailureSchema,
+  createdSchema,
+  diagramPageSchema,
+  errorBodySchema,
+  jsonObjectSchema,
+  protectedResourceSchema,
+  snapshotInfoSchema,
+  templateInfoSchema,
+  withIdSchema,
+} from "./helpers/response-schemas.ts";
 // Worker HTTP routes with real DiagramRooms on fake D1/R2.
 import { describe, expect, it, vi } from "vitest";
 import { apiErrorMessage, type ApiFailure } from "../src/app/api-error.ts";
 import worker from "../src/worker/index.ts";
 import { createDiagram, parseLink } from "../src/worker/store.ts";
-import type { Author } from "../src/worker/scene.ts";
 import { makeEnv, testCtx, type TestEnv } from "./helpers/fakes.ts";
 
 function req(path: string, init?: RequestInit): Request {
   const headers = new Headers(init?.headers);
+
   if (!headers.has("Cookie"))
     headers.set("Cookie", "sdc-session=11111111-1111-1111-1111-111111111111");
+
   if (!headers.has("Origin")) headers.set("Origin", "http://localhost");
+
   return new Request(`http://localhost${path}`, { ...init, headers });
 }
 
@@ -19,7 +33,7 @@ function call(env: TestEnv, request: Request) {
   return worker.fetch(request, env.env, testCtx());
 }
 
-async function post(env: TestEnv, path: string, payload: unknown) {
+async function post(env: TestEnv, path: string, payload: JsonInput) {
   return call(
     env,
     req(path, {
@@ -32,13 +46,21 @@ async function post(env: TestEnv, path: string, payload: unknown) {
 
 /** Response bodies the API returns. */
 type Created = { id: string; key: string; name: string; link: string };
+
 type ListedDiagram = { id: string; key: string; name: string };
+
 type DiagramPage = { items: ListedDiagram[]; nextCursor: string | null };
+
 type WithId = { id: string };
+
 type ErrorBody = { error: string };
+
 type TemplateInfo = { id: string; name: string };
+
 type SnapshotInfo = { id: string; name: string };
-type InvalidBodyCase = [route: string, payload: unknown];
+
+type InvalidBodyCase = [route: string, payload: JsonInput];
+
 /** The RFC 9728 document the OAuth provider serves for the MCP endpoint. */
 type ProtectedResource = { resource: string; authorization_servers: string[] };
 
@@ -61,13 +83,14 @@ const invalidBodies: InvalidBodyCase[] = [
 ];
 
 async function body(res: Response) {
-  return (await res.json()) as Record<string, unknown>;
+  return jsonObjectSchema.parse(await res.json());
 }
 
 async function create(env: TestEnv, name: string, template?: string) {
   const res = await post(env, "/api/diagrams", template ? { name, template } : { name });
   expect(res.status).toBe(200);
-  return (await body(res)) as Created;
+
+  return createdSchema.parse(await body(res)) satisfies Created;
 }
 
 const put = (env: TestEnv, path: string, bytes: BodyInit, type = "image/png") =>
@@ -84,12 +107,14 @@ describe("diagrams API", () => {
     const response = await call(env, req("/api/diagrams"));
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    const page = (await response.json()) as DiagramPage;
+    const page = diagramPageSchema.parse(await response.json()) satisfies DiagramPage;
     const listed = page.items;
     expect(listed.map((d) => d.id)).toEqual([agent.id, old.id]);
+
     const opened = await Promise.all(
       listed.map(async (d) => call(env, req(`/api/d/${d.id}?k=${d.key}`))),
     );
+
     expect(opened.map((result) => result.status)).toEqual([200, 200]);
     expect((await call(env, req(`/api/d/${old.id}?k=${old.key}`))).status).toBe(200);
     expect((await call(env, req(`/api/d/${old.id}?k=${listed[0].key}`))).status).toBe(403);
@@ -114,34 +139,56 @@ describe("diagrams API", () => {
 
   it("paginates tied timestamps without duplicates, even after insertion and cursor-row deletion", async () => {
     const env = makeEnv();
+
     const created = await Promise.all(
       Array.from({ length: 5 }, (_, i) => create(env, `Board ${i}`)),
     );
+
     for (const d of created) env.db.diagrams.get(d.id)!.created_at = 100;
+
     const expected = created
       .map((d) => d.id)
       .toSorted()
       .toReversed();
-    const first = (await (await call(env, req("/api/diagrams?limit=2"))).json()) as DiagramPage;
+
+    const first = diagramPageSchema.parse(
+      await (await call(env, req("/api/diagrams?limit=2"))).json(),
+    ) satisfies DiagramPage;
+
     expect(first.items.map((d) => d.id)).toEqual(expected.slice(0, 2));
     expect(env.db.library.size).toBe(2); // Backfill is bounded to the requested page.
     await create(env, "Newer during pagination");
     const last = first.items[1];
     const removed = await call(env, req(`/api/d/${last.id}?k=${last.key}`, { method: "DELETE" }));
     expect(removed.status).toBe(204);
-    const second = (await (
-      await call(env, req(`/api/diagrams?limit=2&cursor=${encodeURIComponent(first.nextCursor!)}`))
-    ).json()) as typeof first;
+
+    const second = diagramPageSchema.parse(
+      await (
+        await call(
+          env,
+          req(`/api/diagrams?limit=2&cursor=${encodeURIComponent(first.nextCursor!)}`),
+        )
+      ).json(),
+    ) satisfies typeof first;
+
     expect(second.items.map((d) => d.id)).toEqual(expected.slice(2, 4));
-    const third = (await (
-      await call(env, req(`/api/diagrams?limit=2&cursor=${encodeURIComponent(second.nextCursor!)}`))
-    ).json()) as typeof first;
+
+    const third = diagramPageSchema.parse(
+      await (
+        await call(
+          env,
+          req(`/api/diagrams?limit=2&cursor=${encodeURIComponent(second.nextCursor!)}`),
+        )
+      ).json(),
+    ) satisfies typeof first;
+
     expect(third.items.map((d) => d.id)).toEqual(expected.slice(4));
     expect(third.nextCursor).toBeNull();
   });
 
   it("rejects invalid pagination parameters", async () => {
     const env = makeEnv();
+
     const params = [
       "limit=0",
       "limit=101",
@@ -153,16 +200,22 @@ describe("diagrams API", () => {
       "cursor=",
       `cursor=${btoa(JSON.stringify({ createdAt: -1, id: "abcdefgh" }))}`,
     ];
+
     const results = await Promise.all(
       params.map(async (param) => call(env, req(`/api/diagrams?${param}`))),
     );
+
     expect(results.every((res) => res.status === 400)).toBe(true);
   });
 
   it("deletes only an authorized board and disables old and library links", async () => {
     const env = makeEnv();
     const [target, keep] = await Promise.all([create(env, "Prod smoke"), create(env, "Keep")]);
-    const page = (await (await call(env, req("/api/diagrams"))).json()) as DiagramPage;
+
+    const page = diagramPageSchema.parse(
+      await (await call(env, req("/api/diagrams"))).json(),
+    ) satisfies DiagramPage;
+
     const libraryKey = page.items.find((d) => d.id === target.id)!.key;
     expect((await call(env, req(`/api/d/${target.id}?k=wrong`, { method: "DELETE" }))).status).toBe(
       403,
@@ -170,11 +223,17 @@ describe("diagrams API", () => {
     expect(
       (await call(env, req(`/api/d/${target.id}?k=${libraryKey}`, { method: "DELETE" }))).status,
     ).toBe(204);
-    const result = (await (await call(env, req("/api/diagrams"))).json()) as typeof page;
+
+    const result = diagramPageSchema.parse(
+      await (await call(env, req("/api/diagrams"))).json(),
+    ) satisfies typeof page;
+
     expect(result.items.map((d) => d.id)).toEqual([keep.id]);
+
     const blocked = await Promise.all(
       [target.key, libraryKey].map(async (key) => call(env, req(`/api/d/${target.id}?k=${key}`))),
     );
+
     expect(blocked.map((res) => res.status)).toEqual([403, 403]);
     expect((await call(env, req(`/api/d/${keep.id}?k=${keep.key}`))).status).toBe(200);
   });
@@ -195,6 +254,7 @@ describe("diagrams API", () => {
     const d = await create(env, "HLD");
     const paths = [`/api/d/${d.id}`, `/api/d/${d.id}?k=wrong`, `/api/d/unknown-id?k=${d.key}`];
     const results = await Promise.all(paths.map(async (path) => call(env, req(path))));
+
     for (const res of results) expect(res.status).toBe(403);
   });
 
@@ -211,11 +271,13 @@ describe("diagrams API", () => {
   it("rejects invalid room names without changing the saved name", async () => {
     const env = makeEnv();
     const d = await create(env, "Original");
+
     const responses = await Promise.all(
       ["  ", 42, "x".repeat(121)].map((name) =>
         post(env, `/api/d/${d.id}/rename?k=${d.key}`, { name }),
       ),
     );
+
     for (const response of responses) expect(response.status).toBe(400);
     const response = await call(env, req(`/api/d/${d.id}?k=${d.key}`));
     expect(await body(response)).toMatchObject({ name: "Original" });
@@ -234,7 +296,7 @@ describe("diagrams API", () => {
     const src = await create(env, "Src", "builtin:read-heavy");
     const tpl = await post(env, `/api/d/${src.id}/template?k=${src.key}`, { name: "Saved" });
     expect(tpl.status).toBe(200);
-    const tplId = ((await body(tpl)) as WithId).id;
+    const tplId = (withIdSchema.parse(await body(tpl)) satisfies WithId).id;
     const copy = await create(env, "Copy", tplId);
     const g = await env.rooms.get(copy.id)!.getGraph();
     expect(g.nodes).toHaveLength(6);
@@ -244,17 +306,27 @@ describe("diagrams API", () => {
     const env = makeEnv();
     const res = await post(env, "/api/diagrams", { name: "X", template: "nope" });
     expect(res.status).toBe(403);
-    expect(((await body(res)) as ErrorBody).error).toMatch("Template is not available");
+    expect((errorBodySchema.parse(await body(res)) satisfies ErrorBody).error).toMatch(
+      "Template is not available",
+    );
     expect(env.db.diagrams.size).toBe(0);
   });
 
   it("lists builtin and saved templates", async () => {
     const env = makeEnv();
-    const before = (await (await call(env, req("/api/templates"))).json()) as TemplateInfo[];
+
+    const before = templateInfoSchema
+      .array()
+      .parse(await (await call(env, req("/api/templates"))).json()) satisfies TemplateInfo[];
+
     expect(before.some((t) => t.id === "builtin:interview")).toBe(true);
     const src = await create(env, "Src");
     await post(env, `/api/d/${src.id}/template?k=${src.key}`, { name: "Mine" });
-    const after = (await (await call(env, req("/api/templates"))).json()) as TemplateInfo[];
+
+    const after = templateInfoSchema
+      .array()
+      .parse(await (await call(env, req("/api/templates"))).json()) satisfies TemplateInfo[];
+
     expect(after.some((t) => t.name === "Mine")).toBe(true);
   });
 });
@@ -264,14 +336,14 @@ describe("snapshots API", () => {
     const env = makeEnv();
     const d = await create(env, "V");
     const room = env.rooms.get(d.id)!;
-    await room.applyPatch([{ op: "add_node", label: "A" }], "system" as Author);
+    await room.applyPatch([{ op: "add_node", label: "A" }], "human");
 
     const snap = await post(env, `/api/d/${d.id}/snapshots?k=${d.key}`, { name: "v1" });
     expect(snap.status).toBe(200);
-    const meta = (await body(snap)) as SnapshotInfo;
+    const meta = snapshotInfoSchema.parse(await body(snap)) satisfies SnapshotInfo;
     expect(meta.name).toBe("v1");
 
-    await room.applyPatch([{ op: "add_node", label: "B" }], "system" as Author);
+    await room.applyPatch([{ op: "add_node", label: "B" }], "human");
     const list = await call(env, req(`/api/d/${d.id}/snapshots?k=${d.key}`));
     expect(await list.json()).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: meta.id })]),
@@ -286,7 +358,7 @@ describe("snapshots API", () => {
   it("tidies through HTTP as the system origin", async () => {
     const env = makeEnv();
     const d = await create(env, "T");
-    await env.rooms.get(d.id)!.applyPatch([{ op: "add_node", label: "A" }], "system" as Author);
+    await env.rooms.get(d.id)!.applyPatch([{ op: "add_node", label: "A" }], "human");
     const res = await post(env, `/api/d/${d.id}/tidy?k=${d.key}`, {});
     expect(res.status).toBe(200);
     // apply_patch already tidied it: nothing to change, so no snapshot.
@@ -344,9 +416,11 @@ describe("files API", () => {
       },
     ]);
     await put(env, `/api/d/${d.id}/files/file1?k=${d.key}`, png);
-    const tpl = (await body(
-      await post(env, `/api/d/${d.id}/template?k=${d.key}`, { name: "With image" }),
-    )) as WithId;
+
+    const tpl = withIdSchema.parse(
+      await body(await post(env, `/api/d/${d.id}/template?k=${d.key}`, { name: "With image" })),
+    ) satisfies WithId;
+
     const copy = await create(env, "Copy", tpl.id);
     const res = await call(env, req(`/api/d/${copy.id}/files/file1?k=${copy.key}`));
     expect(res.status).toBe(200);
@@ -361,7 +435,7 @@ describe("request validation", () => {
     const path = route.startsWith("/api/") ? route : `/api/d/${d.id}${route}?k=${d.key}`;
     const response = await post(env, path, payload);
     expect(response.status).toBe(400);
-    const failure = (await response.json()) as ApiFailure;
+    const failure = apiFailureSchema.parse(await response.json()) satisfies ApiFailure;
     expect(failure).toMatchObject({
       success: false,
       error: { name: "ZodError", message: expect.any(String) },
@@ -374,6 +448,7 @@ describe("request validation", () => {
   it("rejects malformed JSON instead of treating it as an empty tidy request", async () => {
     const env = makeEnv();
     const d = await create(env, "Validation");
+
     const response = await call(
       env,
       req(`/api/d/${d.id}/tidy?k=${d.key}`, {
@@ -382,6 +457,7 @@ describe("request validation", () => {
         body: "{",
       }),
     );
+
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "Malformed JSON in request body" });
     expect(env.db.snapshots).toHaveLength(0);
@@ -391,8 +467,9 @@ describe("request validation", () => {
     const env = makeEnv();
     const response = await post(env, "/api/diagrams", {});
     expect(response.status).toBe(200);
-    const d = (await response.json()) as Created;
+    const d = createdSchema.parse(await response.json()) satisfies Created;
     expect(d.name).toBe("Untitled");
+
     const renamed = await call(
       env,
       req(`/api/d/${d.id}/rename?k=${d.key}`, {
@@ -401,6 +478,7 @@ describe("request validation", () => {
         body: JSON.stringify({ name: "  Trimmed  " }),
       }),
     );
+
     expect(await renamed.json()).toEqual({ ok: true, name: "Trimmed" });
     const snapshot = await post(env, `/api/d/${d.id}/snapshots?k=${d.key}`, {});
     expect(snapshot.status).toBe(200);
@@ -422,6 +500,7 @@ describe("routing", () => {
   it("authorizes diagram and WebSocket subpaths before dispatching", async () => {
     const env = makeEnv();
     const d = await create(env, "Protected");
+
     const paths = [
       `/api/d/${d.id}/rename`,
       `/api/d/${d.id}/files/file1`,
@@ -429,9 +508,11 @@ describe("routing", () => {
       `/ws/${d.id}`,
       `/ws/${d.id}/extra`,
     ];
+
     const responses = await Promise.all(
       paths.map(async (path) => call(env, req(`${path}?k=wrong`))),
     );
+
     expect(responses.map((response) => response.status)).toEqual(paths.map(() => 403));
     expect(await Promise.all(responses.map((response) => response.json()))).toEqual(
       paths.map(() => ({ error: "invalid link" })),
@@ -454,6 +535,7 @@ describe("routing", () => {
   it("keeps file ID restrictions and strict paths", async () => {
     const env = makeEnv();
     const d = await create(env, "Paths");
+
     const paths = [
       `/api/d/${d.id}/files/bad.id?k=${d.key}`,
       `/api/d/${d.id}/files/${"x".repeat(129)}?k=${d.key}`,
@@ -461,6 +543,7 @@ describe("routing", () => {
       "/api/d/bad.id?k=wrong",
       "/api/diagrams/",
     ];
+
     const responses = await Promise.all(paths.map(async (path) => call(env, req(path))));
     expect(responses.map((response) => response.status)).toEqual(paths.map(() => 404));
   });
@@ -482,7 +565,7 @@ describe("routing", () => {
     const env = makeEnv();
     const response = await call(env, req("/.well-known/oauth-protected-resource/mcp"));
     expect(response.status).toBe(200);
-    const doc = (await response.json()) as ProtectedResource;
+    const doc = protectedResourceSchema.parse(await response.json()) satisfies ProtectedResource;
     expect(doc.resource).toBe("http://localhost/mcp");
     expect(doc.authorization_servers).toEqual(["http://localhost"]);
   });

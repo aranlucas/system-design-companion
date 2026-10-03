@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { createdSchema, librarySchema, stringRecordSchema } from "./helpers/response-schemas.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker/index.ts";
 import {
@@ -11,12 +13,15 @@ import { readBounded, takeBudget } from "../src/worker/request-limits.ts";
 import { makeEnv, testCtx, type TestEnv } from "./helpers/fakes.ts";
 
 type Created = { id: string; key: string };
+
 type Library = { items: Created[] };
 
 async function request(env: TestEnv, path: string, token?: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
   headers.set("Origin", "https://design.example");
+
   if (token) headers.set("Cookie", `__Host-sdc-session=${token}`);
+
   return worker.fetch(
     new Request(`https://design.example${path}`, { ...init, headers }),
     env.env,
@@ -30,6 +35,7 @@ async function session(env: TestEnv, userId: string) {
     `browser-session:${await sha256(token)}`,
     JSON.stringify({ userId, expiresAt: Date.now() + 60_000 }),
   );
+
   return token;
 }
 
@@ -50,15 +56,24 @@ describe("public service access boundaries", () => {
         })
       ).status,
     ).toBe(401);
+
     const created = await request(env, "/api/diagrams", alice, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "Private" }),
     });
-    const board = (await created.json()) as Created;
+
+    const board = createdSchema.parse(await created.json()) satisfies Created;
     expect(created.status).toBe(200);
-    const aliceLibrary = (await (await request(env, "/api/diagrams", alice)).json()) as Library;
-    const bobLibrary = (await (await request(env, "/api/diagrams", bob)).json()) as Library;
+
+    const aliceLibrary = librarySchema.parse(
+      await (await request(env, "/api/diagrams", alice)).json(),
+    ) satisfies Library;
+
+    const bobLibrary = librarySchema.parse(
+      await (await request(env, "/api/diagrams", bob)).json(),
+    ) satisfies Library;
+
     expect(aliceLibrary.items.map((item) => item.id)).toEqual([board.id]);
     expect(bobLibrary.items).toEqual([]);
     // Explicit collaboration remains possible without sign-in.
@@ -74,7 +89,11 @@ describe("public service access boundaries", () => {
     const env = makeEnv();
     const legacy = await createDiagram(env.env, "Legacy");
     const token = await session(env, "github%3A1");
-    const library = (await (await request(env, "/api/diagrams", token)).json()) as Library;
+
+    const library = librarySchema.parse(
+      await (await request(env, "/api/diagrams", token)).json(),
+    ) satisfies Library;
+
     expect(library.items).toEqual([]);
     expect(env.db.library.has(legacy.id)).toBe(false);
     expect(await verifyKey(env.env, legacy.id, legacy.key)).not.toBeNull();
@@ -106,6 +125,7 @@ describe("public service access boundaries", () => {
   it("does not disclose or clone another user's template and leaves no failed board", async () => {
     const env = makeEnv();
     const board = await createDiagram(env.env, "Source", undefined, "github%3A1");
+
     const template = await saveAsTemplate(
       env.env,
       board.id,
@@ -113,6 +133,7 @@ describe("public service access boundaries", () => {
       undefined,
       "github%3A1",
     );
+
     expect(
       (await listTemplates(env.env, "github%3A1")).some((item) => item.id === template.id),
     ).toBe(true);
@@ -132,6 +153,7 @@ describe("public service access boundaries", () => {
   it("rejects cross-origin cookie mutations and expires browser sessions", async () => {
     const env = makeEnv();
     const token = await session(env, "github%3A1");
+
     const crossOrigin = new Request("https://design.example/api/diagrams", {
       method: "POST",
       headers: {
@@ -141,6 +163,7 @@ describe("public service access boundaries", () => {
       },
       body: JSON.stringify({ name: "CSRF" }),
     });
+
     expect((await worker.fetch(crossOrigin, env.env, testCtx())).status).toBe(403);
     await env.kv.put(
       `browser-session:${await sha256(token)}`,
@@ -169,11 +192,13 @@ describe("browser GitHub sign-in", () => {
       "fetch",
       vi.fn(async (input: string | URL, init?: RequestInit) => {
         if (String(input).includes("access_token")) {
-          const params = JSON.parse(init?.body as string) as Record<string, string>;
+          const params = stringRecordSchema.parse(JSON.parse(z.string().parse(init?.body)));
           expect(params.code_verifier).toBeTruthy();
           expect(params.redirect_uri).toBe("https://design.example/github/callback");
+
           return Response.json({ access_token: "upstream-token" });
         }
+
         return Response.json({ id: 42 });
       }),
     );
@@ -183,11 +208,13 @@ describe("browser GitHub sign-in", () => {
     const loginCookie = login.headers.get("Set-Cookie")!.split(";")[0];
     const callback = `/github/callback?state=${destination.searchParams.get("state")}&code=test-code`;
     expect((await request(env, callback)).status).toBe(400);
+
     const signedIn = await worker.fetch(
       new Request(`https://design.example${callback}`, { headers: { Cookie: loginCookie } }),
       env.env,
       testCtx(),
     );
+
     expect(signedIn.status).toBe(302);
     const cookies = signedIn.headers.get("Set-Cookie")!;
     expect(cookies).toContain("HttpOnly");
@@ -195,11 +222,13 @@ describe("browser GitHub sign-in", () => {
     const token = cookies.match(/__Host-sdc-session=([a-f0-9-]+)/)![1];
     expect((await request(env, "/api/diagrams", token)).status).toBe(200);
     expect(JSON.stringify([...env.kv.values])).not.toContain("upstream-token");
+
     const replay = await worker.fetch(
       new Request(`https://design.example${callback}`, { headers: { Cookie: loginCookie } }),
       env.env,
       testCtx(),
     );
+
     expect(replay.status).toBe(400);
     expect((await request(env, "/api/auth/logout", token, { method: "POST" })).status).toBe(204);
     expect((await request(env, "/api/diagrams", token)).status).toBe(401);
@@ -209,6 +238,7 @@ describe("browser GitHub sign-in", () => {
 describe("bounded requests", () => {
   it("cancels chunked input as soon as it exceeds its allowance", async () => {
     const cancel = vi.fn();
+
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new Uint8Array(5));
@@ -216,6 +246,7 @@ describe("bounded requests", () => {
       },
       cancel,
     });
+
     await expect(readBounded(body, 8)).rejects.toThrow("too large");
     expect(cancel).toHaveBeenCalledOnce();
   });
@@ -223,11 +254,13 @@ describe("bounded requests", () => {
   it("rejects oversized HTTP bodies before creating artifacts", async () => {
     const env = makeEnv();
     const token = await session(env, "github%3A1");
+
     const response = await request(env, "/api/diagrams", token, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: "x".repeat(1024 * 1024 + 1),
     });
+
     expect(response.status).toBe(413);
     expect(env.db.diagrams.size).toBe(0);
   });
@@ -235,6 +268,7 @@ describe("bounded requests", () => {
   it("enforces per-key budgets and resets them in the next window", async () => {
     const env = makeEnv();
     const now = vi.spyOn(Date, "now").mockReturnValue(120_000);
+
     try {
       await takeBudget(env.env, "alice", 1);
       await expect(takeBudget(env.env, "alice", 1)).rejects.toThrow("Too many requests");

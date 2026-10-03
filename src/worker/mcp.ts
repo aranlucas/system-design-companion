@@ -1,3 +1,5 @@
+const serverCapabilities = { tools: {}, prompts: {}, resources: {}, events: {} };
+
 import {
   RESOURCE_MIME_TYPE,
   registerAppResource,
@@ -8,13 +10,12 @@ import {
   McpServer,
   requireScopes,
   type McpRequestContext,
-  type ServerCapabilities,
 } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { COMPONENT_KINDS, COMPONENTS } from "../shared/components.ts";
 import { registerEvents } from "./events.ts";
 import type { McpPrincipal } from "./principal.ts";
-import { SHAPES, type Op } from "./scene.ts";
+import { GEOMETRIES, type Op } from "./scene.ts";
 import { RUBRIC } from "./rubric.ts";
 import {
   createDiagram,
@@ -40,7 +41,9 @@ export async function handleMcp(request: Request, env: Env, principal: McpPrinci
       );
     throw error;
   }
+
   const handler = createMcpHandler((ctx) => buildServer(env, ctx, principal));
+
   // The SDK never verifies tokens itself; authInfo is strictly the caller's claim
   // about who is calling, and events/subscribe keys subscriptions on it.
   return handler.fetch(request, {
@@ -56,22 +59,35 @@ export async function handleMcp(request: Request, env: Env, principal: McpPrinci
 
 /** Tool and prompt arguments, as their input schemas validate them. */
 type DiagramArgs = { diagram: string };
+
 type CreateDiagramArgs = { name: string; template?: string };
+
 type GetSceneArgs = DiagramArgs & { format?: "graph" | "raw" };
+
 type ScreenshotArgs = DiagramArgs & { element_ids?: string[] };
+
 type PatchArgs = DiagramArgs & { ops: Op[]; summary?: string };
+
 type FrameArgs = DiagramArgs & { frame?: string };
+
 type LayoutArgs = FrameArgs & { direction?: "LR" | "TB" };
+
 type MermaidArgs = DiagramArgs & { source: string };
+
 type NameArgs = DiagramArgs & { name: string };
+
 type RestoreArgs = DiagramArgs & { snapshot_id: string };
+
 type TemplateArgs = NameArgs & { description?: string };
+
 type FocusArgs = DiagramArgs & {
   targets: string[];
   mode: "focus" | "point";
   gesture: "dot" | "heart";
 };
+
 type ReviewArgs = { focus?: string };
+
 type EstimateArgs = { dau?: string; notes?: string };
 
 const INSTRUCTIONS = `Collaborative Excalidraw canvas for system design. A human (and possibly an interviewer) edits the same canvas live in a browser tab.
@@ -86,6 +102,7 @@ Workflow:
 const target = z
   .string()
   .describe("element id, unique label (case-insensitive), or a ref from this batch");
+
 const placement = z
   .object({
     right_of: target.optional(),
@@ -97,9 +114,11 @@ const placement = z
     gap: z.number().optional().describe("px, default 100"),
   })
   .describe("where to put it; overlaps are nudged away automatically");
+
 const color = z
   .string()
   .describe("fill: white gray red pink violet blue cyan green yellow orange, or a hex color");
+
 const textColor = z
   .string()
   .describe(
@@ -120,8 +139,8 @@ const opSchema = z.discriminatedUnion("op", [
       .string()
       .optional()
       .describe("required unless kind is given; e.g. kind=sql_db, label='Orders DB'"),
-    shape: z
-      .enum(SHAPES)
+    "shape": z
+      .enum(GEOMETRIES)
       .optional()
       .describe("rectangle (default: services), ellipse (datastores/clients), diamond (decisions)"),
     color: color.optional(),
@@ -147,7 +166,7 @@ const opSchema = z.discriminatedUnion("op", [
     label: z.string().optional().describe("new label (frame name / note text for those types)"),
     color: color.optional(),
     text_color: textColor.optional(),
-    shape: z.enum(SHAPES).optional(),
+    "shape": z.enum(GEOMETRIES).optional(),
     dashed: z.boolean().optional(),
     width: z.number().optional(),
     height: z.number().optional(),
@@ -210,7 +229,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
       instructions: INSTRUCTIONS,
       // `events` is not in the SDK's ServerCapabilities type, but the discover
       // response advertises capabilities verbatim, so the key reaches the wire.
-      capabilities: { tools: {}, prompts: {}, resources: {}, events: {} } as ServerCapabilities,
+      capabilities: serverCapabilities,
     },
   );
 
@@ -219,9 +238,12 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
   /** Resolve a share link to a verified diagram. The link is the client-held handle; nothing is stored server-side. */
   async function pick(link: string) {
     const parsed = parseLink(link);
+
     if (!parsed) throw new Error("`diagram` must be the share link, e.g. https://…/d/<id>?k=<key>");
     const row = await verifyKey(env, parsed.id, parsed.key);
+
     if (!row) throw new Error("invalid or revoked diagram link");
+
     return row;
   }
 
@@ -238,6 +260,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     async ({ diagram }: DiagramArgs) => {
       const row = await pick(diagram);
       const info = await room(env, row.id).info();
+
       const data = {
         diagram: row.name,
         elements: info.elements,
@@ -246,6 +269,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
           ? "The user has the canvas open."
           : "No canvas tab is open; screenshots and mermaid import need one.",
       };
+
       return {
         content: [
           {
@@ -274,11 +298,13 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     async ({ name, template }: CreateDiagramArgs) => {
       const d = await createDiagram(env, name, template, principal.userId);
       const link = shareLink(origin, d.id, d.key);
+
       const data = {
         name: d.name,
         diagram: link,
         note: "Pass this link as `diagram` to other tools, and give it to the user to open.",
       };
+
       return {
         content: [
           { type: "text" as const, text: `Created ${d.name}. Open ${link}. ${data.note}` },
@@ -305,10 +331,12 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     },
     async ({ diagram, format }: GetSceneArgs) => {
       const d = await pick(diagram);
+
       const data =
         format === "raw"
           ? { elements: await room(env, d.id).getRaw() }
           : await room(env, d.id).getGraph();
+
       return {
         content: [
           { type: "text" as const, text: `Retrieved ${format ?? "graph"} scene for ${d.name}.` },
@@ -331,6 +359,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     async ({ diagram }: DiagramArgs) => {
       const d = await pick(diagram);
       const elements = await room(env, d.id).getRaw();
+
       return {
         content: [{ type: "text" as const, text: `${elements.length} elements` }],
         structuredContent: { name: d.name, url: diagram, elements },
@@ -365,6 +394,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     },
     async ({ diagram }: DiagramArgs) => {
       const data = await room(env, (await pick(diagram)).id).getSelection();
+
       return {
         content: [
           {
@@ -398,6 +428,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     },
     async ({ diagram, element_ids }: ScreenshotArgs) => {
       const shot = await room(env, (await pick(diagram)).id).screenshot(element_ids);
+
       return { content: [{ type: "image" as const, data: shot.base64, mimeType: shot.mimeType }] };
     },
   );
@@ -428,6 +459,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     async ({ diagram, ops, summary }: PatchArgs) => {
       const data = await room(env, (await pick(diagram)).id).applyPatch(ops, "agent", summary);
       const failed = data.results.filter((result) => !result.ok).length;
+
       return {
         content: [
           {
@@ -455,6 +487,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     },
     async ({ diagram, frame }: FrameArgs) => {
       const data = await room(env, (await pick(diagram)).id).tidy(frame);
+
       return {
         content: [
           { type: "text" as const, text: `Tidied the diagram: ${data.changed} elements changed.` },
@@ -483,6 +516,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     },
     async ({ diagram, direction, frame }: LayoutArgs) => {
       const data = await room(env, (await pick(diagram)).id).layout(direction ?? "LR", frame);
+
       return {
         content: [
           { type: "text" as const, text: `Laid out the diagram: ${data.moved} nodes moved.` },
@@ -504,6 +538,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     },
     async ({ diagram, source }: MermaidArgs) => {
       const data = await room(env, (await pick(diagram)).id).importMermaid(source);
+
       return {
         content: [
           { type: "text" as const, text: `Imported Mermaid: ${data.added} elements added.` },
@@ -526,6 +561,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     },
     async ({ diagram, name }: NameArgs) => {
       const data = await room(env, (await pick(diagram)).id).snapshot(name, "named");
+
       return {
         content: [
           {
@@ -548,6 +584,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     },
     async ({ diagram }: DiagramArgs) => {
       const data = { snapshots: await room(env, (await pick(diagram)).id).listSnapshots() };
+
       return {
         content: [
           {
@@ -572,6 +609,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     },
     async ({ diagram, snapshot_id }: RestoreArgs) => {
       const data = await room(env, (await pick(diagram)).id).restore(snapshot_id);
+
       return {
         content: [
           {
@@ -594,6 +632,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     },
     async () => {
       const data = { templates: await listTemplates(env, principal.userId) };
+
       return {
         content: [
           { type: "text" as const, text: `Found ${data.templates.length} templates.` },
@@ -624,6 +663,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
         description,
         principal.userId,
       );
+
       return {
         content: [
           { type: "text" as const, text: `Saved template ${data.name}.` },
@@ -655,6 +695,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     },
     async ({ diagram, targets, mode, gesture }: FocusArgs) => {
       const data = await room(env, (await pick(diagram)).id).focusView(targets, mode, gesture);
+
       return {
         content: [
           {
@@ -682,10 +723,10 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
           uri: uri.href,
           mimeType: "application/json",
           text: JSON.stringify(
-            COMPONENTS.map(({ kind, label, shape, group, icon }) => ({
+            COMPONENTS.map(({ kind, label, "shape": geometry, group, icon }) => ({
               kind,
               label,
-              shape,
+              "shape": geometry,
               group,
               icon,
             })),

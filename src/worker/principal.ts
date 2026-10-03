@@ -1,3 +1,4 @@
+import { z } from "zod";
 // The authenticated caller behind an MCP request, and how it reaches the SDK.
 //
 // The OAuth provider verifies the bearer token and hands the handler a verified
@@ -22,13 +23,32 @@ export interface McpPrincipal {
 }
 
 type OAuthProps = { authorizationId?: string };
+
 export type OAuthHandlerContext = OAuthResourceContext<OAuthProps>;
 
+type PrincipalContext = Pick<OAuthHandlerContext, "auth" | "props">;
+
+/** Validate the provider-added fields missing from ExportedHandler's standard context type. */
+export const oauthContextSchema = z.object({
+  auth: z.object({
+    token: z.string(),
+    audience: z.string(),
+    expiresAt: z.number().optional(),
+    scope: z.array(z.string()),
+    userId: z.string().optional(),
+    clientId: z.string().optional(),
+  }),
+  props: z.object({ authorizationId: z.string().optional() }),
+});
+
 /** A token the authorization server issued always names a user, so this cannot fail. */
-export function toMcpPrincipal(ctx: OAuthHandlerContext): McpPrincipal {
+export function toMcpPrincipal(ctx: PrincipalContext): McpPrincipal {
   const { auth, props } = ctx;
+
   if (!props?.authorizationId) throw new Error("access token carried no authorization identity");
+
   if (!auth.userId) throw new Error("access token carried no subject");
+
   return {
     userId: auth.userId,
     authorizationId: props.authorizationId,

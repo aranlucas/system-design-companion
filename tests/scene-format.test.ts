@@ -1,3 +1,4 @@
+import { storedElementsSchema } from "../src/shared/schemas.ts";
 // Formatting: wrapText/measureText, tidy guarantees, layout, addForeign, restoreTo.
 import { describe, expect, it } from "vitest";
 import type { El } from "../src/shared/protocol.ts";
@@ -7,6 +8,7 @@ function build(ops: Op[]): Scene {
   const s = new Scene([]);
   const res = s.apply(ops, "agent");
   expect(res.every((r) => r.ok)).toBe(true);
+
   return s;
 }
 
@@ -24,10 +26,12 @@ const runsOn = (p: number[], q: number[], u: number[], v: number[]) =>
 const overlaps = (s: Scene) => {
   const blocks = s.live().filter((e) => s.isNode(e) || (e.type === "text" && !e.containerId));
   let n = 0;
+
   for (let i = 0; i < blocks.length; i++)
     for (let j = i + 1; j < blocks.length; j++) {
       const a = blocks[i];
       const b = blocks[j];
+
       if (
         a.x < b.x + b.width &&
         b.x < a.x + a.width &&
@@ -36,6 +40,7 @@ const overlaps = (s: Scene) => {
       )
         n++;
     }
+
   return n;
 };
 
@@ -49,6 +54,7 @@ describe("wrapText / measureText", () => {
     const text = `word `.repeat(40).trim();
     const out = wrapText(text);
     expect(out).toContain("\n");
+
     for (const line of out.split("\n")) {
       expect(line.length).toBeLessThanOrEqual(64);
       expect(line).not.toMatch(/^\s|\s$/);
@@ -59,6 +65,7 @@ describe("wrapText / measureText", () => {
     const out = wrapText(`- ${`item `.repeat(30).trim()}`);
     const [first, ...rest] = out.split("\n");
     expect(first.startsWith("- ")).toBe(true);
+
     for (const line of rest) expect(line.startsWith("  ")).toBe(true);
   });
 
@@ -93,6 +100,7 @@ describe("tidy", () => {
         dashed: true,
       },
     ]);
+
     const arrow = s.live().find((e) => e.type === "arrow" && e.strokeStyle === "dashed")!;
     // Saved geometry from the old midpoint-only router.
     s.mutate(arrow, {
@@ -113,15 +121,18 @@ describe("tidy", () => {
       target.x + target.width + 40,
     );
     const source = s.resolve("Geofence processor");
+
     // Right angles only, and never running on top of the neighbouring transition arrow.
     for (let i = 1; i < path.length; i++)
       expect(path[i][0] === path[i - 1][0] || path[i][1] === path[i - 1][1]).toBe(true);
     const other = s.live().find((e) => e.type === "arrow" && e.strokeStyle !== "dashed")!;
     const otherPath = other.points.map(([x, y]: number[]) => [other.x + x, other.y + y]);
+
     for (let i = 1; i < path.length; i++)
       for (let j = 1; j < otherPath.length; j++)
         expect(runsOn(path[i - 1], path[i], otherPath[j - 1], otherPath[j])).toBe(false);
     const caption = s.boundText(source)!;
+
     // Check every segment, not just the control points, clears the caption.
     for (let i = 1; i < path.length; i++) {
       for (let step = 0; step <= 100; step++) {
@@ -136,6 +147,7 @@ describe("tidy", () => {
         ).toBe(true);
       }
     }
+
     const again = new Scene(s.live());
     again.tidy();
     expect(again.changedElements()).toEqual([]);
@@ -145,6 +157,7 @@ describe("tidy", () => {
   // bypassing the ops layer's own overlap-nudging and frame-attach.
   let seq = 100;
   const idx = () => `b${String(seq++).padStart(6, "0")}`;
+
   const base = (id: string, type: string, x: number, y: number, w: number, h: number): El => ({
     id,
     type,
@@ -159,6 +172,7 @@ describe("tidy", () => {
     boundElements: [],
     backgroundColor: "transparent",
   });
+
   it.each([true, false])(
     "reroutes Route history inside its shared frame (autoBend=%s)",
     (autoBend) => {
@@ -166,6 +180,7 @@ describe("tidy", () => {
       const left = { ...base("left", "rectangle", 80, 100, 160, 70), frameId: "f" };
       const right = { ...base("right", "rectangle", 720, 100, 160, 70), frameId: "f" };
       const obstacle = { ...base("middle", "rectangle", 400, 60, 160, 180), frameId: "f" };
+
       const arrow = {
         ...base("route", "arrow", 240, 135, 480, 300),
         customData: { autoBend },
@@ -178,21 +193,25 @@ describe("tidy", () => {
         endBinding: { elementId: "right", gap: 8 },
         boundElements: [{ id: "route-label", type: "text" }],
       };
+
       const label = {
         ...base("route-label", "text", 420, -175, 120, 25),
         text: "Route history",
         containerId: "route",
         fontSize: 20,
       };
+
       const scene = new Scene([frame, left, right, obstacle, arrow, label]);
       scene.tidy(new Set(["f"]));
       const result = scene.resolve("route");
+
       for (const [x, y] of result.points) {
         expect(result.x + x).toBeGreaterThanOrEqual(0);
         expect(result.x + x).toBeLessThanOrEqual(1000);
         expect(result.y + y).toBeGreaterThanOrEqual(0);
         expect(result.y + y).toBeLessThanOrEqual(500);
       }
+
       const text = scene.resolve("route-label");
       expect(text.y).toBeGreaterThanOrEqual(0);
       expect(text.y + text.height).toBeLessThanOrEqual(500);
@@ -209,8 +228,10 @@ describe("tidy", () => {
 
   function cluttered(): Scene {
     const f = { ...base("f", "frame", 0, 0, 1600, 900), name: "F" };
+
     const mkNode = (id: string, x: number, y: number, label: string, frameId: string | null) => {
       const n: El = { ...base(id, "rectangle", x, y, 160, 70), frameId };
+
       const t: El = {
         ...base(`${id}-t`, "text", x, y, 50, 20),
         text: label,
@@ -219,9 +240,12 @@ describe("tidy", () => {
         containerId: id,
         frameId,
       };
+
       n.boundElements = [{ id: t.id, type: "text" }];
-      return [n, t] as El[];
+
+      return [n, t] satisfies El[];
     };
+
     const arrow = {
       ...base("arr", "arrow", 0, 0, 0, 0),
       points: [
@@ -231,7 +255,8 @@ describe("tidy", () => {
       strokeStyle: "solid",
       startBinding: { elementId: "a", focus: 0, gap: 8, fixedPoint: null },
       endBinding: { elementId: "c", focus: 0, gap: 8, fixedPoint: null },
-    } as El;
+    } satisfies El;
+
     const note = {
       ...base("n1", "text", 500, 500, 2000, 20),
       text: `word `.repeat(40).trim(),
@@ -239,7 +264,8 @@ describe("tidy", () => {
       fontSize: 20,
       containerId: null,
       frameId: null,
-    } as El;
+    } satisfies El;
+
     return new Scene([
       f,
       ...mkNode("a", 100, 100, "Alpha", null),
@@ -260,12 +286,14 @@ describe("tidy", () => {
 
   it("never changes connections, labels, colours or node count", () => {
     const s = cluttered();
+
     const before = {
       labels: labels(s),
       edges: graphView(s).edges?.map((e) => [e.from, e.to]),
       colors: s.live().map((e) => e.backgroundColor),
       count: s.live().length,
     };
+
     s.tidy();
     expect(labels(s)).toEqual(before.labels);
     expect(graphView(s).edges?.map((e) => [e.from, e.to])).toEqual(before.edges);
@@ -288,6 +316,7 @@ describe("tidy", () => {
       { op: "add_node", ref: "b", label: "B", place: { at: { x: 5000, y: 5000 } } },
       { op: "add_node", ref: "c", label: "C", place: { at: { x: 5020, y: 5020 } } },
     ]);
+
     const frameId = s.resolve("f").id;
     const stats = s.tidy(new Set([frameId]));
     expect(stats).toBeDefined();
@@ -305,10 +334,12 @@ describe("layout", () => {
       { op: "connect", from: "a", to: "b" },
       { op: "connect", from: "b", to: "c" },
     ]);
+
     expect(s.layout("LR")).toBe(3);
     expect(s.layout("TB")).toBe(3);
     const g = graphView(s);
     expect(g.edges).toHaveLength(2);
+
     for (const e of s.live()) {
       expect(Number.isFinite(e.x) && Number.isFinite(e.y)).toBe(true);
     }
@@ -320,6 +351,7 @@ describe("layout", () => {
       { op: "add_node", ref: "a", label: "A", frame: "f" },
       { op: "add_node", ref: "b", label: "B", frame: "f" },
     ]);
+
     expect(s.layout("LR", "f")).toBe(2);
     expect(() => new Scene([]).layout("LR")).toThrow("nothing to lay out");
   });
@@ -355,6 +387,7 @@ describe("addForeign / restoreTo", () => {
       { op: "add_node", ref: "a", label: "A" },
       { op: "add_node", ref: "b", label: "B" },
     ]);
+
     const snap = structuredClone(s.live());
     const vBefore = s.resolve("a").version;
     s.apply(
@@ -376,7 +409,8 @@ describe("addForeign / restoreTo", () => {
       { op: "connect", from: "a", to: "b", label: "e" },
       { op: "add_note", text: "n" },
     ]);
-    const raw = JSON.parse(JSON.stringify(s.live())) as ReturnType<Scene["live"]>;
+
+    const raw = storedElementsSchema.parse(JSON.parse(JSON.stringify(s.live())));
     const copy = new Scene(raw);
     expect(graphView(copy)).toEqual(graphView(s));
   });

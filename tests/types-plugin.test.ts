@@ -3,11 +3,15 @@ import { describe, it } from "vitest";
 import plugin from "../lint/types-plugin.ts";
 
 RuleTester.describe = describe;
+
 RuleTester.it = it;
 
 const tester = new RuleTester({ languageOptions: { parserOptions: { lang: "ts" } } });
+
 const objectError = "Inline object type: declare it as a named module-level type or interface.";
+
 const tupleError = "Inline tuple type: declare it as a named module-level type or interface.";
+
 const localError = "Declare types at module level, not inside functions.";
 
 tester.run("no-inline-types", plugin.rules["no-inline-types"], {

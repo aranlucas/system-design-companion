@@ -12,17 +12,20 @@ import {
   verifyKey,
 } from "../src/worker/store.ts";
 import { makeEnv } from "./helpers/fakes.ts";
+import { d1Adapter } from "./helpers/d1-adapter.ts";
 import { SQLiteD1 } from "./helpers/sqlite-d1.ts";
 
 const owner = "github%3A1";
+
 const databases: SQLiteD1[] = [];
 
 async function setup() {
   const bindings = makeEnv();
   const db = new SQLiteD1();
   databases.push(db);
-  bindings.env.DB = db as unknown as D1Database;
+  bindings.env.DB = d1Adapter(db);
   await ensureSchema(bindings.env);
+
   return { ...bindings, db };
 }
 
@@ -49,19 +52,23 @@ async function sourceWithImages() {
   await bindings.bucket.put(`files/${source.id}/first`, "first image");
   await bindings.bucket.put(`files/${source.id}/second`, "second image");
   const template = await saveAsTemplate(bindings.env, source.id, "Template", "description", owner);
+
   return { ...bindings, source, template };
 }
 
 function gate() {
   let resolve!: () => void;
+
   const promise = new Promise<void>((done) => {
     resolve = done;
   });
+
   return { promise, resolve };
 }
 
 afterEach(() => {
   vi.restoreAllMocks();
+
   for (const db of databases.splice(0)) db.sql.close();
 });
 
@@ -78,6 +85,7 @@ describe("creation publication and compensation", () => {
     ) {
       entered.resolve();
       await release.promise;
+
       return apply.apply(this, args);
     });
     const creating = createDiagram(env, "Ready", "builtin:web-baseline", owner);
@@ -123,20 +131,25 @@ describe("creation publication and compensation", () => {
       const source = template ? await createDiagram(env, "Source", undefined, owner) : undefined;
       db.sql.exec(`CREATE TRIGGER fail_owner BEFORE INSERT ON diagram_owners
       BEGIN SELECT RAISE(ABORT, 'owner insert failed'); END`);
+
       const create = () =>
         source
           ? saveAsTemplate(env, source.id, "Retry", undefined, owner)
           : createDiagram(env, "Retry", "builtin:web-baseline", owner);
+
       await expect(create()).rejects.toThrow("owner insert failed");
       expect(db.sql.prepare("SELECT id FROM diagrams WHERE name = 'Retry'").all()).toEqual([]);
       expect([...bucket.objects.keys()]).toEqual([]);
+
       if (!source) expect(await [...rooms.values()][0].getRaw()).toEqual([]);
       db.sql.exec("DROP TRIGGER fail_owner");
       const created = await create();
       expect(await ownsDiagram(env, created.id, owner)).toBe(true);
+
       const listed = template
         ? await listTemplates(env, owner)
         : (await listDiagrams(env, 50, undefined, owner)).items;
+
       expect(listed.filter((item) => item.name === "Retry").map((item) => item.id)).toEqual([
         created.id,
       ]);
@@ -148,10 +161,12 @@ describe("creation publication and compensation", () => {
     async (stage) => {
       const { env, rooms, bucket, source, template } = await sourceWithImages();
       const original = new Map(bucket.objects);
+
       if (stage === "get") {
         const get = bucket.get.bind(bucket);
         vi.spyOn(bucket, "get").mockImplementationOnce(async (key) => {
           if (key === `templates/${template.id}.json`) throw new Error("get failed");
+
           return get(key);
         });
       } else {
@@ -165,6 +180,7 @@ describe("creation publication and compensation", () => {
           throw new Error("seed failed");
         });
       }
+
       await expect(createDiagram(env, "Retry", template.id, owner)).rejects.toThrow(
         `${stage} failed`,
       );
@@ -191,20 +207,26 @@ describe("creation publication and compensation", () => {
       const put = bucket.put.bind(bucket);
       vi.spyOn(bucket, "put").mockImplementation(async (key, value, options) => {
         if (key.endsWith("/first")) throw new Error("copy failed");
+
         if (key.endsWith("/second")) {
           started.resolve();
           await release.promise;
         }
+
         return put(key, value, options);
       });
       let settled = false;
+
       const creating = saving
         ? saveAsTemplate(env, source.id, "Retry", undefined, owner)
         : createDiagram(env, "Retry", template.id, owner);
-      const outcome = creating.catch((error: unknown) => {
+
+      const outcome = creating.catch((cause: unknown) => {
         settled = true;
-        return error;
+
+        return cause;
       });
+
       await started.promise;
       await new Promise((resolve) => setTimeout(resolve, 0));
       const settledBeforeCopyFinished = settled;
@@ -224,10 +246,13 @@ describe("creation publication and compensation", () => {
     const { env, bucket, source } = await sourceWithImages();
     const original = new Map(bucket.objects);
     const put = bucket.put.bind(bucket);
+
     const fault = vi.spyOn(bucket, "put").mockImplementation(async (key, value, options) => {
       if (key.startsWith("templates/")) throw new Error("template write failed");
+
       return put(key, value, options);
     });
+
     await expect(saveAsTemplate(env, source.id, "Retry", undefined, owner)).rejects.toThrow(
       "template write failed",
     );
@@ -248,23 +273,28 @@ describe("creation publication and compensation", () => {
       let accessKey = "";
       vi.spyOn(db, "batch").mockImplementationOnce(async (statements) => {
         await batch(statements);
+
         if (!template)
           accessKey = (await listDiagrams(env, 50, undefined, owner)).items.find(
             (item) => item.name === "Retry",
           )!.key;
         throw new Error("lost acknowledgement");
       });
+
       const deletion = vi
         .spyOn(bucket, "delete")
         .mockRejectedValueOnce(new Error("R2 unavailable"));
+
       const creating = template
         ? saveAsTemplate(env, source.id, "Retry", undefined, owner)
         : createDiagram(env, "Retry", undefined, owner);
+
       await expect(creating).rejects.toThrow("cleanup incomplete");
       const row = db.sql.prepare("SELECT id FROM diagrams WHERE name = 'Retry'").get();
       const id = String(row!.id);
       expect((await listTemplates(env, owner)).some((item) => item.id === id)).toBe(false);
       expect(await verifyKey(env, id, accessKey)).toBeNull();
+
       if (template)
         await expect(createDiagram(env, "Hidden", id, owner)).rejects.toThrow("Template not found");
       deletion.mockRestore();

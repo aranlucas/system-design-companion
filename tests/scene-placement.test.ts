@@ -6,11 +6,13 @@ function build(ops: Op[]): Scene {
   const s = new Scene([]);
   const res = s.apply(ops, "agent");
   expect(res.every((r) => r.ok)).toBe(true);
+
   return s;
 }
 
 const box = (s: Scene, ref: string) => {
   const e = s.resolve(ref);
+
   return { x: e.x, y: e.y, w: e.width, h: e.height };
 };
 
@@ -20,6 +22,7 @@ describe("placement hints", () => {
       { op: "add_node", ref: "a", label: "A" },
       { op: "add_node", ref: "b", label: "B", place: { right_of: "a" } },
     ]);
+
     const a = box(s, "a");
     const b = box(s, "b");
     expect(b.x).toBe(a.x + a.w + 100);
@@ -34,6 +37,7 @@ describe("placement hints", () => {
       { op: "add_node", ref: "d", label: "D", place: { below: "c", gap: 30 } },
       { op: "add_node", ref: "u", label: "U", place: { above: "c", gap: 30 } },
     ]);
+
     const c = box(s, "c");
     expect(box(s, "r").x).toBe(c.x + c.w + 200);
     const l = box(s, "l");
@@ -56,6 +60,7 @@ describe("placement hints", () => {
       { op: "add_node", ref: "blocker", label: "X", place: { right_of: "a" } },
       { op: "add_node", ref: "c", label: "C", place: { near: "a" } },
     ]);
+
     const a = box(s, "a");
     const c = box(s, "c");
     // Right side is taken: must land below, left or above instead.
@@ -67,6 +72,7 @@ describe("placement hints", () => {
       { op: "add_node", ref: "a", label: "A" },
       { op: "add_node", ref: "b", label: "B" },
     ]);
+
     const a = box(s, "a");
     expect(box(s, "b").x).toBe(a.x + a.w + 100);
   });
@@ -76,11 +82,14 @@ describe("placement hints", () => {
       { op: "add_node", ref: "a", label: "A", place: { at: { x: 0, y: 0 } } },
       { op: "add_node", ref: "b", label: "B", place: { at: { x: 0, y: 0 } } },
     ]);
+
     const a = box(s, "a");
     const b = box(s, "b");
     expect(b.y).toBeGreaterThan(a.y);
+
     const overlap =
       b.x < a.x + a.w + 20 && a.x < b.x + b.w + 20 && b.y < a.y + a.h + 20 && a.y < b.y + b.h + 20;
+
     expect(overlap).toBe(false);
   });
 });
@@ -92,6 +101,7 @@ describe("frames", () => {
       { op: "add_node", ref: "a", label: "A", frame: "f" },
       { op: "add_node", ref: "b", label: "B", place: { right_of: "a" } },
     ]);
+
     expect(s.resolve("b").frameId).toBe(s.resolve("f").id);
   });
 
@@ -107,6 +117,7 @@ describe("frames", () => {
       },
       { op: "add_node", ref: "a", label: "A", place: { at: { x: 100, y: 100 } } },
     ]);
+
     expect(s.resolve("a").frameId).toBe(s.resolve("f").id);
   });
 
@@ -122,6 +133,7 @@ describe("frames", () => {
       },
       { op: "add_node", ref: "a", label: "A", frame: "f", place: { at: { x: 2000, y: 2000 } } },
     ]);
+
     const f = box(s, "f");
     expect(f.w).toBeGreaterThan(800);
     expect(f.h).toBeGreaterThan(500);
@@ -132,12 +144,15 @@ describe("frames", () => {
       { op: "add_node", ref: "a", label: "A", place: { at: { x: 100, y: 100 } } },
       { op: "add_frame", ref: "f", name: "F", contains: ["a"] },
     ]);
+
     const f0 = box(s, "f");
     const a0 = box(s, "a");
+
     const res = s.apply(
       [{ op: "update", target: "f", move: { at: { x: 3000, y: 3000 } } }],
       "agent",
     );
+
     expect(res[0].ok).toBe(true);
     const f1 = box(s, "f");
     const a1 = box(s, "a");
@@ -157,6 +172,7 @@ describe("frames", () => {
       },
       { op: "add_node", ref: "a", label: "A", place: { at: { x: 9000, y: 9000 } } },
     ]);
+
     const res = s.apply([{ op: "update", target: "a", frame: "f" }], "agent");
     expect(res[0].ok).toBe(true);
     const f = box(s, "f");

@@ -2,7 +2,9 @@ import { z } from "zod";
 import { MAX_SCENE_ELEMENTS } from "./request-limits.ts";
 
 const coordinate = z.number().min(-1_000_000).max(1_000_000);
+
 const id = z.string().min(1).max(128);
+
 const element = z.looseObject({
   id,
   type: z.string().min(1).max(40),
@@ -45,5 +47,5 @@ export const socketMessageSchema = z.discriminatedUnion("type", [
       data: z.unknown().optional(),
       error: z.string().max(1000).optional(),
     })
-    .refine((message) => message.ok || typeof message.error === "string"),
+    .refine((message) => message.ok || message.error !== undefined),
 ]);

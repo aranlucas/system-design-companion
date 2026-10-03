@@ -9,11 +9,13 @@ function applied(id: string): Scene {
   const s = new Scene([]);
   const res = s.apply(t.ops, "template");
   expect(res.filter((r) => !r.ok)).toEqual([]);
+
   return s;
 }
 
 function counts(s: Scene) {
   const g = graphView(s);
+
   return {
     nodes: g.nodes?.length ?? 0,
     edges: g.edges?.length ?? 0,
@@ -26,6 +28,7 @@ describe("builtin templates", () => {
   it("has unique ids with names and descriptions", () => {
     const ids = BUILTIN_TEMPLATES.map((t) => t.id);
     expect(new Set(ids).size).toBe(ids.length);
+
     for (const t of BUILTIN_TEMPLATES) {
       expect(t.name.length).toBeGreaterThan(0);
       expect(t.description.length).toBeGreaterThan(0);

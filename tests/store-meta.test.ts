@@ -92,6 +92,7 @@ describe("component catalog", () => {
     expect(new Set(kinds).size).toBe(kinds.length);
     expect(COMPONENT_KINDS).toHaveLength(COMPONENTS.length);
     const groups = new Set(["Clients", "Edge", "Compute", "Data", "Messaging", "External"]);
+
     for (const c of COMPONENTS) {
       expect(["rectangle", "ellipse", "diamond"]).toContain(c.shape);
       expect(groups.has(c.group)).toBe(true);
@@ -109,6 +110,7 @@ describe("rubric", () => {
   it("covers the ten interview dimensions", () => {
     const items = RUBRIC.match(/^\d+\. /gm);
     expect(items).toHaveLength(10);
+
     for (const word of ["Requirements", "Estimates", "Trade-offs"]) expect(RUBRIC).toContain(word);
   });
 

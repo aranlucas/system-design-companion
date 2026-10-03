@@ -1,12 +1,12 @@
 // Standard system design components, shared by the canvas Library (human) and add_node `kind` (agent).
 // Colour encodes the role so a diagram reads at a glance.
 
-export type ComponentShape = "rectangle" | "ellipse" | "diamond";
+export type ComponentGeometry = "rectangle" | "ellipse" | "diamond";
 
 export interface Component {
   kind: string;
   label: string;
-  shape: ComponentShape;
+  "shape": ComponentGeometry;
   fill: string;
   icon?:
     | "database"
@@ -41,7 +41,7 @@ export const COMPONENTS: Component[] = [
   {
     kind: "server",
     label: "Server",
-    shape: "rectangle",
+    "shape": "rectangle",
     icon: "server",
     fill: FILL.compute,
     group: "Compute",
@@ -49,7 +49,7 @@ export const COMPONENTS: Component[] = [
   {
     kind: "cloud",
     label: "Cloud",
-    shape: "rectangle",
+    "shape": "rectangle",
     icon: "cloud",
     fill: FILL.external,
     group: "External",
@@ -57,7 +57,7 @@ export const COMPONENTS: Component[] = [
   {
     kind: "user",
     label: "User",
-    shape: "ellipse",
+    "shape": "ellipse",
     icon: "user",
     fill: FILL.client,
     group: "Clients",
@@ -65,7 +65,7 @@ export const COMPONENTS: Component[] = [
   {
     kind: "device",
     label: "Device",
-    shape: "rectangle",
+    "shape": "rectangle",
     icon: "device",
     fill: FILL.client,
     group: "Clients",
@@ -73,7 +73,7 @@ export const COMPONENTS: Component[] = [
   {
     kind: "database",
     label: "Database",
-    shape: "ellipse",
+    "shape": "ellipse",
     icon: "database",
     fill: FILL.data,
     group: "Data",
@@ -82,7 +82,7 @@ export const COMPONENTS: Component[] = [
     kind: "client",
     icon: "device",
     label: "Client",
-    shape: "ellipse",
+    "shape": "ellipse",
     fill: FILL.client,
     group: "Clients",
   },
@@ -90,7 +90,7 @@ export const COMPONENTS: Component[] = [
     kind: "mobile",
     icon: "phone",
     label: "Mobile App",
-    shape: "ellipse",
+    "shape": "ellipse",
     fill: FILL.client,
     group: "Clients",
   },
@@ -98,17 +98,31 @@ export const COMPONENTS: Component[] = [
     kind: "web",
     icon: "device",
     label: "Web App",
-    shape: "ellipse",
+    "shape": "ellipse",
     fill: FILL.client,
     group: "Clients",
   },
-  { kind: "dns", icon: "globe", label: "DNS", shape: "rectangle", fill: FILL.edge, group: "Edge" },
-  { kind: "cdn", icon: "globe", label: "CDN", shape: "rectangle", fill: FILL.edge, group: "Edge" },
+  {
+    kind: "dns",
+    icon: "globe",
+    label: "DNS",
+    "shape": "rectangle",
+    fill: FILL.edge,
+    group: "Edge",
+  },
+  {
+    kind: "cdn",
+    icon: "globe",
+    label: "CDN",
+    "shape": "rectangle",
+    fill: FILL.edge,
+    group: "Edge",
+  },
   {
     kind: "load_balancer",
     icon: "balance",
     label: "Load Balancer",
-    shape: "rectangle",
+    "shape": "rectangle",
     fill: FILL.edge,
     group: "Edge",
   },
@@ -116,7 +130,7 @@ export const COMPONENTS: Component[] = [
     kind: "api_gateway",
     icon: "balance",
     label: "API Gateway",
-    shape: "rectangle",
+    "shape": "rectangle",
     fill: FILL.edge,
     group: "Edge",
   },
@@ -124,7 +138,7 @@ export const COMPONENTS: Component[] = [
     kind: "rate_limiter",
     icon: "shield",
     label: "Rate Limiter",
-    shape: "rectangle",
+    "shape": "rectangle",
     fill: FILL.edge,
     group: "Edge",
   },
@@ -132,7 +146,7 @@ export const COMPONENTS: Component[] = [
     kind: "service",
     icon: "server",
     label: "Service",
-    shape: "rectangle",
+    "shape": "rectangle",
     fill: FILL.compute,
     group: "Compute",
   },
@@ -140,7 +154,7 @@ export const COMPONENTS: Component[] = [
     kind: "worker",
     icon: "server",
     label: "Workers",
-    shape: "rectangle",
+    "shape": "rectangle",
     fill: FILL.compute,
     group: "Compute",
   },
@@ -148,7 +162,7 @@ export const COMPONENTS: Component[] = [
     kind: "auth",
     icon: "shield",
     label: "Auth Service",
-    shape: "rectangle",
+    "shape": "rectangle",
     fill: FILL.compute,
     group: "Compute",
   },
@@ -156,7 +170,7 @@ export const COMPONENTS: Component[] = [
     kind: "scheduler",
     icon: "clock",
     label: "Scheduler / Cron",
-    shape: "rectangle",
+    "shape": "rectangle",
     fill: FILL.compute,
     group: "Compute",
   },
@@ -164,7 +178,7 @@ export const COMPONENTS: Component[] = [
     kind: "websocket",
     icon: "balance",
     label: "WebSocket Gateway",
-    shape: "rectangle",
+    "shape": "rectangle",
     fill: FILL.compute,
     group: "Compute",
   },
@@ -172,7 +186,7 @@ export const COMPONENTS: Component[] = [
     kind: "sql_db",
     icon: "database",
     label: "SQL DB",
-    shape: "ellipse",
+    "shape": "ellipse",
     fill: FILL.data,
     group: "Data",
   },
@@ -180,7 +194,7 @@ export const COMPONENTS: Component[] = [
     kind: "nosql_db",
     icon: "database",
     label: "NoSQL DB",
-    shape: "ellipse",
+    "shape": "ellipse",
     fill: FILL.data,
     group: "Data",
   },
@@ -188,7 +202,7 @@ export const COMPONENTS: Component[] = [
     kind: "object_store",
     icon: "storage",
     label: "Object Storage",
-    shape: "ellipse",
+    "shape": "ellipse",
     fill: FILL.data,
     group: "Data",
   },
@@ -196,7 +210,7 @@ export const COMPONENTS: Component[] = [
     kind: "search",
     icon: "search",
     label: "Search Index",
-    shape: "ellipse",
+    "shape": "ellipse",
     fill: FILL.data,
     group: "Data",
   },
@@ -204,7 +218,7 @@ export const COMPONENTS: Component[] = [
     kind: "timeseries",
     icon: "database",
     label: "Time-series DB",
-    shape: "ellipse",
+    "shape": "ellipse",
     fill: FILL.data,
     group: "Data",
   },
@@ -212,7 +226,7 @@ export const COMPONENTS: Component[] = [
     kind: "warehouse",
     icon: "database",
     label: "Data Warehouse",
-    shape: "ellipse",
+    "shape": "ellipse",
     fill: FILL.data,
     group: "Data",
   },
@@ -220,7 +234,7 @@ export const COMPONENTS: Component[] = [
     kind: "cache",
     icon: "cache",
     label: "Cache",
-    shape: "rectangle",
+    "shape": "rectangle",
     fill: FILL.cache,
     group: "Data",
   },
@@ -228,7 +242,7 @@ export const COMPONENTS: Component[] = [
     kind: "queue",
     icon: "queue",
     label: "Queue",
-    shape: "rectangle",
+    "shape": "rectangle",
     fill: FILL.messaging,
     group: "Messaging",
   },
@@ -236,7 +250,7 @@ export const COMPONENTS: Component[] = [
     kind: "pubsub",
     icon: "balance",
     label: "Pub/Sub",
-    shape: "rectangle",
+    "shape": "rectangle",
     fill: FILL.messaging,
     group: "Messaging",
   },
@@ -244,7 +258,7 @@ export const COMPONENTS: Component[] = [
     kind: "stream",
     icon: "queue",
     label: "Event Stream (Kafka)",
-    shape: "rectangle",
+    "shape": "rectangle",
     fill: FILL.messaging,
     group: "Messaging",
   },
@@ -252,7 +266,7 @@ export const COMPONENTS: Component[] = [
     kind: "third_party",
     icon: "cloud",
     label: "3rd-party API",
-    shape: "rectangle",
+    "shape": "rectangle",
     fill: FILL.external,
     group: "External",
   },
@@ -260,15 +274,27 @@ export const COMPONENTS: Component[] = [
     kind: "notifications",
     icon: "mail",
     label: "Push / Email / SMS",
-    shape: "rectangle",
+    "shape": "rectangle",
     fill: FILL.external,
     group: "External",
   },
-  { kind: "decision", label: "Decision?", shape: "diamond", fill: "transparent", group: "Compute" },
+  {
+    kind: "decision",
+    label: "Decision?",
+    "shape": "diamond",
+    fill: "transparent",
+    group: "Compute",
+  },
 ];
 
 /** At least one string, as zod's `z.enum` requires. */
 type NonEmptyStrings = [string, ...string[]];
 
-export const COMPONENT_KINDS = COMPONENTS.map((c) => c.kind) as NonEmptyStrings;
+const [firstComponent, ...remainingComponents] = COMPONENTS;
+
+export const COMPONENT_KINDS: NonEmptyStrings = [
+  firstComponent.kind,
+  ...remainingComponents.map((c) => c.kind),
+];
+
 export const componentByKind = new Map(COMPONENTS.map((c) => [c.kind, c]));

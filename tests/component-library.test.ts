@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { libraryDataSchema } from "./helpers/response-schemas.ts";
 import { describe, expect, it } from "vitest";
 import { componentLibrary } from "../src/app/library.ts";
 import { COMPONENTS } from "../src/shared/components.ts";
@@ -33,11 +35,12 @@ describe("component library import", () => {
   it("serializes an Excalidraw library with the same artwork as the server", async () => {
     const blob = componentLibrary();
     expect(blob.type).toBe("application/vnd.excalidrawlib+json");
-    const data = JSON.parse(await blob.text()) as LibraryData;
+    const data = libraryDataSchema.parse(JSON.parse(await blob.text())) satisfies LibraryData;
     expect(data.type).toBe("excalidrawlib");
     expect(data.version).toBe(2);
     const items = data.libraryItems;
     expect(items).toHaveLength(COMPONENTS.length);
+
     for (const [index, component] of COMPONENTS.entries()) {
       const scene = new Scene([]);
       scene.addNode(
@@ -49,15 +52,24 @@ describe("component library import", () => {
   });
 
   it("keeps all element references inside their library item", async () => {
-    const { libraryItems: items } = JSON.parse(await componentLibrary().text()) as LibraryData;
+    const { libraryItems: items } = libraryDataSchema.parse(
+      JSON.parse(await componentLibrary().text()),
+    ) satisfies LibraryData;
+
     const allIds = items.flatMap((item) => item.elements.map((e) => e.id));
     expect(new Set(allIds).size).toBe(allIds.length);
+
     for (const item of items) {
       const ids = new Set(item.elements.map((e) => e.id));
+
       for (const element of item.elements) {
-        for (const bound of element.boundElements ?? []) expect(ids.has(bound.id)).toBe(true);
+        for (const bound of z
+          .array(z.object({ id: z.string() }))
+          .parse(element.boundElements ?? []))
+          expect(ids.has(bound.id)).toBe(true);
+
         if (element.type === "text" && element.containerId) {
-          expect(ids.has(element.containerId)).toBe(true);
+          expect(ids.has(z.string().parse(element.containerId))).toBe(true);
         }
       }
     }
