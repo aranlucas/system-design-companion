@@ -7,52 +7,27 @@ How to run, deploy and connect System Design Companion. For what it does, see th
 
 ```sh
 pnpm install
-pnpm dev          # http://localhost:5173
+pnpm dev          # https://system-design-companion.localhost
 ```
 
-1. Open http://localhost:5173 and create a diagram (optionally from a template).
+1. Open https://system-design-companion.localhost and create a diagram (optionally from a template).
 2. Add the MCP server once (use the deployed URL + `/mcp` in production):
-   - Claude Code: `claude mcp add --transport http system-design http://localhost:5173/mcp`
-   - Codex: `codex mcp add system-design --url http://localhost:5173/mcp`
+   - Claude Code: `claude mcp add --transport http system-design https://system-design-companion.localhost/mcp`
+   - Codex: `codex mcp add system-design --url https://system-design-companion.localhost/mcp`
 3. Tell the agent "join <share link>", then draw together.
 
 If you previously registered this server as `canvas`, remove that entry in your MCP client
 and add it again as `system-design` using the command above. Existing diagram links still
 work.
 
-### Named local URL with Portless
+### Portless
 
-[Portless](https://github.com/vercel-labs/portless/tree/v0.15.7) gives this checkout a
-stable local URL. Complete the local setup above, use **Node.js 24 or newer**
-(within this project's supported range), then run:
-
-```sh
-npm install -g portless@0.15.7
-pnpm run dev:portless
-```
-
-Open **https://system-design-companion.localhost** with the default proxy settings.
-Portless starts its shared proxy automatically. Its first HTTPS run creates and
-trusts a local certificate authority and may prompt for administrator privileges
-to bind port 443 or update local hostname entries. Start it from an interactive
-terminal and review those prompts. `portless doctor` diagnoses local setup issues.
-
-Portless supplies Vite with a free port, a loopback host, and `--strictPort`.
-The MCP view build still completes before Vite starts.
-
-Linked Git worktrees receive a branch-name prefix, such as
-`https://fix-ui.system-design-companion.localhost`; use the URL Portless prints.
-Use `pnpm run dev` for the existing direct-server workflow.
-
-For local GitHub sign-in, configure a separate development OAuth app with
-homepage `https://system-design-companion.localhost` and callback
-`https://system-design-companion.localhost/github/callback`. Keep its
-credentials in the ignored `.dev.vars` described below. For another worktree,
-register that worktree's printed origin and the same `/github/callback` path.
-Local MCP clients should use `https://system-design-companion.localhost/mcp`
-and trust the Portless CA; Node clients started outside Portless may need
-`NODE_EXTRA_CA_CERTS=~/.portless/ca.pem`. A hosted MCP client cannot reach this
-machine's `.localhost` URL.
+`pnpm dev` runs Vite through [Portless](https://github.com/vercel-labs/portless) (a dev
+dependency); its first run may ask for `sudo` to bind port 443 and trust a local
+certificate. Linked Git worktrees get a branch prefix, such as
+`https://fix-ui.system-design-companion.localhost`; register that origin's `/github/callback` in the
+development OAuth app. Node MCP clients started outside Portless may need
+`NODE_EXTRA_CA_CERTS=~/.portless/ca.pem`.
 
 ## Deploy (Cloudflare)
 
@@ -101,7 +76,7 @@ that sign-in is not configured. The two `OAUTH_KV` namespaces (production and pr
 tokens and codes; nothing else moves into KV.
 
 For local sign-in, create a separate GitHub OAuth app with callback URL
-`http://localhost:5173/github/callback`, and put its credentials in an ignored `.dev.vars`:
+`https://system-design-companion.localhost/github/callback`, and put its credentials in an ignored `.dev.vars`:
 
 ```dotenv
 GITHUB_CLIENT_ID=<local-app-client-id>
