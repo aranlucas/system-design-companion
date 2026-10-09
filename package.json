@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "dev": "pnpm build:view && portless run --name system-design-companion vite dev",
+    "dev": "pnpm build:view && portless run vite dev",
     "build": "pnpm build:view && vite build",
     "build:view": "node scripts/build-view.ts",
     "check:bundle": "pnpm build && node scripts/check-bundle.ts",
@@ -48,6 +48,7 @@
     "oxfmt": "^0.70.0",
     "oxlint": "1.85.0",
     "oxlint-tsgolint": "^7.0.2003",
+    "portless": "0.15.7",
     "typescript": "^7.0.2",
     "vite": "^8.3.1",
     "vitest": "^5.0.1",
