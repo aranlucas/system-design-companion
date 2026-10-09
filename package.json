@@ -5,7 +5,6 @@
   "scripts": {
     "test": "vitest run",
     "dev": "pnpm build:view && portless run --name system-design-companion vite dev",
-    "dev:direct": "pnpm build:view && vite dev",
     "build": "pnpm build:view && vite build",
     "build:view": "node scripts/build-view.ts",
     "check:bundle": "pnpm build && node scripts/check-bundle.ts",
