@@ -77,14 +77,13 @@
     ".opencode/**",
     ".pi/**",
     ".roo/**",
-    ".windsurf/**",
-    "tools/oxlint/anti-slop/**"
+    ".windsurf/**"
   ],
   "jsPlugins": [
     "./lint/types-plugin.ts",
     {
       "name": "anti-slop",
-      "specifier": "./tools/oxlint/anti-slop/index.ts"
+      "specifier": "@aranlucas/oxlint-plugin-anti-slop"
     }
   ],
   "overrides": [
