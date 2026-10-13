@@ -38,8 +38,8 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@aranlucas/oxlint-plugin-anti-slop": "0.1.0",
     "@cloudflare/vite-plugin": "^2.0.0-beta.sha-ad79608dd",
-    "@oxlint/plugins": "1.85.0",
     "@types/node": "^24.19.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

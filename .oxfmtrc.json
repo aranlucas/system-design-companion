@@ -14,8 +14,7 @@
     ".opencode/**",
     ".pi/**",
     ".roo/**",
-    ".windsurf/**",
-    "tools/oxlint/anti-slop/**"
+    ".windsurf/**"
   ],
   "printWidth": 100,
   "quoteProps": "preserve"
