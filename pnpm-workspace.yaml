@@ -67,5 +67,5 @@ overrides:
   "nanoid@>=4 <5.1.16": 5.1.16
   "undici@>=7 <7.29.1": 7.29.1
 permissions:
-  '@cloudflare/workers-oauth-provider':
+  "@cloudflare/workers-oauth-provider":
     skills: true
