@@ -5,7 +5,11 @@
   --muted: #6c757d;
   --border: #dee2e6;
   --accent: #6741d9;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
   color: var(--fg);
 }
 @media (prefers-color-scheme: dark) {
