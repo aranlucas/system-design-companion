@@ -1,3 +1,4 @@
+import { promiseResult } from "../src/shared/promise-result.ts";
 import { requiredTestValue } from "./helpers/required-test-value.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { El } from "../src/shared/protocol.ts";
@@ -58,13 +59,13 @@ async function sourceWithImages() {
 }
 
 function gate() {
-  let resolve!: () => void;
+  let release: (() => void) | undefined;
 
-  const promise = new Promise<void>((done) => {
-    resolve = done;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
   });
 
-  return { promise, resolve };
+  return { promise, resolve: requiredTestValue(release) };
 }
 
 afterEach(() => {
@@ -147,9 +148,8 @@ describe("creation publication and compensation", () => {
       expect(db.sql.prepare("SELECT id FROM diagrams WHERE name = 'Retry'").all()).toEqual([]);
       expect([...bucket.objects.keys()]).toEqual([]);
 
-      if (!source) {
-        expect(await [...rooms.values()][0].getRaw()).toEqual([]);
-      }
+      const unpublished = source ? [] : [...rooms.values()].slice(0, 1);
+      expect((await Promise.all(unpublished.map((room) => room.getRaw()))).flat()).toEqual([]);
 
       db.sql.exec("DROP TRIGGER fail_owner");
       const created = await create();
@@ -173,12 +173,14 @@ describe("creation publication and compensation", () => {
 
       if (stage === "get") {
         const get = bucket.get.bind(bucket);
-        vi.spyOn(bucket, "get").mockImplementationOnce(async (key) => {
-          if (key === `templates/${template.id}.json`) {
-            throw new Error("get failed");
-          }
+        vi.spyOn(bucket, "get").mockImplementationOnce((key) => {
+          return promiseResult(() => {
+            if (key === `templates/${template.id}.json`) {
+              throw new Error("get failed");
+            }
 
-          return get(key);
+            return get(key);
+          });
         });
       } else {
         // oxlint-disable-next-line typescript/unbound-method -- invoked with the real room as this
@@ -241,11 +243,15 @@ describe("creation publication and compensation", () => {
       });
 
       await started.promise;
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
       const settledBeforeCopyFinished = settled;
       release.resolve();
       expect(await outcome).toMatchObject({ message: "copy failed" });
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
       expect(settledBeforeCopyFinished).toBe(false);
       expect(bucket.objects).toEqual(original);
       expect((await listTemplates(env, owner)).filter((item) => item.name === "Retry")).toEqual([]);
@@ -260,12 +266,14 @@ describe("creation publication and compensation", () => {
     const original = new Map(bucket.objects);
     const put = bucket.put.bind(bucket);
 
-    const fault = vi.spyOn(bucket, "put").mockImplementation(async (key, value, options) => {
-      if (key.startsWith("templates/")) {
-        throw new Error("template write failed");
-      }
+    const fault = vi.spyOn(bucket, "put").mockImplementation((key, value, options) => {
+      return promiseResult(() => {
+        if (key.startsWith("templates/")) {
+          throw new Error("template write failed");
+        }
 
-      return put(key, value, options);
+        return put(key, value, options);
+      });
     });
 
     await expect(saveAsTemplate(env, source.id, "Retry", undefined, owner)).rejects.toThrow(
@@ -314,9 +322,14 @@ describe("creation publication and compensation", () => {
       expect((await listTemplates(env, owner)).some((item) => item.id === id)).toBe(false);
       expect(await verifyKey(env, id, accessKey)).toBeNull();
 
-      if (template) {
-        await expect(createDiagram(env, "Hidden", id, owner)).rejects.toThrow("Template not found");
-      }
+      const hiddenTemplates = template ? [id] : [];
+      await Promise.all(
+        hiddenTemplates.map((templateId) =>
+          expect(createDiagram(env, "Hidden", templateId, owner)).rejects.toThrow(
+            "Template not found",
+          ),
+        ),
+      );
 
       deletion.mockRestore();
       await deleteDiagram(env, id);

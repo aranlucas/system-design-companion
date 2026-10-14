@@ -1,3 +1,4 @@
+import { elementAttribute, requiredElementAttribute } from "../../src/shared/element-attributes.ts";
 import { requiredPoint } from "../../src/shared/schemas.ts";
 // Layout problems in a scene, as counts. Shared by the tidy regression tests and scripts/tidy-check.ts.
 import type { El } from "../../src/shared/protocol.ts";
@@ -6,7 +7,7 @@ import type { Scene } from "../../src/worker/scene.ts";
 type Pt = [number, number];
 
 /** A bound shape (if it still exists) and the arrow end drawn at it. */
-type BoundEnd = [El | undefined, Pt];
+type BoundEnd = [El | null | undefined, Pt];
 
 type Segment = [Pt, Pt];
 
@@ -56,7 +57,8 @@ const passesThrough = (p: Pt, q: Pt, e: El) => {
   return false;
 };
 
-const path = (a: El): Pt[] => a.points.map(([x, y]: Pt) => [a.x + x, a.y + y]);
+const path = (a: El): Pt[] =>
+  requiredElementAttribute(a, "points").map(([x, y]: Pt) => [a.x + x, a.y + y]);
 
 const segs = (a: El) => {
   const pts = path(a);
@@ -73,7 +75,9 @@ export function layoutReport(s: Scene) {
   const nodes = live.filter((e) => s.isNode(e));
 
   const outsideFrame = blocks.filter((e) => {
-    const f = e.frameId ? byId.get(e.frameId) : undefined;
+    const f = elementAttribute(e, "frameId")
+      ? byId.get(requiredElementAttribute(e, "frameId"))
+      : undefined;
 
     return (
       f &&
@@ -91,8 +95,16 @@ export function layoutReport(s: Scene) {
     const pts = path(a);
 
     const ends: BoundEnd[] = [
-      [a.startBinding && byId.get(a.startBinding.elementId), pts[0]],
-      [a.endBinding && byId.get(a.endBinding.elementId), requiredPoint(pts, -1)],
+      [
+        elementAttribute(a, "startBinding") &&
+          byId.get(requiredElementAttribute(a, "startBinding").elementId),
+        pts[0],
+      ],
+      [
+        elementAttribute(a, "endBinding") &&
+          byId.get(requiredElementAttribute(a, "endBinding").elementId),
+        requiredPoint(pts, -1),
+      ],
     ];
 
     return ends.some(([n, p]) => n && distToEl(p, n) > 20);
@@ -100,7 +112,11 @@ export function layoutReport(s: Scene) {
 
   // Arrows passing through a node that is not one of their ends.
   const crossings = arrows.filter((a) => {
-    const ends = new Set([a.startBinding?.elementId, a.endBinding?.elementId]);
+    const ends = new Set([
+      elementAttribute(a, "startBinding")?.elementId,
+      elementAttribute(a, "endBinding")?.elementId,
+    ]);
+
     const pts = path(a);
     const others = nodes.filter((n) => !ends.has(n.id));
 
@@ -109,19 +125,23 @@ export function layoutReport(s: Scene) {
 
   // What a reader sees as clutter: bound arrows crossing each other, running through a caption or
   // note, drawn at an angle, and labels landing on shapes, captions, notes or each other.
-  const bound = arrows.filter((a) => a.startBinding && a.endBinding);
+  const bound = arrows.filter(
+    (a) => elementAttribute(a, "startBinding") && elementAttribute(a, "endBinding"),
+  );
 
   let arrowCrossings = 0;
 
   for (let i = 0; i < bound.length; i++) {
     for (let j = i + 1; j < bound.length; j++) {
-      for (const [p, q] of segs(bound[i])) {
-        for (const [u, v] of segs(bound[j])) if (segmentsCross(p, q, u, v)) arrowCrossings++;
-      }
+      arrowCrossings += segs(bound[i]).reduce(
+        (count, [p, q]) =>
+          count + segs(bound[j]).filter(([u, v]) => segmentsCross(p, q, u, v)).length,
+        0,
+      );
     }
   }
 
-  const captions = live.filter((e) => e.customData?.componentLabel);
+  const captions = live.filter((e) => elementAttribute(e, "customData")?.componentLabel);
   const texts = [...captions, ...live.filter((e) => s.isNote(e))];
 
   const throughText = bound.filter((a) =>
@@ -134,7 +154,9 @@ export function layoutReport(s: Scene) {
   );
 
   const arrowLabels = live.filter((e) => {
-    const c = e.containerId ? byId.get(e.containerId) : undefined;
+    const c = elementAttribute(e, "containerId")
+      ? byId.get(requiredElementAttribute(e, "containerId"))
+      : undefined;
 
     return e.type === "text" && c?.type === "arrow";
   });
@@ -154,7 +176,7 @@ export function layoutReport(s: Scene) {
     crossings,
     blockOverlaps: pairs(blocks, overlap),
     frameOverlaps: pairs(frames, overlap),
-    loose: blocks.filter((e) => !e.frameId).length,
+    loose: blocks.filter((e) => !elementAttribute(e, "frameId")).length,
     outsideFrame,
     widestNote: notes.length ? Math.max(...notes.map((e) => e.width)) : 0,
   };

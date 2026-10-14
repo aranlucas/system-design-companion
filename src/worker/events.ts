@@ -1,3 +1,4 @@
+import { requiredValue } from "../shared/required-value.ts";
 import type { JsonValue } from "../shared/schemas.ts";
 // MCP Events: the catalog, subscription storage, and signed webhook delivery.
 //
@@ -214,7 +215,7 @@ export function registerEvents(server: McpServer, env: Env, principal: McpPrinci
   low.setRequestHandler(
     "events/list",
     { params: listParams, result: z.looseObject({ events: z.array(z.unknown()) }) },
-    async () => {
+    () => {
       requireRead(principal);
 
       return { events: EVENT_TYPES };
@@ -223,12 +224,12 @@ export function registerEvents(server: McpServer, env: Env, principal: McpPrinci
   low.setRequestHandler(
     "events/subscribe",
     { params: subscribeParams, result: z.looseObject({ id: str }) },
-    async (params) => subscribe(env, principal, params),
+    (params) => subscribe(env, principal, params),
   );
   low.setRequestHandler(
     "events/unsubscribe",
     { params: unsubscribeParams, result: z.looseObject({}) },
-    async (params) => unsubscribe(env, principal, params),
+    (params) => unsubscribe(env, principal, params),
   );
 }
 
@@ -257,7 +258,7 @@ async function subscribe(env: Env, principal: McpPrincipal, params: SubscribeReq
   assertSecretLength(secret);
 
   const args = validateArguments(params.name, params.arguments);
-  const parsed = parseLink(args.diagram)!;
+  const parsed = requiredValue(parseLink(args.diagram), "parseLink(args.diagram)");
 
   if (!(await verifyKey(env, parsed.id, parsed.key))) {
     throw protocolError(ERR_FORBIDDEN, "Forbidden", { reason: "diagram link is not valid" });
@@ -352,7 +353,7 @@ async function unsubscribe(env: Env, principal: McpPrincipal, params: Unsubscrib
   }
 
   const args = validateArguments(params.name, params.arguments);
-  const parsed = parseLink(args.diagram)!;
+  const parsed = requiredValue(parseLink(args.diagram), "parseLink(args.diagram)");
 
   const id = await subscriptionId(
     principal,
@@ -525,6 +526,7 @@ async function post(
   const text = JSON.stringify(body);
 
   if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) {
+    // eslint-disable-next-line no-console -- Operational failure reporting must remain visible to the host error logs.
     console.error("mcp events: payload too large", msgId);
 
     return null;
@@ -564,7 +566,7 @@ async function post(
 
 /** Ask the endpoint to prove it wants deliveries before we start sending them. */
 async function verifyCallback(env: Env, sub: Subscription): Promise<boolean> {
-  const challenge = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
+  const challenge = btoa(String.fromCodePoint(...crypto.getRandomValues(new Uint8Array(32))));
 
   const res = await post(env, sub, `msg_verification_${crypto.randomUUID()}`, {
     type: "verification",
@@ -623,7 +625,7 @@ function markVerified(userId: string, url: string) {
   }
 
   if (verified.size >= 1024) {
-    verified.delete(verified.keys().next().value!);
+    verified.delete(requiredValue(verified.keys().next().value, "verified.keys().next().value"));
   }
 
   verified.set(JSON.stringify([userId, url]), Date.now() + VERIFICATION_TTL_MS);
@@ -641,7 +643,9 @@ function decodeSecret(secret: string): Uint8Array {
     throw new Error("missing whsec_ prefix");
   }
 
-  return Uint8Array.from(atob(secret.slice("whsec_".length)), (c) => c.charCodeAt(0));
+  return Uint8Array.from(atob(secret.slice("whsec_".length)), (c) =>
+    requiredValue(c.codePointAt(0), "base64 byte"),
+  );
 }
 
 function assertSecretLength(secret: string): void {
@@ -679,7 +683,7 @@ async function sign(
     new TextEncoder().encode(`${msgId}.${timestamp}.${body}`),
   );
 
-  return `v1,${btoa(String.fromCharCode(...new Uint8Array(mac)))}`;
+  return `v1,${btoa(String.fromCodePoint(...new Uint8Array(mac)))}`;
 }
 
 // ---------- errors and small helpers ----------
@@ -693,7 +697,9 @@ function invalidParams(message: string): ProtocolError {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 type KeyHashRow = { key_hash: string };

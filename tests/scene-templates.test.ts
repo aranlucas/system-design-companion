@@ -46,7 +46,11 @@ describe("builtin templates", () => {
     const s = applied("builtin:web-baseline");
     expect(counts(s)).toMatchObject({ nodes: 9, edges: 8 });
     const g = graphView(s);
-    const pairs = requiredTestValue(g.edges).map((e) => `${e.from}->${e.to}`);
+
+    const pairs = requiredTestValue(g.edges).map(
+      (e) => `${requiredTestValue(e.from)}->${requiredTestValue(e.to)}`,
+    );
+
     expect(pairs).toContain("Client->CDN");
     expect(pairs).toContain("Client->Load Balancer");
   });

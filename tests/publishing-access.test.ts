@@ -1,3 +1,4 @@
+import { promiseResult } from "../src/shared/promise-result.ts";
 import { requiredTestValue } from "./helpers/required-test-value.ts";
 import { z } from "zod";
 import { createdSchema, librarySchema, stringRecordSchema } from "./helpers/response-schemas.ts";
@@ -13,23 +14,27 @@ import {
 import { readBounded, takeBudget } from "../src/worker/request-limits.ts";
 import { makeEnv, testCtx, type TestEnv } from "./helpers/fakes.ts";
 
+type UpstreamFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
+
 type Created = { id: string; key: string };
 
 type Library = { items: Created[] };
 
-async function request(env: TestEnv, path: string, token?: string, init: RequestInit = {}) {
-  const headers = new Headers(init.headers);
-  headers.set("Origin", "https://design.example");
+function request(env: TestEnv, path: string, token?: string, init: RequestInit = {}) {
+  return promiseResult(() => {
+    const headers = new Headers(init.headers);
+    headers.set("Origin", "https://design.example");
 
-  if (token) {
-    headers.set("Cookie", `__Host-sdc-session=${token}`);
-  }
+    if (token) {
+      headers.set("Cookie", `__Host-sdc-session=${token}`);
+    }
 
-  return worker.fetch(
-    new Request(`https://design.example${path}`, { ...init, headers }),
-    env.env,
-    testCtx(),
-  );
+    return worker.fetch(
+      new Request(`https://design.example${path}`, { ...init, headers }),
+      env.env,
+      testCtx(),
+    );
+  });
 }
 
 async function session(env: TestEnv, userId: string) {
@@ -191,25 +196,21 @@ describe("browser GitHub sign-in", () => {
     const env = makeEnv();
     env.env.GITHUB_CLIENT_ID = "test-client";
     env.env.GITHUB_CLIENT_SECRET = "test-secret";
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string | URL, init?: RequestInit) => {
-        if (String(input).includes("access_token")) {
-          const params = stringRecordSchema.parse(JSON.parse(z.string().parse(init?.body)));
-          expect(params.code_verifier).toBeTruthy();
-          expect(params.redirect_uri).toBe("https://design.example/github/callback");
 
-          return Response.json({ access_token: "upstream-token" });
-        }
-
-        return Response.json({ id: 42 });
-      }),
+    const upstream = vi.fn<UpstreamFetch>((input) =>
+      Promise.resolve(
+        String(input).includes("access_token")
+          ? Response.json({ access_token: "upstream-token" })
+          : Response.json({ id: 42 }),
+      ),
     );
+
+    vi.stubGlobal("fetch", upstream);
     const login = await request(env, "/api/auth/login");
     const destination = new URL(requiredTestValue(login.headers.get("Location")));
     expect(destination.searchParams.get("code_challenge_method")).toBe("S256");
     const loginCookie = requiredTestValue(login.headers.get("Set-Cookie")).split(";")[0];
-    const callback = `/github/callback?state=${destination.searchParams.get("state")}&code=test-code`;
+    const callback = `/github/callback?state=${requiredTestValue(destination.searchParams.get("state"))}&code=test-code`;
     expect((await request(env, callback)).status).toBe(400);
 
     const signedIn = await worker.fetch(
@@ -218,6 +219,13 @@ describe("browser GitHub sign-in", () => {
       testCtx(),
     );
 
+    const tokenCall = requiredTestValue(
+      upstream.mock.calls.find(([input]) => String(input).includes("access_token")),
+    );
+
+    const params = stringRecordSchema.parse(JSON.parse(z.string().parse(tokenCall[1]?.body)));
+    expect(params.code_verifier).toBeTruthy();
+    expect(params.redirect_uri).toBe("https://design.example/github/callback");
     expect(signedIn.status).toBe(302);
     const cookies = requiredTestValue(signedIn.headers.get("Set-Cookie"));
     expect(cookies).toContain("HttpOnly");

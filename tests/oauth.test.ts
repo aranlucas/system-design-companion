@@ -1,3 +1,4 @@
+import { promiseResult } from "../src/shared/promise-result.ts";
 import { requiredTestValue } from "./helpers/required-test-value.ts";
 import type { JsonInput } from "./helpers/response-schemas.ts";
 import { z } from "zod";
@@ -41,25 +42,47 @@ beforeEach(() => {
   env.env.GITHUB_CLIENT_ID = "github-client";
   env.env.GITHUB_CLIENT_SECRET = "github-secret";
   vi.stubGlobal("Cloudflare", { compatibilityFlags: { global_fetch_strictly_public: true } });
-  github = vi.fn(async (input: string | URL, init?: RequestInit) => {
-    if (String(input) === "https://github.com/login/oauth/access_token") {
-      expect(init?.redirect).toBe("error");
+  github = vi.fn((input: string | URL) => {
+    return promiseResult(() => {
+      if (String(input) === "https://github.com/login/oauth/access_token") {
+        return Response.json({ access_token: "upstream-github-token" });
+      }
 
-      return Response.json({ access_token: "upstream-github-token" });
-    }
+      if (String(input) === "https://api.github.com/user") {
+        return Response.json({ id: 123, login: "tester", name: "Test User" });
+      }
 
-    if (String(input) === "https://api.github.com/user") {
-      expect(new Headers(init?.headers).get("user-agent")).toBe("system-design-companion");
-
-      return Response.json({ id: 123, login: "tester", name: "Test User" });
-    }
-
-    throw new Error(`Unexpected external request: ${String(input)}`);
+      throw new Error(`Unexpected external request: ${String(input)}`);
+    });
   });
   vi.stubGlobal("fetch", github);
 });
 
-afterEach(() => vi.unstubAllGlobals());
+function expectGithubRequestPolicy() {
+  const tokenRequests = github.mock.calls.filter(
+    ([input]) => String(input) === "https://github.com/login/oauth/access_token",
+  );
+
+  for (const [, init] of tokenRequests) {
+    expect(init?.redirect).toBe("error");
+  }
+
+  const userRequests = github.mock.calls.filter(
+    ([input]) => String(input) === "https://api.github.com/user",
+  );
+
+  for (const [, init] of userRequests) {
+    expect(new Headers(init?.headers).get("user-agent")).toBe("system-design-companion");
+  }
+}
+
+afterEach(() => {
+  try {
+    expectGithubRequestPolicy();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
 
 function call(path: string, init?: RequestInit) {
   return worker.fetch(new Request(new URL(path, ORIGIN), init), env.env, testCtx());
@@ -94,7 +117,7 @@ async function consent(scope = "mcp:read mcp:write") {
   const verifier = crypto.randomUUID() + crypto.randomUUID();
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
 
-  const challenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
+  const challenge = btoa(String.fromCodePoint(...new Uint8Array(digest)))
     .replaceAll("+", "-")
     .replaceAll("/", "_")
     .replace(/=+$/, "");
@@ -228,6 +251,7 @@ async function rpcBody(response: Response): Promise<RpcResult> {
 describe("OAuth authorization", () => {
   it("completes consent, GitHub PKCE, token exchange and authenticated event discovery", async () => {
     const { tokens: issued } = await tokens();
+
     expect(issued.access_token).not.toBe("upstream-github-token");
     expect(issued.access_token.startsWith("github%3A123:")).toBe(true);
     const response = await rpc(issued.access_token, "events/list");
@@ -243,26 +267,28 @@ describe("OAuth authorization", () => {
     const diagram = await createDiagram(env.env, "Watched");
     const deliveries: string[] = [];
     const upstream = requiredTestValue(github.getMockImplementation());
-    github.mockImplementation(async (input: string | URL, init?: RequestInit) => {
-      const url = new URL(input);
+    github.mockImplementation((input: string | URL, init?: RequestInit) => {
+      return promiseResult(() => {
+        const url = new URL(input);
 
-      if (url.hostname === "cloudflare-dns.com") {
-        return Response.json({ Status: 0, TC: false, Answer: [{ type: 1, data: "8.8.8.8" }] });
-      }
-
-      if (url.hostname === "receiver.example.com") {
-        const body = jsonObjectSchema.parse(JSON.parse(z.string().parse(init?.body)));
-
-        if (body.type === "verification") {
-          return Response.json({ challenge: body.challenge });
+        if (url.hostname === "cloudflare-dns.com") {
+          return Response.json({ Status: 0, TC: false, Answer: [{ type: 1, data: "8.8.8.8" }] });
         }
 
-        deliveries.push(z.string().parse(init?.body));
+        if (url.hostname === "receiver.example.com") {
+          const body = jsonObjectSchema.parse(JSON.parse(z.string().parse(init?.body)));
 
-        return new Response(null, { status: 204 });
-      }
+          if (body.type === "verification") {
+            return Response.json({ challenge: body.challenge });
+          }
 
-      return upstream(input, init);
+          deliveries.push(z.string().parse(init?.body));
+
+          return new Response(null, { status: 204 });
+        }
+
+        return upstream(input, init);
+      });
     });
 
     const subscription = await rpc(issued.access_token, "events/subscribe", {

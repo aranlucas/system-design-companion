@@ -60,12 +60,14 @@ describe("versioned Excalidraw wire extensions", () => {
     }
 
     expect(storedElementSchema.parse(core)).toBe(core);
-    expect(() => storedElementSchema.parse({ ...core, index: 42 })).toThrow();
+    expect(() => storedElementSchema.parse({ ...core, index: 42 })).toThrow(/Invalid input/);
   });
   it("still rejects malformed core fields before opaque values are forwarded", () => {
     expect(() =>
       storedElementSchema.parse({ ...core, x: "not a coordinate", futureExtension: {} }),
-    ).toThrow();
-    expect(() => storedElementSchema.parse({ ...core, versionNonce: null })).toThrow();
+    ).toThrow(/Invalid input/);
+    expect(() => storedElementSchema.parse({ ...core, versionNonce: null })).toThrow(
+      /Invalid input/,
+    );
   });
 });

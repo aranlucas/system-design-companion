@@ -1,3 +1,4 @@
+import { requiredValue } from "../shared/required-value.ts";
 // Orthogonal connector routing: right-angle routes that go around boxes, cross each other as
 // little as possible, and leave room for their labels. Arrows are routed one at a time (shortest
 // first) with A* over a sparse grid built from obstacle edges and the channels between them.
@@ -239,7 +240,7 @@ class Heap<T> {
   pop(): T {
     const a = this.items;
     const top = a[0];
-    const last = a.pop()!;
+    const last = requiredValue(a.pop(), "a.pop()");
 
     if (a.length) {
       a[0] = last;
@@ -315,13 +316,17 @@ function simplify(pts: Pt[]): Pt[] {
   const out: Pt[] = [];
 
   for (const p of pts) {
-    if (out.length && out.at(-1)!.x === p.x && out.at(-1)!.y === p.y) {
+    if (
+      out.length &&
+      requiredValue(out.at(-1), "out.at(-1)").x === p.x &&
+      requiredValue(out.at(-1), "out.at(-1)").y === p.y
+    ) {
       continue;
     }
 
     if (out.length >= 2) {
-      const a = out.at(-2)!;
-      const b = out.at(-1)!;
+      const a = requiredValue(out.at(-2), "out.at(-2)");
+      const b = requiredValue(out.at(-1), "out.at(-1)");
 
       if ((a.x === b.x && b.x === p.x) || (a.y === b.y && b.y === p.y)) {
         out.pop();
@@ -469,7 +474,10 @@ export function routeOrthogonal(
 
       const next = route(req);
 
-      if (JSON.stringify(next.points) !== JSON.stringify(state.get(req.id)!.points)) {
+      if (
+        JSON.stringify(next.points) !==
+        JSON.stringify(requiredValue(state.get(req.id), "state.get(req.id)").points)
+      ) {
         state.set(req.id, next);
         changes++;
         moved = true;
@@ -484,12 +492,16 @@ export function routeOrthogonal(
   }
 
   // Labels last, once every route is final.
-  const all = [...fixedSegs, ...order.flatMap((r) => segments(state.get(r.id)!.points))];
+  const all = [
+    ...fixedSegs,
+    ...order.flatMap((r) => segments(requiredValue(state.get(r.id), "state.get(r.id)").points)),
+  ];
+
   const labels: Box[] = [];
   const out = new Map<string, Route>();
 
   for (const req of order) {
-    const f = state.get(req.id)!;
+    const f = requiredValue(state.get(req.id), "state.get(req.id)");
 
     const r: Route = {
       points: f.points,
@@ -594,7 +606,7 @@ export function routeOrthogonal(
     // Every obstacle edge is a grid line and so is the middle of every gap, so each obstacle has a
     // line strictly inside it: a step between neighbouring points is clear exactly when both are
     // free. Free points are found by blanking the cells each obstacle covers.
-    const gridKey = `${req.id}:${reach}`;
+    const gridKey = `${req.id}:${String(reach)}`;
     let freeV = grids.get(gridKey);
 
     if (!freeV) {
@@ -628,7 +640,9 @@ export function routeOrthogonal(
 
     const goal = new Map<number, SidePort>();
     const W = gx.length;
-    const id = (x: number, y: number) => yi.get(y)! * W + xi.get(x)!;
+
+    const id = (x: number, y: number) =>
+      requiredValue(yi.get(y), "yi.get(y)") * W + requiredValue(xi.get(x), "xi.get(x)");
 
     for (const e of ends) {
       const q = leadOut(e.p, e.dir);
@@ -755,7 +769,10 @@ export function routeOrthogonal(
           continue;
         }
 
-        const endBonus = goal.get(next.v * 4 + d) ? sideCost(req.to, goal.get(next.v * 4 + d)!) : 0;
+        const endBonus = goal.get(next.v * 4 + d)
+          ? sideCost(req.to, requiredValue(goal.get(next.v * 4 + d), "goal.get(next.v * 4 + d)"))
+          : 0;
+
         heap.push(g + endBonus + h(q), next);
       }
     }

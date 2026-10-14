@@ -1,5 +1,7 @@
+import { z } from "zod";
+import { elementAttribute } from "../src/shared/element-attributes.ts";
 import { requiredTestValue } from "./helpers/required-test-value.ts";
-import { storedElementSchema } from "../src/shared/schemas.ts";
+import { storedElementSchema, serverMessageSchema } from "../src/shared/schemas.ts";
 // DiagramRoom on fake storage: ops layer, snapshots, merge rule, presence.
 import { describe, expect, it, vi } from "vitest";
 import { AGENT_STROKE, type El, type ClientMessage } from "../src/shared/protocol.ts";
@@ -123,9 +125,11 @@ describe("DiagramRoom ops layer", () => {
     ).toEqual(["API", "DB"]);
     expect(g.edges).toHaveLength(1);
     const raw = await room.getRaw();
-    expect(raw.filter((e) => e.type !== "text").every((e) => e.strokeColor === AGENT_STROKE)).toBe(
-      true,
-    );
+    expect(
+      raw
+        .filter((e) => e.type !== "text")
+        .every((e) => elementAttribute(e, "strokeColor") === AGENT_STROKE),
+    ).toBe(true);
   });
 
   it("system patches skip the auto-snapshot", async () => {
@@ -201,9 +205,12 @@ describe("DiagramRoom ops layer", () => {
     });
     const tidy = await room.tidy();
     expect(tidy.separated).toBeGreaterThan(0);
-    expect(requiredTestValue((await room.getRaw()).find((e) => e.id === "b")).strokeColor).toBe(
-      "#e03131",
-    );
+    expect(
+      elementAttribute(
+        requiredTestValue((await room.getRaw()).find((e) => e.id === "b")),
+        "strokeColor",
+      ),
+    ).toBe("#e03131");
   });
 
   it("tidy can be scoped to a list of frames, with null for the top level", async () => {
@@ -273,7 +280,7 @@ describe("DiagramRoom ops layer", () => {
     await donor.applyPatch([{ op: "add_node", label: "T" }], "template");
     await room.seed(await donor.getRaw());
     const raw = await room.getRaw();
-    expect(raw.some((e) => e.customData?.author === "template")).toBe(true);
+    expect(raw.some((e) => elementAttribute(e, "customData")?.author === "template")).toBe(true);
     expect(await room.listSnapshots()).toHaveLength(0);
   });
 
@@ -421,7 +428,7 @@ describe("presence and tab RPC", () => {
     await message(a, { type: "presence", selection: ["x"], focused: true, username: "Ada" });
     await message(a, { type: "pointer", pointer: { x: 1, y: 2, tool: "pointer" }, button: "up" });
     expect(a.sent).toHaveLength(0);
-    expect(b.sent.map((m) => JSON.parse(m))).toEqual([
+    expect(b.sent.map((m) => serverMessageSchema.parse(JSON.parse(m)))).toEqual([
       { type: "collaborator", id: "a", username: "Ada", selection: ["x"] },
       {
         type: "collaborator",
@@ -431,9 +438,15 @@ describe("presence and tab RPC", () => {
       },
     ]);
     await room.webSocketClose(a);
-    expect(b.sent.map((m) => JSON.parse(m))).toContainEqual({ type: "collaborator_left", id: "a" });
+    expect(b.sent.map((m) => serverMessageSchema.parse(JSON.parse(m)))).toContainEqual({
+      type: "collaborator_left",
+      id: "a",
+    });
     // The fake still lists the closing socket; the count must exclude it.
-    expect(b.sent.map((m) => JSON.parse(m))).toContainEqual({ type: "peers", count: 1 });
+    expect(b.sent.map((m) => serverMessageSchema.parse(JSON.parse(m)))).toContainEqual({
+      type: "peers",
+      count: 1,
+    });
   });
 
   it("broadcasts room name changes to connected tabs", async () => {
@@ -465,7 +478,15 @@ describe("presence and tab RPC", () => {
     addWs(passive);
     addWs(active);
     const result = room.focusView(["Database"], "point");
-    const message = JSON.parse(active.sent[0]);
+
+    const message = z
+      .object({
+        reqId: z.string(),
+        method: z.literal("focus_view"),
+        params: z.object({ elementIds: z.array(z.string()), mode: z.literal("point") }),
+      })
+      .parse(JSON.parse(active.sent[0]));
+
     expect(message).toMatchObject({ method: "focus_view", params: { mode: "point" } });
     expect(passive.sent).toHaveLength(0);
     await room.webSocketMessage(
@@ -542,8 +563,10 @@ describe("room-level interview flow", () => {
 
     const ops: Op[] = [
       { op: "add_frame", ref: "hld", name: "High-level design" },
+      // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
       { op: "add_node", ref: "c", label: "Client", shape: "ellipse", frame: "hld" },
       { op: "add_node", ref: "api", label: "API", place: { right_of: "c" } },
+      // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
       { op: "add_node", ref: "db", label: "DB", shape: "ellipse", place: { right_of: "api" } },
       { op: "connect", from: "c", to: "api" },
       { op: "connect", from: "api", to: "db" },

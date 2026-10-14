@@ -1,3 +1,5 @@
+import { requiredValue } from "../shared/required-value.ts";
+import { elementAttribute, requiredElementAttribute } from "../shared/element-attributes.ts";
 import { pointListSchema } from "../shared/schemas.ts";
 // Draws Excalidraw elements as a static, hand-drawn SVG (rough.js), without bundling Excalidraw.
 import rough from "roughjs";
@@ -37,7 +39,9 @@ function node<K extends keyof SVGElementTagNameMap>(
 }
 
 const absPoints = (e: El): Pt[] =>
-  pointListSchema.parse(e.points ?? [[0, 0]]).map(([px, py]) => [e.x + px, e.y + py]);
+  pointListSchema
+    .parse(elementAttribute(e, "points") ?? [[0, 0]])
+    .map(([px, py]) => [e.x + px, e.y + py]);
 
 function bounds(els: El[]) {
   let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
@@ -67,26 +71,32 @@ function bounds(els: El[]) {
 }
 
 function roughOptions(e: El): Options {
-  const sw = e.strokeWidth ?? 2;
-  const filled = e.backgroundColor && e.backgroundColor !== "transparent";
+  const sw = elementAttribute(e, "strokeWidth") ?? 2;
+
+  const filled =
+    elementAttribute(e, "backgroundColor") &&
+    elementAttribute(e, "backgroundColor") !== "transparent";
 
   return {
-    seed: e.seed ?? 1,
-    roughness: e.roughness ?? 1,
-    stroke: e.strokeColor ?? "#1e1e1e",
+    seed: elementAttribute(e, "seed") ?? 1,
+    roughness: elementAttribute(e, "roughness") ?? 1,
+    stroke: elementAttribute(e, "strokeColor") ?? "#1e1e1e",
     strokeWidth: sw,
-    fill: filled ? e.backgroundColor : undefined,
-    fillStyle: e.fillStyle === "cross-hatch" ? "cross-hatch" : (e.fillStyle ?? "hachure"),
+    fill: filled ? elementAttribute(e, "backgroundColor") : undefined,
+    fillStyle:
+      elementAttribute(e, "fillStyle") === "cross-hatch"
+        ? "cross-hatch"
+        : (elementAttribute(e, "fillStyle") ?? "hachure"),
     fillWeight: sw / 2,
     hachureGap: sw * 4,
     strokeLineDash:
-      e.strokeStyle === "dashed"
+      elementAttribute(e, "strokeStyle") === "dashed"
         ? [8, 8 + sw]
-        : e.strokeStyle === "dotted"
+        : elementAttribute(e, "strokeStyle") === "dotted"
           ? [1.5, 6 + sw]
           : undefined,
-    disableMultiStroke: e.strokeStyle !== "solid",
-    preserveVertices: (e.roughness ?? 1) < 2,
+    disableMultiStroke: elementAttribute(e, "strokeStyle") !== "solid",
+    preserveVertices: (elementAttribute(e, "roughness") ?? 1) < 2,
   };
 }
 
@@ -94,7 +104,7 @@ function roughOptions(e: El): Options {
 function cornerRadius(e: El) {
   const x = Math.min(e.width, e.height);
 
-  if (e.roundness?.type === 3) {
+  if (elementAttribute(e, "roundness")?.type === 3) {
     return x <= 128 ? x * 0.25 : 32;
   }
 
@@ -179,10 +189,13 @@ function midpoint(pts: Pt[]): Pt {
 
 function drawText(e: El, byId: Map<string, El>, fits: (() => void)[]): SVGGElement {
   const g = node("g");
-  const fontSize = e.fontSize ?? 20;
-  const lh = fontSize * (e.lineHeight ?? 1.25);
-  const lines = String(e.text ?? "").split("\n");
-  const container = e.containerId ? byId.get(e.containerId) : undefined;
+  const fontSize = elementAttribute(e, "fontSize") ?? 20;
+  const lh = fontSize * (elementAttribute(e, "lineHeight") ?? 1.25);
+  const lines = (elementAttribute(e, "text") ?? "").split("\n");
+
+  const container = elementAttribute(e, "containerId")
+    ? byId.get(requiredElementAttribute(e, "containerId"))
+    : undefined;
 
   // Bound labels are positioned by the canvas tab, which may be closed, so centre them ourselves.
   let anchor: "start" | "middle" | "end" = "start";
@@ -197,7 +210,7 @@ function drawText(e: El, byId: Map<string, El>, fits: (() => void)[]): SVGGEleme
 
     anchor = "middle";
     x = cx;
-    top = container.customData?.icon
+    top = elementAttribute(container, "customData")?.icon
       ? container.y + container.height - lines.length * lh - 5
       : cy - (lines.length * lh) / 2;
 
@@ -212,27 +225,28 @@ function drawText(e: El, byId: Map<string, El>, fits: (() => void)[]): SVGGEleme
         }),
       );
     }
-  } else if (e.textAlign === "center") {
+  } else if (elementAttribute(e, "textAlign") === "center") {
     anchor = "middle";
     x = e.x + e.width / 2;
-  } else if (e.textAlign === "right") {
+  } else if (elementAttribute(e, "textAlign") === "right") {
     anchor = "end";
     x = e.x + e.width;
   }
 
   const text = node("text", {
-    "font-family": fontNames.get(Number(e.fontFamily)) ?? HAND,
+    "font-family": fontNames.get(Number(elementAttribute(e, "fontFamily"))) ?? HAND,
     "font-size": fontSize,
-    fill: e.strokeColor ?? "#1e1e1e",
+    fill: elementAttribute(e, "strokeColor") ?? "#1e1e1e",
     "text-anchor": anchor,
     "dominant-baseline": "middle",
   });
 
-  lines.forEach((line, i) => {
+  for (const [i, line] of lines.entries()) {
     const span = node("tspan", { x, y: top + lh * i + lh / 2 });
     span.textContent = line;
     text.append(span);
-  });
+  }
+
   g.append(text);
 
   // If a fallback font is wider than the one the layout was measured with, squeeze it to fit.
@@ -274,7 +288,7 @@ function drawFrame(e: El): SVGGElement {
     fill: "#868e96",
   });
 
-  label.textContent = e.name ?? "Frame";
+  label.textContent = elementAttribute(e, "name") ?? "Frame";
   g.append(label);
 
   return g;
@@ -313,18 +327,28 @@ function drawPrimitive(
       }
 
       const line =
-        e.roundness && !e.elbowed && pts.length > 2
+        e.roundness && !elementAttribute(e, "elbowed") && pts.length > 2
           ? rc.curve(pts, { ...o, fill: undefined })
           : rc.linearPath(pts, { ...o, fill: undefined });
 
       const out = [line];
 
-      if (e.endArrowhead) {
-        out.push(...arrowhead(rc, e.endArrowhead, pts.at(-1)!, pts.at(-2)!, o));
+      if (elementAttribute(e, "endArrowhead")) {
+        out.push(
+          ...arrowhead(
+            rc,
+            requiredElementAttribute(e, "endArrowhead"),
+            requiredValue(pts.at(-1), "pts.at(-1)"),
+            requiredValue(pts.at(-2), "pts.at(-2)"),
+            o,
+          ),
+        );
       }
 
-      if (e.startArrowhead) {
-        out.push(...arrowhead(rc, e.startArrowhead, pts[0], pts[1], o));
+      if (elementAttribute(e, "startArrowhead")) {
+        out.push(
+          ...arrowhead(rc, requiredElementAttribute(e, "startArrowhead"), pts[0], pts[1], o),
+        );
       }
 
       return out;
@@ -336,8 +360,8 @@ function drawPrimitive(
       const path = node("path", {
         d: `M ${pts.map(([px, py]) => `${px} ${py}`).join(" L ")}`,
         fill: "none",
-        stroke: e.strokeColor ?? "#1e1e1e",
-        "stroke-width": (e.strokeWidth ?? 2) * 1.5,
+        stroke: elementAttribute(e, "strokeColor") ?? "#1e1e1e",
+        "stroke-width": (elementAttribute(e, "strokeWidth") ?? 2) * 1.5,
         "stroke-linecap": "round",
         "stroke-linejoin": "round",
       });
@@ -404,19 +428,21 @@ export function renderScene(svg: SVGSVGElement, elements: El[]) {
     const g = node("g");
     g.append(...(Array.isArray(drawn) ? drawn : [drawn]));
 
-    if ((e.opacity ?? 100) < 100) {
-      g.setAttribute("opacity", String(e.opacity / 100));
+    if ((elementAttribute(e, "opacity") ?? 100) < 100) {
+      g.setAttribute("opacity", String(requiredElementAttribute(e, "opacity") / 100));
     }
 
-    if (e.angle) {
+    if (elementAttribute(e, "angle")) {
       g.setAttribute(
         "transform",
-        `rotate(${(e.angle * 180) / Math.PI} ${e.x + e.width / 2} ${e.y + e.height / 2})`,
+        `rotate(${(requiredElementAttribute(e, "angle") * 180) / Math.PI} ${e.x + e.width / 2} ${e.y + e.height / 2})`,
       );
     }
 
     svg.append(g);
   }
 
-  void fitWhenFontsLoad(fits);
+  fitWhenFontsLoad(fits).catch((failure) => {
+    globalThis.reportError(failure);
+  });
 }

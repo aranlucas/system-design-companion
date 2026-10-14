@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { promiseResult } from "../src/shared/promise-result.ts";
 import { requiredTestValue } from "./helpers/required-test-value.ts";
 import type { JsonInput } from "./helpers/response-schemas.ts";
 import {
@@ -37,15 +39,17 @@ function call(env: TestEnv, request: Request) {
   return worker.fetch(request, env.env, testCtx());
 }
 
-async function post(env: TestEnv, path: string, payload: JsonInput) {
-  return call(
-    env,
-    req(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }),
-  );
+function post(env: TestEnv, path: string, payload: JsonInput) {
+  return promiseResult(() => {
+    return call(
+      env,
+      req(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+    );
+  });
 }
 
 /** Response bodies the API returns. */
@@ -116,7 +120,7 @@ describe("diagrams API", () => {
     expect(listed.map((d) => d.id)).toEqual([agent.id, old.id]);
 
     const opened = await Promise.all(
-      listed.map(async (d) => call(env, req(`/api/d/${d.id}?k=${d.key}`))),
+      listed.map((d) => promiseResult(() => call(env, req(`/api/d/${d.id}?k=${d.key}`)))),
     );
 
     expect(opened.map((result) => result.status)).toEqual([200, 200]);
@@ -126,11 +130,8 @@ describe("diagrams API", () => {
     expect(await again.json()).toEqual(page);
     await post(env, `/api/d/${agent.id}/rename?k=${listed[0].key}`, { name: "Renamed" });
     const updated = await call(env, req("/api/diagrams"));
-    expect(await updated.json()).toEqual(
-      expect.objectContaining({
-        items: expect.arrayContaining([expect.objectContaining({ name: "Renamed" })]),
-      }),
-    );
+    const updatedPage = diagramPageSchema.parse(await updated.json());
+    expect(updatedPage.items.some((item) => item.name === "Renamed")).toBe(true);
   });
 
   it("returns an empty server library before any boards exist", async () => {
@@ -212,7 +213,7 @@ describe("diagrams API", () => {
     ];
 
     const results = await Promise.all(
-      params.map(async (param) => call(env, req(`/api/diagrams?${param}`))),
+      params.map((param) => promiseResult(() => call(env, req(`/api/diagrams?${param}`)))),
     );
 
     expect(results.every((res) => res.status === 400)).toBe(true);
@@ -241,7 +242,9 @@ describe("diagrams API", () => {
     expect(result.items.map((d) => d.id)).toEqual([keep.id]);
 
     const blocked = await Promise.all(
-      [target.key, libraryKey].map(async (key) => call(env, req(`/api/d/${target.id}?k=${key}`))),
+      [target.key, libraryKey].map((key) =>
+        promiseResult(() => call(env, req(`/api/d/${target.id}?k=${key}`))),
+      ),
     );
 
     expect(blocked.map((res) => res.status)).toEqual([403, 403]);
@@ -263,7 +266,10 @@ describe("diagrams API", () => {
     const env = makeEnv();
     const d = await create(env, "HLD");
     const paths = [`/api/d/${d.id}`, `/api/d/${d.id}?k=wrong`, `/api/d/unknown-id?k=${d.key}`];
-    const results = await Promise.all(paths.map(async (path) => call(env, req(path))));
+
+    const results = await Promise.all(
+      paths.map((path) => promiseResult(() => call(env, req(path)))),
+    );
 
     for (const res of results) {
       expect(res.status).toBe(403);
@@ -454,10 +460,8 @@ describe("request validation", () => {
     const response = await post(env, path, payload);
     expect(response.status).toBe(400);
     const failure = apiFailureSchema.parse(await response.json()) satisfies ApiFailure;
-    expect(failure).toMatchObject({
-      success: false,
-      error: { name: "ZodError", message: expect.any(String) },
-    });
+    expect(failure).toMatchObject({ success: false, error: { name: "ZodError" } });
+    expect(z.object({ message: z.string() }).parse(failure.error).message).toBeTypeOf("string");
     expect(apiErrorMessage(failure, "fallback")).not.toBe("fallback");
     expect(env.db.diagrams.size).toBe(1);
     expect(env.db.snapshots).toHaveLength(0);
@@ -528,7 +532,7 @@ describe("routing", () => {
     ];
 
     const responses = await Promise.all(
-      paths.map(async (path) => call(env, req(`${path}?k=wrong`))),
+      paths.map((path) => promiseResult(() => call(env, req(`${path}?k=wrong`)))),
     );
 
     expect(responses.map((response) => response.status)).toEqual(paths.map(() => 403));
@@ -566,7 +570,10 @@ describe("routing", () => {
       "/api/diagrams/",
     ];
 
-    const responses = await Promise.all(paths.map(async (path) => call(env, req(path))));
+    const responses = await Promise.all(
+      paths.map((path) => promiseResult(() => call(env, req(path)))),
+    );
+
     expect(responses.map((response) => response.status)).toEqual(paths.map(() => 404));
   });
 

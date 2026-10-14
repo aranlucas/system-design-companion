@@ -1,3 +1,4 @@
+import { requiredValue } from "../shared/required-value.ts";
 import { zValidator } from "@hono/zod-validator";
 import { Hono, type Handler, type MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -50,6 +51,7 @@ app.onError((error, c) => {
     return c.json({ error: error.message }, error.status);
   }
 
+  // eslint-disable-next-line no-console -- Operational failure reporting must remain visible to the host error logs.
   console.error(JSON.stringify({ event: "worker_error", name: error.name }));
 
   return c.json({ error: "Unexpected server error. Please try again." }, 500);
@@ -100,7 +102,7 @@ app.get("/api/diagrams", zValidator("query", paginationQuery), async (c) => {
 app.post("/api/diagrams", zValidator("json", createBody), async (c) => {
   const { name, template } = c.req.valid("json");
   const userId = await requireBrowserUser(c.req.raw, c.env);
-  const d = await createDiagram(c.env, name, template || undefined, userId);
+  const d = await createDiagram(c.env, name, template === "" ? undefined : template, userId);
 
   return c.json({ ...d, link: shareLink(new URL(c.req.url).origin, d.id, d.key) });
 });
@@ -116,7 +118,7 @@ app.delete("/api/diagrams/:id{[A-Za-z0-9_-]+}", async (c) => {
 
 // Both route groups require a capability key, including requests to unknown subpaths.
 const authorizeDiagram: MiddlewareHandler<WorkerEnv> = async (c, next) => {
-  const id = c.req.param("id")!;
+  const id = requiredValue(c.req.param("id"), 'c.req.param("id")');
   const diagram = await verifyKey(c.env, id, c.req.query("k"));
 
   if (!diagram) {
@@ -232,7 +234,7 @@ app.all(CALLBACK_PATH, interactive);
 // The OAuth provider fronts /mcp and owns its own discovery, token, registration,
 // authorize and callback endpoints. Canvas traffic never touches it: the path
 // check runs first so the provider is only loaded for requests that need it.
-export default {
+const worker = {
   fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
     if (request.body && !["GET", "HEAD"].includes(request.method)) {
       const maxBytes = new URL(request.url).pathname.includes("/files/")
@@ -264,3 +266,5 @@ export default {
     return oauthProvider(new URL(request.url).origin, app).fetch(request, env, ctx);
   },
 };
+
+export default worker;

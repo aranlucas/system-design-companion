@@ -28,14 +28,16 @@ function rejectDisposal<T>(value: T): T {
       let descriptor: PropertyDescriptor | undefined;
 
       for (
-        let owner = target;
+        let owner: object | null = target;
         owner !== null && !descriptor;
-        owner = Object.getPrototypeOf(owner)
+        owner = Reflect.getPrototypeOf(owner)
       ) {
         descriptor = Object.getOwnPropertyDescriptor(owner, key);
       }
 
-      return descriptor?.get ? descriptor.get.call(target) : descriptor?.value;
+      const reflected: unknown = descriptor?.get ? descriptor.get.call(target) : descriptor?.value;
+
+      return reflected;
     },
   });
 }
@@ -59,14 +61,14 @@ export function awaitedRpc<T extends Rpc.DurableObjectBranded>(
       let descriptor: PropertyDescriptor | undefined;
 
       for (
-        let owner = target;
+        let owner: object | null = target;
         owner !== null && !descriptor;
-        owner = Object.getPrototypeOf(owner)
+        owner = Reflect.getPrototypeOf(owner)
       ) {
         descriptor = Object.getOwnPropertyDescriptor(owner, key);
       }
 
-      const method = descriptor?.get ? descriptor.get.call(target) : descriptor?.value;
+      const method: unknown = descriptor?.get ? descriptor.get.call(target) : descriptor?.value;
 
       if (!isCallable(method)) {
         throw new Error(`Unimplemented RPC capability: ${String(key)}`);

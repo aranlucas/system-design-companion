@@ -1,3 +1,4 @@
+import { promiseResult } from "../src/shared/promise-result.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { callbackAllowed, checkCallbackDestination } from "../src/worker/webhook-destination.ts";
 import { makeEnv } from "./helpers/fakes.ts";
@@ -7,11 +8,13 @@ const CALLBACK = "https://receiver.example.com/events";
 type DnsRecord = { type: number; data: string };
 
 function resolver(records: DnsRecord[]) {
-  const fetch = vi.fn(async (input: URL) => {
-    expect(input.hostname).toBe("cloudflare-dns.com");
-    expect(input.searchParams.get("name")).toBe("receiver.example.com");
+  const fetch = vi.fn((input: URL) => {
+    return promiseResult(() => {
+      expect(input.hostname).toBe("cloudflare-dns.com");
+      expect(input.searchParams.get("name")).toBe("receiver.example.com");
 
-    return Response.json({ Status: 0, TC: false, Answer: records });
+      return Response.json({ Status: 0, TC: false, Answer: records });
+    });
   });
 
   vi.stubGlobal("fetch", fetch);
@@ -81,11 +84,11 @@ describe("callback destination policy", () => {
     const { env } = makeEnv();
     resolver([]);
     await expect(checkCallbackDestination(env, CALLBACK)).rejects.toThrow("public addresses");
-    vi.stubGlobal("fetch", async () => Response.json({ Status: 2 }));
-    await expect(checkCallbackDestination(env, CALLBACK)).rejects.toThrow();
-    vi.stubGlobal("fetch", async () => Response.json({ Status: 0, TC: true }));
-    await expect(checkCallbackDestination(env, CALLBACK)).rejects.toThrow();
-    vi.stubGlobal("fetch", async () => new Response("x".repeat(4097)));
+    vi.stubGlobal("fetch", () => promiseResult(() => Response.json({ Status: 2 })));
+    await expect(checkCallbackDestination(env, CALLBACK)).rejects.toThrow(/Invalid input/);
+    vi.stubGlobal("fetch", () => promiseResult(() => Response.json({ Status: 0, TC: true })));
+    await expect(checkCallbackDestination(env, CALLBACK)).rejects.toThrow(/Invalid input/);
+    vi.stubGlobal("fetch", () => promiseResult(() => new Response("x".repeat(4097))));
     await expect(checkCallbackDestination(env, CALLBACK)).rejects.toThrow("too large");
   });
 });

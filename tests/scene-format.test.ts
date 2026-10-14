@@ -1,3 +1,4 @@
+import { elementAttribute, requiredElementAttribute } from "../src/shared/element-attributes.ts";
 import { requiredTestValue } from "./helpers/required-test-value.ts";
 import { storedElementsSchema } from "../src/shared/schemas.ts";
 // Formatting: wrapText/measureText, tidy guarantees, layout, addForeign, restoreTo.
@@ -25,7 +26,10 @@ const runsOn = (p: number[], q: number[], u: number[], v: number[]) =>
     Math.max(Math.min(p[0], q[0]), Math.min(u[0], v[0]));
 
 const overlaps = (s: Scene) => {
-  const blocks = s.live().filter((e) => s.isNode(e) || (e.type === "text" && !e.containerId));
+  const blocks = s
+    .live()
+    .filter((e) => s.isNode(e) || (e.type === "text" && !elementAttribute(e, "containerId")));
+
   let n = 0;
 
   for (let i = 0; i < blocks.length; i++) {
@@ -107,7 +111,7 @@ describe("tidy", () => {
     ]);
 
     const arrow = requiredTestValue(
-      s.live().find((e) => e.type === "arrow" && e.strokeStyle === "dashed"),
+      s.live().find((e) => e.type === "arrow" && elementAttribute(e, "strokeStyle") === "dashed"),
     );
 
     // Saved geometry from the old midpoint-only router.
@@ -119,11 +123,16 @@ describe("tidy", () => {
         [691, 229],
         [379, 890],
       ],
-      customData: { ...arrow.customData, autoBend: true },
+      customData: { ...elementAttribute(arrow, "customData"), autoBend: true },
     });
     s.tidy();
     s.changedElements();
-    const path = arrow.points.map(([x, y]: number[]) => [arrow.x + x, arrow.y + y]);
+
+    const path = requiredElementAttribute(arrow, "points").map(([x, y]: number[]) => [
+      arrow.x + x,
+      arrow.y + y,
+    ]);
+
     const target = s.resolve("Geofences");
     expect(Math.max(...path.map(([x]: number[]) => x))).toBeLessThanOrEqual(
       target.x + target.width + 40,
@@ -136,10 +145,13 @@ describe("tidy", () => {
     }
 
     const other = requiredTestValue(
-      s.live().find((e) => e.type === "arrow" && e.strokeStyle !== "dashed"),
+      s.live().find((e) => e.type === "arrow" && elementAttribute(e, "strokeStyle") !== "dashed"),
     );
 
-    const otherPath = other.points.map(([x, y]: number[]) => [other.x + x, other.y + y]);
+    const otherPath = requiredElementAttribute(other, "points").map(([x, y]: number[]) => [
+      other.x + x,
+      other.y + y,
+    ]);
 
     for (let i = 1; i < path.length; i++) {
       for (let j = 1; j < otherPath.length; j++) {
@@ -221,7 +233,7 @@ describe("tidy", () => {
       scene.tidy(new Set(["f"]));
       const result = scene.resolve("route");
 
-      for (const [x, y] of result.points) {
+      for (const [x, y] of requiredElementAttribute(result, "points")) {
         expect(result.x + x).toBeGreaterThanOrEqual(0);
         expect(result.x + x).toBeLessThanOrEqual(1000);
         expect(result.y + y).toBeGreaterThanOrEqual(0);
@@ -233,12 +245,14 @@ describe("tidy", () => {
       expect(text.y + text.height).toBeLessThanOrEqual(500);
       expect(scene.resolve("f").y).toBe(0);
       expect(scene.resolve("f").width).toBe(1000);
-      expect(result.frameId).toBe("f");
-      const geometry = JSON.stringify([result.x, result.y, result.points]);
+      expect(elementAttribute(result, "frameId")).toBe("f");
+      const geometry = JSON.stringify([result.x, result.y, elementAttribute(result, "points")]);
       scene.tidy(new Set(["f"]));
-      expect(JSON.stringify([result.x, result.y, result.points])).toBe(geometry);
-      expect(result.startBinding.elementId).toBe("left");
-      expect(result.endBinding.elementId).toBe("right");
+      expect(JSON.stringify([result.x, result.y, elementAttribute(result, "points")])).toBe(
+        geometry,
+      );
+      expect(requiredElementAttribute(result, "startBinding").elementId).toBe("left");
+      expect(requiredElementAttribute(result, "endBinding").elementId).toBe("right");
     },
   );
 
@@ -306,14 +320,14 @@ describe("tidy", () => {
     const before = {
       labels: labels(s),
       edges: graphView(s).edges?.map((e) => [e.from, e.to]),
-      colors: s.live().map((e) => e.backgroundColor),
+      colors: s.live().map((e) => elementAttribute(e, "backgroundColor")),
       count: s.live().length,
     };
 
     s.tidy();
     expect(labels(s)).toEqual(before.labels);
     expect(graphView(s).edges?.map((e) => [e.from, e.to])).toEqual(before.edges);
-    expect(s.live().map((e) => e.backgroundColor)).toEqual(before.colors);
+    expect(s.live().map((e) => elementAttribute(e, "backgroundColor"))).toEqual(before.colors);
     expect(s.live().length).toBe(before.count);
   });
 
@@ -388,9 +402,13 @@ describe("addForeign / restoreTo", () => {
     const added = s.addForeign(incoming, "agent");
     expect(added).toBe(incoming.length);
     const imported = s.live().filter((e) => s.labelOf(e) === "X" || s.labelOf(e) === "Y");
-    expect(imported.every((e) => e.customData.author === "agent")).toBe(true);
     expect(
-      imported.filter((e) => e.type !== "text").every((e) => e.strokeColor === "#6741d9"),
+      imported.every((e) => requiredElementAttribute(e, "customData").author === "agent"),
+    ).toBe(true);
+    expect(
+      imported
+        .filter((e) => e.type !== "text")
+        .every((e) => elementAttribute(e, "strokeColor") === "#6741d9"),
     ).toBe(true);
   });
 

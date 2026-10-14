@@ -356,7 +356,7 @@ async function fetchGithubUser(accessToken: string): Promise<GithubUser | null> 
 async function s256(verifier: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
 
-  return btoa(String.fromCharCode(...new Uint8Array(digest)))
+  return btoa(String.fromCodePoint(...new Uint8Array(digest)))
     .replaceAll("+", "-")
     .replaceAll("/", "_")
     .replace(/=+$/, "");
@@ -458,7 +458,8 @@ export async function eventAuthorizationActive(
     if (
       grants.items.some(
         (grant) =>
-          grant.metadata?.authorizationId === authorizationId &&
+          z.object({ authorizationId: z.string() }).safeParse(grant.metadata).data
+            ?.authorizationId === authorizationId &&
           grant.scope.includes("mcp:read") &&
           (grant.resource === resource ||
             (Array.isArray(grant.resource) && grant.resource.includes(resource))) &&

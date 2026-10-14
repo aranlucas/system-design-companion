@@ -1,3 +1,4 @@
+import { requiredValue } from "../shared/required-value.ts";
 import { componentByKind } from "../shared/components.ts";
 import type { Op, Scene } from "./scene.ts";
 
@@ -17,7 +18,7 @@ export function patchSnapshotName(ops: Op[], scene: Scene, summary?: string): st
 
   const label = (target: string) => {
     if (refs.has(target)) {
-      return refs.get(target)!;
+      return requiredValue(refs.get(target), "refs.get(target)");
     }
 
     try {
@@ -30,7 +31,12 @@ export function patchSnapshotName(ops: Op[], scene: Scene, summary?: string): st
   const descriptions = ops.map((op) => {
     switch (op.op) {
       case "add_node": {
-        const name = compact(op.label || componentByKind.get(op.kind ?? "")?.label || "node", 40);
+        const name = compact(
+          [op.label, componentByKind.get(op.kind ?? "")?.label].find(
+            (candidate) => candidate !== undefined && candidate !== "",
+          ) ?? "node",
+          40,
+        );
 
         if (op.ref) {
           refs.set(op.ref, name);

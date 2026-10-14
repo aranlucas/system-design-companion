@@ -4,11 +4,20 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
-import type { Manifest } from "vite";
+import { z } from "zod/mini";
 
 const clientDir = ".cloudflare/output/v0/workers/default/assets";
 
-const manifest: Manifest = JSON.parse(readFileSync(`${clientDir}/.vite/manifest.json`, "utf8"));
+const manifest = z
+  .record(
+    z.string(),
+    z.object({
+      file: z.string(),
+      imports: z.optional(z.array(z.string())),
+      isDynamicEntry: z.optional(z.boolean()),
+    }),
+  )
+  .parse(JSON.parse(readFileSync(`${clientDir}/.vite/manifest.json`, "utf8")));
 
 function staticFiles(entry: string, seen = new Set<string>()): Set<string> {
   if (seen.has(entry)) {
@@ -55,6 +64,7 @@ const canvasImports = staticFiles("src/app/canvas.tsx");
 
 const canvas = sizes([...canvasImports].map((entry) => join(clientDir, manifest[entry].file)));
 
+// eslint-disable-next-line no-console -- This CLI command reports its validation/build results to the terminal.
 console.table({
   "Home JavaScript (static imports)": home,
   "Canvas JavaScript (static imports)": canvas,

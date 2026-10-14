@@ -33,14 +33,14 @@ export const paginationQuery = z.object({
 });
 
 export const createBody = z.object({
-  name: optionalName.transform((value) => value || "Untitled"),
+  name: optionalName.transform((value) => (value === "" ? "Untitled" : (value ?? "Untitled"))),
   template: z.string().optional(),
 });
 
 export const renameBody = z.object({ name });
 
 export const snapshotBody = z.object({
-  name: optionalName.transform((value) => value || "manual"),
+  name: optionalName.transform((value) => (value === "" ? "manual" : (value ?? "manual"))),
 });
 
 export const restoreBody = z.object({ snapshotId: z.string().min(1) });

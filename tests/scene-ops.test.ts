@@ -1,3 +1,4 @@
+import { elementAttribute, requiredElementAttribute } from "../src/shared/element-attributes.ts";
 import { requiredTestValue } from "./helpers/required-test-value.ts";
 // Semantic ops: every MCP apply_patch variant, target resolution, authorship.
 import { describe, expect, it } from "vitest";
@@ -21,7 +22,9 @@ function graph(s: Scene) {
 }
 
 const textOf = (s: Scene, id: string) =>
-  s.live().find((e) => e.type === "text" && (e.id === id || e.containerId === id));
+  s
+    .live()
+    .find((e) => e.type === "text" && (e.id === id || elementAttribute(e, "containerId") === id));
 
 describe("add_node", () => {
   it("creates a labelled rectangle with defaults", () => {
@@ -61,19 +64,28 @@ describe("add_node", () => {
 
     const art = s
       .live()
-      .filter((e) => e.customData?.componentPart && e.groupIds.includes(root.groupIds[0]));
+      .filter(
+        (e) =>
+          elementAttribute(e, "customData")?.componentPart &&
+          requiredElementAttribute(e, "groupIds").includes(
+            requiredElementAttribute(root, "groupIds")[0],
+          ),
+      );
 
     const right = Math.max(
       ...art.map(
         (e) =>
-          e.x + (e.type === "line" ? Math.max(...e.points.map((p: number[]) => p[0])) : e.width),
+          e.x +
+          (e.type === "line"
+            ? Math.max(...requiredElementAttribute(e, "points").map((p: number[]) => p[0]))
+            : e.width),
       ),
     );
 
     const arrow = requiredTestValue(s.live().find((e) => e.type === "arrow"));
     expect(arrow.x).toBeLessThanOrEqual(right + 10);
     expect(root.width).toBeLessThanOrEqual(84);
-    expect(s.boundText(root)?.containerId).toBeNull();
+    expect(elementAttribute(s.boundText(root), "containerId")).toBeNull();
     const width = root.width;
     applyOk(s, [
       {
@@ -83,7 +95,7 @@ describe("add_node", () => {
       },
     ]);
     expect(root.width).toBe(width);
-    expect(s.boundText(root)?.text).toContain("\n");
+    expect(elementAttribute(s.boundText(root), "text")).toContain("\n");
   });
 
   it("rejects unknown kinds and missing labels", () => {
@@ -103,7 +115,7 @@ describe("add_node", () => {
       expect(graph(s).nodes).toHaveLength(1);
       expect(graph(s).edges).toHaveLength(0);
       expect(graph(s).notes).toHaveLength(0);
-      expect(s.live().some((e) => e.customData?.componentPart)).toBe(true);
+      expect(s.live().some((e) => elementAttribute(e, "customData")?.componentPart)).toBe(true);
     }
   });
 
@@ -119,21 +131,29 @@ describe("add_node", () => {
 
     const parts = s
       .live()
-      .filter((e) => e.customData?.componentPart && e.groupIds.includes(root.groupIds[0]));
+      .filter(
+        (e) =>
+          elementAttribute(e, "customData")?.componentPart &&
+          requiredElementAttribute(e, "groupIds").includes(
+            requiredElementAttribute(root, "groupIds")[0],
+          ),
+      );
 
     const previous = { x: root.x, y: root.y, w: root.width, h: root.height };
     const positions = parts.map((p) => ({ x: p.x, y: p.y }));
     applyOk(s, [
       { op: "update", target: "db", width: 300, height: 200, move: { at: { x: 700, y: 500 } } },
     ]);
-    parts.forEach((part, i) => {
+
+    for (const [i, part] of parts.entries()) {
       expect(part.x).toBeCloseTo(
         root.x + ((positions[i].x - previous.x) * root.width) / previous.w,
       );
       expect(part.y).toBeCloseTo(
         root.y + ((positions[i].y - previous.y) * root.height) / previous.h,
       );
-    });
+    }
+
     s.tidy();
     expect(graph(s).nodes).toHaveLength(2);
     expect(graph(s).edges).toHaveLength(1);
@@ -147,14 +167,14 @@ describe("add_node", () => {
     const agent = fresh();
     applyOk(agent, [{ op: "add_node", label: "A" }], "agent");
     const aEl = agent.live()[0];
-    expect(aEl.strokeColor).toBe(AGENT_STROKE);
-    expect(aEl.customData.author).toBe("agent");
+    expect(elementAttribute(aEl, "strokeColor")).toBe(AGENT_STROKE);
+    expect(requiredElementAttribute(aEl, "customData").author).toBe("agent");
 
     const human = fresh();
     applyOk(human, [{ op: "add_node", label: "A" }], "human");
     const hEl = human.live()[0];
-    expect(hEl.strokeColor).toBe("#1e1e1e");
-    expect(hEl.customData.author).toBe("human");
+    expect(elementAttribute(hEl, "strokeColor")).toBe("#1e1e1e");
+    expect(requiredElementAttribute(hEl, "customData").author).toBe("human");
   });
 
   it("marks agent edits of human nodes without stealing authorship", () => {
@@ -162,8 +182,8 @@ describe("add_node", () => {
     applyOk(s, [{ op: "add_node", label: "DB" }], "human");
     applyOk(s, [{ op: "update", target: "DB", label: "DB v2" }], "agent");
     const el = requiredTestValue(s.live().find((e) => e.type !== "text"));
-    expect(el.customData.author).toBe("human");
-    expect(el.customData.editedBy).toBe("agent");
+    expect(requiredElementAttribute(el, "customData").author).toBe("human");
+    expect(requiredElementAttribute(el, "customData").editedBy).toBe("agent");
   });
 });
 
@@ -181,8 +201,8 @@ describe("connect / disconnect", () => {
     expect(g.edges[0].to).toBe("API");
     expect(g.edges[0].label).toBe("HTTPS");
     const arrow = requiredTestValue(s.live().find((e) => e.type === "arrow"));
-    expect(arrow.startBinding.elementId).toBe(g.nodes[0].id);
-    expect(arrow.endBinding.elementId).toBe(g.nodes[1].id);
+    expect(requiredElementAttribute(arrow, "startBinding").elementId).toBe(g.nodes[0].id);
+    expect(requiredElementAttribute(arrow, "endBinding").elementId).toBe(g.nodes[1].id);
   });
 
   it("supports dashed and bidirectional arrows", () => {
@@ -234,6 +254,7 @@ describe("update / remove", () => {
   it("renames, recolors and reshapes", () => {
     const s = fresh();
     applyOk(s, [{ op: "add_node", ref: "a", label: "A" }]);
+    // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
     applyOk(s, [{ op: "update", target: "a", label: "B", color: "blue", shape: "ellipse" }]);
     const g = graph(s);
     expect(g.nodes[0].label).toBe("B");
@@ -294,12 +315,12 @@ describe("add_frame / add_note", () => {
     const note = s.resolve(requiredTestValue(r.id));
     expect(note).toMatchObject({ type: "stickynote", strokeColor: AGENT_STROKE });
     expect(note.created).toEqual(expect.any(Number));
-    expect(note.baseHeight).toBeLessThanOrEqual(note.height);
+    expect(elementAttribute(note, "baseHeight")).toBeLessThanOrEqual(note.height);
     const label = requiredTestValue(s.boundText(note));
     expect(label).toMatchObject({ containerId: note.id, originalText: long, baseFontSize: 20 });
-    expect(label.text).toContain("\n");
+    expect(elementAttribute(label, "text")).toContain("\n");
 
-    for (const line of label.text.split("\n")) {
+    for (const line of requiredElementAttribute(label, "text").split("\n")) {
       expect(line.length).toBeLessThanOrEqual(28);
     }
 
@@ -319,7 +340,7 @@ describe("add_frame / add_note", () => {
     ]);
     const note = s.resolve("n");
     const label = requiredTestValue(s.boundText(note));
-    expect(label.originalText).toBe(`longer `.repeat(20).trim());
+    expect(elementAttribute(label, "originalText")).toBe(`longer `.repeat(20).trim());
     expect(label.y + label.height).toBeLessThanOrEqual(note.y + note.height - 36);
     expect(s.resolve("longer ".repeat(20).trim()).id).toBe(note.id);
 
@@ -379,11 +400,11 @@ describe("text_color", () => {
       { op: "add_note", text: "Hot path", text_color: "blue" },
     ]);
 
-    expect(textOf(s, requiredTestValue(a.id))?.strokeColor).toBe("#e03131");
-    expect(textOf(s, requiredTestValue(arrow.id))?.strokeColor).toBe("#123456");
-    expect(textOf(s, requiredTestValue(note.id))?.strokeColor).toBe("#1971c2");
+    expect(elementAttribute(textOf(s, requiredTestValue(a.id)), "strokeColor")).toBe("#e03131");
+    expect(elementAttribute(textOf(s, requiredTestValue(arrow.id)), "strokeColor")).toBe("#123456");
+    expect(elementAttribute(textOf(s, requiredTestValue(note.id)), "strokeColor")).toBe("#1971c2");
     // Only the text changes, not the shape's outline.
-    expect(s.resolve("a").strokeColor).toBe(AGENT_STROKE);
+    expect(elementAttribute(s.resolve("a"), "strokeColor")).toBe(AGENT_STROKE);
 
     const g = graph(s);
     expect(g.nodes.find((n) => n.label === "A")?.text_color).toBe("red");
@@ -409,9 +430,9 @@ describe("text_color", () => {
     ]);
     const g = graph(s);
     expect(g.nodes.find((n) => n.label === "Orders DB")?.text_color).toBe("green");
-    expect(textOf(s, requiredTestValue(note.id))?.strokeColor).toBe("#e8590c");
+    expect(elementAttribute(textOf(s, requiredTestValue(note.id)), "strokeColor")).toBe("#e8590c");
     // A sticky note's ink is one color: the note follows its label.
-    expect(s.resolve(requiredTestValue(note.id)).strokeColor).toBe("#e8590c");
+    expect(elementAttribute(s.resolve(requiredTestValue(note.id)), "strokeColor")).toBe("#e8590c");
   });
 
   it("fails when there is no text to color", () => {

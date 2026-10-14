@@ -11,10 +11,15 @@ export async function boundedResponse(response: Response): Promise<string> {
   try {
     for (;;) {
       // oxlint-disable-next-line no-await-in-loop -- consume a bounded stream
-      const { done, value } = await reader.read();
+      const result = await reader.read();
+      const value: unknown = result.value;
 
-      if (done) {
+      if (result.done) {
         break;
+      }
+
+      if (!(value instanceof Uint8Array)) {
+        throw new Error("verification response must contain byte chunks");
       }
 
       size += value.length;

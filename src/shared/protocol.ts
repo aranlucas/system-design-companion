@@ -16,7 +16,7 @@ export interface El {
   isDeleted: boolean;
   index?: string | null;
   // eslint-disable-next-line anti-slop/no-unsafe-dictionary-type -- Versioned Excalidraw wire extensions are intentionally opaque and forwarded losslessly; only the named core fields are validated here. This index does not establish extension-field safety.
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface Viewport {

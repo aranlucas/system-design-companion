@@ -1,3 +1,4 @@
+import { elementAttribute, requiredElementAttribute } from "../src/shared/element-attributes.ts";
 import { requiredTestValue } from "./helpers/required-test-value.ts";
 // Tidy behaviours: arrow binding, frame fitting, groups, spacing, push direction, and regressions
 // measured with the same layout report scripts/tidy-check.ts prints.
@@ -153,14 +154,14 @@ describe("tidy: binding loose arrow ends", () => {
     ]);
 
     expect(s.tidy().bound).toBe(2);
-    expect(s.resolve("x").startBinding.elementId).toBe("C");
-    expect(s.resolve("x").endBinding.elementId).toBe("A");
+    expect(requiredElementAttribute(s.resolve("x"), "startBinding").elementId).toBe("C");
+    expect(requiredElementAttribute(s.resolve("x"), "endBinding").elementId).toBe("A");
   });
 
   it("leaves an arrow alone unless both ends land on nodes, as graph() reads it", () => {
     const s = new Scene([rect("A", 0, 0), arrow("x", [80, 76], [400, 400])]);
     expect(s.tidy().bound).toBe(0);
-    expect(s.resolve("x").startBinding).toBeUndefined();
+    expect(elementAttribute(s.resolve("x"), "startBinding")).toBeUndefined();
     expect(graphView(s).edges ?? []).toHaveLength(0);
   });
 
@@ -172,7 +173,7 @@ describe("tidy: binding loose arrow ends", () => {
     ]);
 
     expect(s.tidy().bound).toBe(1);
-    expect(s.resolve("x").endBinding.elementId).toBe("C");
+    expect(requiredElementAttribute(s.resolve("x"), "endBinding").elementId).toBe("C");
   });
 });
 
@@ -344,7 +345,7 @@ describe("tidy: no regressions", () => {
       "frameOverlaps",
       "outsideFrame",
     ] as const) {
-      expect(after[k], k).toBeLessThanOrEqual(before[k]);
+      expect(after[k]).toBeLessThanOrEqual(before[k]);
     }
 
     expect(idempotent(s)).toBe(0);

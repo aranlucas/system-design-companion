@@ -30,4 +30,5 @@ const html = readFileSync("src/view/index.html", "utf8").replace("/* VIEW_SCRIPT
 
 writeFileSync("public/mcp-view.html", html);
 
+// eslint-disable-next-line no-console -- This CLI command reports its validation/build results to the terminal.
 console.log(`view: public/mcp-view.html (${(html.length / 1024).toFixed(1)} KiB)`);

@@ -18,25 +18,24 @@ export function strictFake<T extends object>(members: Partial<T>, options: FakeO
       let descriptor: PropertyDescriptor | undefined;
 
       for (
-        let owner = target;
+        let owner: object | null = target;
         owner !== null && !descriptor;
-        owner = Object.getPrototypeOf(owner)
+        owner = Reflect.getPrototypeOf(owner)
       ) {
         descriptor = Object.getOwnPropertyDescriptor(owner, key);
       }
 
-      // Promise resolution probes every returned object for a then method; an ordinary non-thenable must report its absence.
-      if (!descriptor && key === "then" && options.nonThenable) {
-        return;
-      }
+      // Promise resolution probes returned objects for a then method. Only an
+      // explicitly non-thenable fake may expose this absent member as undefined.
+      const absentThen = !descriptor && key === "then" && options.nonThenable;
 
-      if (!descriptor) {
+      if (!descriptor && !absentThen) {
         throw new Error(`Unimplemented fake member: ${String(key)}`);
       }
 
-      const value = descriptor.get ? descriptor.get.call(target) : descriptor.value;
+      const value: unknown = descriptor?.get ? descriptor.get.call(target) : descriptor?.value;
 
-      if (value === undefined) {
+      if (value === undefined && !absentThen) {
         throw new Error(`Unimplemented fake member: ${String(key)}`);
       }
 

@@ -15,6 +15,7 @@ test("scene smoke preserves references, layout, removals, and element order", ()
         width: 1200,
         height: 600,
       },
+      // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
       { op: "add_node", ref: "c", label: "Client", shape: "ellipse", frame: "hld" },
       { op: "add_node", ref: "lb", label: "Load Balancer", place: { right_of: "c" }, frame: "hld" },
       {
@@ -27,6 +28,7 @@ test("scene smoke preserves references, layout, removals, and element order", ()
       {
         op: "add_node",
         label: "Postgres",
+        // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
         shape: "ellipse",
         place: { below: "api" },
         color: "green",

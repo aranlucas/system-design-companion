@@ -15,6 +15,10 @@ export interface IconPart {
 
 /** Native primitives keep icons editable and portable in exported diagrams. */
 export function iconElements(c: Component, width: number): IconPart[] {
+  if (c.icon === undefined) {
+    return [];
+  }
+
   const x = (width - 80) / 2;
 
   switch (c.icon) {

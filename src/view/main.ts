@@ -1,3 +1,4 @@
+import { requiredValue } from "../shared/required-value.ts";
 import { z } from "zod";
 import { sceneDataSchema } from "../shared/schemas.ts";
 import { errorMessage } from "../shared/errors.ts";
@@ -19,7 +20,8 @@ interface SceneData {
 
 const POLL_MS = 4000;
 
-const byId = (id: string) => document.querySelector(`#${id}`)!;
+const byId = (id: string) =>
+  requiredValue(document.querySelector(`#${id}`), "document.querySelector(`#${id}`)");
 
 const title = byId("title");
 
@@ -108,7 +110,13 @@ function setDisplayMode(mode: string) {
   clearInterval(poll);
 
   if (mode === "fullscreen") {
-    poll = setInterval(() => void load(), POLL_MS);
+    poll = setInterval(
+      () =>
+        load().catch((failure) => {
+          status.textContent = errorMessage(failure);
+        }),
+      POLL_MS,
+    );
   }
 }
 
@@ -117,7 +125,9 @@ app.ontoolinput = ({ arguments: args }) => {
 
   if (link.success && link.data !== diagram) {
     diagram = link.data;
-    void load();
+    load().catch((failure) => {
+      status.textContent = errorMessage(failure);
+    });
   }
 };
 
@@ -138,18 +148,28 @@ function applyContext(ctx: McpUiHostContext) {
 
 app.onhostcontextchanged = applyContext;
 
-refreshBtn.addEventListener("click", () => void load());
+refreshBtn.addEventListener("click", () => {
+  load().catch((failure) => {
+    status.textContent = errorMessage(failure);
+  });
+});
 
 openBtn.addEventListener("click", () => {
   if (data) {
-    void app.openLink({ url: data.url });
+    app.openLink({ url: data.url }).catch((failure) => {
+      status.textContent = errorMessage(failure);
+    });
   }
 });
 
-fullBtn.addEventListener("click", async () => {
-  const want = displayMode === "fullscreen" ? "inline" : "fullscreen";
-  const { mode } = await app.requestDisplayMode({ mode: want });
-  setDisplayMode(mode);
+fullBtn.addEventListener("click", () => {
+  (async () => {
+    const want = displayMode === "fullscreen" ? "inline" : "fullscreen";
+    const { mode } = await app.requestDisplayMode({ mode: want });
+    setDisplayMode(mode);
+  })().catch((failure) => {
+    status.textContent = errorMessage(failure);
+  });
 });
 
 async function start() {
@@ -163,4 +183,6 @@ async function start() {
   fullBtn.hidden = !ctx?.availableDisplayModes?.includes("fullscreen");
 }
 
-void start();
+start().catch((failure) => {
+  status.textContent = errorMessage(failure);
+});
