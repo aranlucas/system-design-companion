@@ -9,7 +9,11 @@
     "noEmit": true,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@test/*": ["./test/*"]
+    }
   },
-  "include": ["src/worker", "src/shared", "tests", "vitest.config.ts"]
+  "include": ["src/worker", "src/shared", "test", "vitest.config.ts"]
 }

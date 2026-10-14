@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { storedElementsSchema } from "../src/shared/schemas.ts";
 import { Scene } from "../src/worker/scene.ts";
-import { layoutReport } from "../tests/helpers/layout-report.ts";
+import { layoutReport } from "../test/helpers/layout-report.ts";
 
 const els = storedElementsSchema.parse(JSON.parse(readFileSync(process.argv[2], "utf8")));
 

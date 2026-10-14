@@ -1,0 +1,669 @@
+import { z } from "zod";
+import { elementAttribute } from "@/shared/element-attributes.ts";
+import { requiredTestValue } from "@test/helpers/required-test-value.ts";
+import { storedElementSchema, serverMessageSchema } from "@/shared/schemas.ts";
+// DiagramRoom on fake storage: ops layer, snapshots, merge rule, presence.
+import { describe, expect, it, vi } from "vitest";
+import { AGENT_STROKE, type El, type ClientMessage } from "@/shared/protocol.ts";
+import { DiagramRoom, TOMBSTONE_TTL_MS } from "@/worker/room.ts";
+import type { Op } from "@/worker/scene.ts";
+import { makeEnv, makeRoom, makeRoomCtx, makeWs } from "@test/helpers/fakes.ts";
+
+/** The socket handlers, called directly with a fake socket. */
+
+function graphOf(room: DiagramRoom) {
+  return room.getGraph();
+}
+
+const rect = (id: string, x: number, y: number, frameId: string | null = null): El => ({
+  id,
+  type: "rectangle",
+  x,
+  y,
+  width: 160,
+  height: 70,
+  version: 1,
+  versionNonce: 1,
+  isDeleted: false,
+  index: `a${id}`,
+  frameId,
+});
+
+async function roomWithNode() {
+  const { env } = makeEnv();
+  const room = await makeRoom(env);
+  const [r] = (await room.applyPatch([{ op: "add_node", label: "X" }], "human")).results;
+  const cur = requiredTestValue((await room.getRaw()).find((e) => e.id === r.id));
+
+  const send = (el: El) =>
+    room.webSocketMessage(makeWs(), JSON.stringify({ type: "update", elements: [el] }));
+
+  const versionOf = async () => requiredTestValue((await room.getRaw()).find((e) => e.id === r.id));
+
+  return { room, cur, send, versionOf };
+}
+
+const collect = (room: DiagramRoom, now: number) => room["collectTombstones"](now);
+
+async function roomWithDelete() {
+  const { env } = makeEnv();
+  const ctx = makeRoomCtx();
+  const room = new DiagramRoom(ctx.ctx, env);
+  await room.init("d", "D");
+
+  const out = await room.applyPatch(
+    [
+      { op: "add_node", ref: "a", label: "Gone" },
+      { op: "add_node", ref: "b", label: "Kept" },
+    ],
+    "human",
+  );
+
+  const beforeDelete = await room.snapshot("before delete");
+  const deletedAt = Date.now();
+  await room.applyPatch([{ op: "remove", target: "Gone" }], "human");
+
+  const gone = [...ctx.sql.elements.values()].flatMap((json) => {
+    const element = storedElementSchema.parse(JSON.parse(json));
+
+    return element.isDeleted ? [element.id] : [];
+  });
+
+  return { room, ctx, deletedAt, gone, beforeDelete, keptId: requiredTestValue(out.results[1].id) };
+}
+
+describe("DiagramRoom ops layer", () => {
+  it("deactivation closes active tabs, rejects reconnects and ignores late edits", async () => {
+    const { env } = makeEnv();
+    const ctx = makeRoomCtx();
+    const room = new DiagramRoom(ctx.ctx, env);
+    await room.init("deleted-room", "Deleted");
+    const ws = makeWs();
+    const close = vi.fn();
+    ws.close = close;
+    ctx.addWs(ws);
+    await room.deactivate();
+    expect(close).toHaveBeenCalledWith(1008, "Diagram deleted");
+    expect(ctx.sql.meta.get("deleted")).toBe("true");
+    expect((await room.fetch(new Request("http://localhost"))).status).toBe(410);
+    await room.webSocketMessage(ws, JSON.stringify({ type: "update", elements: [] }));
+    expect(ws.sent).toEqual([]);
+  });
+
+  it("inits with a name and reports info", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env, "d1", "HLD");
+    const info = await room.info();
+    expect(info).toMatchObject({ id: "d1", name: "HLD", elements: 0, tabs: 0 });
+  });
+
+  it("applyPatch draws, auto-snapshots and tints violet", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+
+    const out = await room.applyPatch(
+      [
+        { op: "add_node", ref: "a", label: "API" },
+        { op: "add_node", ref: "b", label: "DB" },
+        { op: "connect", from: "a", to: "b" },
+      ],
+      "agent",
+    );
+
+    expect(out.results.every((r) => r.ok)).toBe(true);
+    expect(out.snapshotId).toBeDefined();
+    expect(out.changed).toBeGreaterThan(0);
+    const snaps = await room.listSnapshots();
+    expect(snaps.some((s) => s.id === out.snapshotId && s.kind === "auto")).toBe(true);
+
+    const g = await graphOf(room);
+    expect(g.diagram).toBe("Test");
+    expect(
+      requiredTestValue(g.nodes)
+        .map((n) => n.label)
+        .toSorted(),
+    ).toEqual(["API", "DB"]);
+    expect(g.edges).toHaveLength(1);
+    const raw = await room.getRaw();
+    expect(
+      raw
+        .filter((e) => e.type !== "text")
+        .every((e) => elementAttribute(e, "strokeColor") === AGENT_STROKE),
+    ).toBe(true);
+  });
+
+  it("system patches skip the auto-snapshot", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    const out = await room.applyPatch([{ op: "add_node", label: "A" }], "human");
+    expect(out.snapshotId).toBeUndefined();
+    expect(await room.listSnapshots()).toHaveLength(0);
+  });
+
+  it("names the pre-edit version from user feedback and restores the previous state", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+
+    const out = await room.applyPatch(
+      [{ op: "add_node", kind: "device" }],
+      "agent",
+      "  Model devices separately from users  ",
+    );
+
+    expect((await room.listSnapshots())[0].name).toBe(
+      "Before: Model devices separately from users",
+    );
+    expect((await graphOf(room)).nodes).toHaveLength(1);
+    await room.restore(requiredTestValue(out.snapshotId));
+    expect((await graphOf(room)).nodes ?? []).toHaveLength(0);
+  });
+
+  it("falls back to component and existing node labels for version names", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    await room.applyPatch([{ op: "add_node", kind: "database" }]);
+    expect((await room.listSnapshots())[0].name).toBe("Before: Add Database");
+    const node = requiredTestValue((await graphOf(room)).nodes)[0];
+    const out = await room.applyPatch([{ op: "update", target: node.id, label: "Events DB" }]);
+    const snap = (await room.listSnapshots()).find((s) => s.id === out.snapshotId);
+    expect(snap?.name).toBe("Before: Rename Database to Events DB");
+  });
+
+  it("tidy snapshots before changing anything, and skips the snapshot when already tidy", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    await room.seed([rect("a", 0, 0), rect("b", 20, 10)]);
+    const tidy = await room.tidy();
+    expect(tidy.changed).toBeGreaterThan(0);
+    expect(tidy.separated).toBeGreaterThan(0);
+    const snaps = await room.listSnapshots();
+    expect(snaps.find((s) => s.id === tidy.snapshotId)?.name).toBe("before tidy");
+
+    const again = await room.tidy();
+    expect(again).toMatchObject({ changed: 0, snapshotId: undefined });
+    expect(await room.listSnapshots()).toHaveLength(snaps.length);
+  });
+
+  it("tidy keeps an edit that lands while its snapshot is written", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    await room.seed([rect("a", 0, 0), rect("b", 20, 10)]);
+    // Someone recolours "b", which tidy is about to move, while tidy writes its snapshot.
+    const snapshot = room.snapshot.bind(room);
+    vi.spyOn(room, "snapshot").mockImplementationOnce(async (...args) => {
+      const meta = await snapshot(...args);
+      const b = requiredTestValue((await room.getRaw()).find((e) => e.id === "b"));
+      await room.webSocketMessage(
+        makeWs(),
+        JSON.stringify({
+          type: "update",
+          elements: [{ ...b, version: b.version + 1, strokeColor: "#e03131" }],
+        }),
+      );
+
+      return meta;
+    });
+    const tidy = await room.tidy();
+    expect(tidy.separated).toBeGreaterThan(0);
+    expect(
+      elementAttribute(
+        requiredTestValue((await room.getRaw()).find((e) => e.id === "b")),
+        "strokeColor",
+      ),
+    ).toBe("#e03131");
+  });
+
+  it("tidy can be scoped to a list of frames, with null for the top level", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    const frame: El = { ...rect("f", 0, 0), type: "frame", width: 1000, height: 600, name: "F" };
+    await room.seed([
+      frame,
+      rect("a", 100, 100, "f"),
+      rect("b", 120, 110, "f"),
+      rect("c", 3000, 0),
+      rect("d", 3020, 10),
+    ]);
+    const before = new Map((await room.getRaw()).map((e) => [e.id, e]));
+    await room.tidy([null]);
+
+    // Only the top-level pair was separated; the framed pair still overlaps.
+    const moved = (await room.getRaw()).filter(
+      (e) =>
+        e.type === "rectangle" &&
+        (e.x !== requiredTestValue(before.get(e.id)).x ||
+          e.y !== requiredTestValue(before.get(e.id)).y),
+    );
+
+    expect(moved.map((e) => e.id).toSorted()).toEqual(["c", "d"]);
+  });
+
+  it("tidy and layout wrap edits in snapshots", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    await room.seed([rect("a", 0, 0), rect("b", 20, 10)]);
+    const tidy = await room.tidy();
+    expect(tidy.snapshotId).toBeDefined();
+    expect(tidy.changed).toBeTypeOf("number");
+    const layout = await room.layout("LR");
+    expect(layout.moved).toBe(2);
+    expect(layout.snapshotId).toBeDefined();
+  });
+
+  it("snapshots restore and undo", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    await room.applyPatch([{ op: "add_node", label: "Keep" }], "human");
+    const v1 = await room.snapshot("v1", "named");
+    await room.applyPatch([{ op: "add_node", label: "Later" }], "human");
+    const labels = async () => ((await graphOf(room)).nodes ?? []).map((n) => n.label).toSorted();
+    expect(await labels()).toEqual(["Keep", "Later"]);
+
+    const restored = await room.restore(v1.id);
+    expect(restored.restored).toBe(v1.id);
+    expect(await labels()).toEqual(["Keep"]);
+
+    await room.restore(restored.undoSnapshotId);
+    expect(await labels()).toEqual(["Keep", "Later"]);
+  });
+
+  it("restore of a missing snapshot throws", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    await expect(room.restore("missing")).rejects.toThrow("not found");
+  });
+
+  it("seeds template elements without a snapshot", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    const donor = await makeRoom(env, "donor");
+    await donor.applyPatch([{ op: "add_node", label: "T" }], "template");
+    await room.seed(await donor.getRaw());
+    const raw = await room.getRaw();
+    expect(raw.some((e) => elementAttribute(e, "customData")?.author === "template")).toBe(true);
+    expect(await room.listSnapshots()).toHaveLength(0);
+  });
+
+  it("getRaw hides tombstones", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    await room.applyPatch(
+      [
+        { op: "add_node", ref: "a", label: "A" },
+        { op: "add_node", ref: "b", label: "B" },
+        { op: "remove", target: "a" },
+      ],
+      "human",
+    );
+    expect((await room.getRaw()).every((e) => !e.isDeleted)).toBe(true);
+    expect(((await graphOf(room)).nodes ?? []).map((n) => n.label)).toEqual(["B"]);
+  });
+});
+
+describe("failed batch persistence", () => {
+  it.each(["agent", "human"] as const)(
+    "%s edits leave storage, memory and peers unchanged on failure, then can retry",
+    async (author) => {
+      const { env } = makeEnv();
+      const { ctx, sql, addWs } = makeRoomCtx();
+      const room = new DiagramRoom(ctx, env);
+      await room.init("d", "D");
+      await room.applyPatch(
+        [
+          { op: "add_node", ref: "a", label: "API" },
+          { op: "add_node", ref: "b", label: "DB" },
+          { op: "connect", from: "a", to: "b" },
+        ],
+        "template",
+      );
+      const before = structuredClone(await room.getRaw());
+      const storedBefore = new Map(sql.elements);
+      const ws = makeWs();
+      addWs(ws);
+
+      const edit = () =>
+        author === "agent"
+          ? room.applyPatch([
+              { op: "update", target: "API", label: "Gateway" },
+              { op: "remove", target: "DB" },
+            ])
+          : room.webSocketMessage(
+              ws,
+              JSON.stringify({
+                type: "update",
+                elements: before.map((el) => ({ ...el, x: el.x + 100, version: el.version + 1 })),
+              }),
+            );
+
+      const exec = sql.exec.bind(sql);
+      let writes = 0;
+
+      const spy = vi.spyOn(sql, "exec").mockImplementation((query, ...params) => {
+        if (query.startsWith("INSERT OR REPLACE INTO elements") && ++writes === 2) {
+          throw new Error("injected write failure");
+        }
+
+        return exec(query, ...params);
+      });
+
+      try {
+        await expect(edit()).rejects.toThrow("injected write failure");
+        expect(writes).toBe(2);
+        expect(sql.elements).toEqual(storedBefore);
+        expect(await room.getRaw()).toEqual(before);
+        expect(ws.sent).toEqual([]);
+        const reloaded = new DiagramRoom(ctx, env);
+        expect(await reloaded.getRaw()).toEqual(before);
+      } finally {
+        spy.mockRestore();
+      }
+
+      const peer = makeWs();
+      addWs(peer);
+      await edit();
+      expect(await room.getRaw()).not.toEqual(before);
+      expect(peer.sent).toHaveLength(1);
+      expect(JSON.parse(peer.sent[0])).toMatchObject({ type: "update", origin: author });
+      const reloaded = new DiagramRoom(ctx, env);
+      expect(await reloaded.getRaw()).toEqual(await room.getRaw());
+    },
+  );
+});
+
+describe("concurrent-edit merge rule", () => {
+  it("higher version wins; stale versions are ignored", async () => {
+    const { cur, send, versionOf } = await roomWithNode();
+    await send({ ...structuredClone(cur), version: 0, versionNonce: 0 });
+    expect((await versionOf()).version).toBe(cur.version);
+    await send({ ...structuredClone(cur), version: cur.version + 5, versionNonce: 1 });
+    expect((await versionOf()).version).toBe(cur.version + 5);
+  });
+
+  it("on version ties the lower nonce wins", async () => {
+    const { cur, send, versionOf } = await roomWithNode();
+    const v = cur.version + 1;
+    await send({ ...structuredClone(cur), version: v, versionNonce: 500 });
+    expect((await versionOf()).versionNonce).toBe(500);
+    await send({ ...structuredClone(cur), version: v, versionNonce: 100 });
+    expect((await versionOf()).versionNonce).toBe(100);
+    await send({ ...structuredClone(cur), version: v, versionNonce: 900 });
+    expect((await versionOf()).versionNonce).toBe(100);
+  });
+
+  it("broadcasts human updates to the other tabs", async () => {
+    const { env } = makeEnv();
+    const { ctx, addWs } = makeRoomCtx();
+    const room = new DiagramRoom(ctx, env);
+    await room.init("d", "D");
+    const ws1 = makeWs();
+    const ws2 = makeWs();
+    addWs(ws1);
+    addWs(ws2);
+    const el: El = { ...rect("ext", 0, 0), versionNonce: 7 };
+    await room.webSocketMessage(ws1, JSON.stringify({ type: "update", elements: [el] }));
+    expect(ws1.sent).toHaveLength(0);
+    expect(ws2.sent).toHaveLength(1);
+    expect(JSON.parse(ws2.sent[0])).toMatchObject({ type: "update", origin: "human" });
+  });
+});
+
+describe("presence and tab RPC", () => {
+  it("relays cursors, selections and departures to the other tabs as collaborators", async () => {
+    const { env } = makeEnv();
+    const { ctx, addWs } = makeRoomCtx();
+    const room = new DiagramRoom(ctx, env);
+    await room.init("collab", "Collab");
+
+    const a = makeWs();
+    const b = makeWs();
+
+    a.serializeAttachment({ sid: "a", selection: [], focusedAt: 0 });
+    b.serializeAttachment({ sid: "b", selection: [], focusedAt: 0 });
+    addWs(a);
+    addWs(b);
+
+    const message = (ws: WebSocket, msg: ClientMessage) =>
+      room.webSocketMessage(ws, JSON.stringify(msg));
+
+    await message(a, { type: "presence", selection: ["x"], focused: true, username: "Ada" });
+    await message(a, { type: "pointer", pointer: { x: 1, y: 2, tool: "pointer" }, button: "up" });
+    expect(a.sent).toHaveLength(0);
+    expect(b.sent.map((m) => serverMessageSchema.parse(JSON.parse(m)))).toEqual([
+      { type: "collaborator", id: "a", username: "Ada", selection: ["x"] },
+      {
+        type: "collaborator",
+        id: "a",
+        pointer: { x: 1, y: 2, tool: "pointer" },
+        button: "up",
+      },
+    ]);
+    await room.webSocketClose(a);
+    expect(b.sent.map((m) => serverMessageSchema.parse(JSON.parse(m)))).toContainEqual({
+      type: "collaborator_left",
+      id: "a",
+    });
+    // The fake still lists the closing socket; the count must exclude it.
+    expect(b.sent.map((m) => serverMessageSchema.parse(JSON.parse(m)))).toContainEqual({
+      type: "peers",
+      count: 1,
+    });
+  });
+
+  it("broadcasts room name changes to connected tabs", async () => {
+    const { env } = makeEnv();
+    const { ctx, addWs } = makeRoomCtx();
+    const room = new DiagramRoom(ctx, env);
+    await room.init("rename-test", "Before");
+
+    const a = makeWs();
+    const b = makeWs();
+
+    addWs(a);
+    addWs(b);
+    await room.rename("Route history design");
+    expect(JSON.parse(a.sent[0])).toEqual({ type: "rename", name: "Route history design" });
+    expect(b.sent).toEqual(a.sent);
+  });
+  it("focuses only the active subscriber without editing or snapshotting the diagram", async () => {
+    const { env } = makeEnv();
+    const { ctx, addWs } = makeRoomCtx();
+    const room = new DiagramRoom(ctx, env);
+    await room.init("focus-test", "Focus test");
+    await room.applyPatch([{ op: "add_node", kind: "database" }], "human");
+    const before = await room.getRaw();
+    const passive = makeWs();
+    const active = makeWs();
+    passive.serializeAttachment({ selection: [], focusedAt: 1 });
+    active.serializeAttachment({ selection: [], focusedAt: 2 });
+    addWs(passive);
+    addWs(active);
+    const result = room.focusView(["Database"], "point");
+
+    const message = z
+      .object({
+        reqId: z.string(),
+        method: z.literal("focus_view"),
+        params: z.object({ elementIds: z.array(z.string()), mode: z.literal("point") }),
+      })
+      .parse(JSON.parse(active.sent[0]));
+
+    expect(message).toMatchObject({ method: "focus_view", params: { mode: "point" } });
+    expect(passive.sent).toHaveLength(0);
+    await room.webSocketMessage(
+      active,
+      JSON.stringify({
+        type: "rpc_result",
+        reqId: message.reqId,
+        ok: true,
+        data: { mode: "point", visible: true, elementIds: message.params.elementIds },
+      }),
+    );
+    expect(await result).toMatchObject({ mode: "point", visible: true });
+    expect(await room.getRaw()).toEqual(before);
+    expect(await room.listSnapshots()).toHaveLength(0);
+  });
+
+  it("reports no open tab until a socket attaches", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    expect(await room.getSelection()).toMatchObject({ tabOpen: false });
+  });
+
+  it("echoes the attached tab's selection and viewport", async () => {
+    const { env } = makeEnv();
+    const { ctx, addWs } = makeRoomCtx();
+    const room = new DiagramRoom(ctx, env);
+    await room.init("d", "D");
+
+    const out = await room.applyPatch(
+      [
+        { op: "add_node", ref: "a", label: "A" },
+        { op: "add_node", label: "B" },
+      ],
+      "human",
+    );
+
+    const idA = requiredTestValue(out.results[0].id);
+    const ws = makeWs();
+    addWs(ws);
+    const send = room.webSocketMessage.bind(room);
+    await send(
+      ws,
+      JSON.stringify({
+        type: "presence",
+        selection: [idA, "unknown-id"],
+        viewport: { x: 1, y: 2, width: 3, height: 4, zoom: 1 },
+        focused: true,
+      }),
+    );
+    const sel = await room.getSelection();
+    expect(sel.tabOpen).toBe(true);
+    expect(sel.viewport).toMatchObject({ x: 1, y: 2 });
+    expect(sel.nodes?.map((n) => n.id)).toEqual([idA]);
+  });
+
+  it("rejects plain HTTP on the WS route", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    const res = await room.fetch(new Request("http://x/"));
+    expect(res.status).toBe(426);
+  });
+
+  it("screenshot without an open tab fails with guidance", { timeout: 15000 }, async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env);
+    await expect(room.screenshot()).rejects.toThrow("No canvas tab is open");
+  });
+});
+
+describe("room-level interview flow", () => {
+  it("draws, tidies, checkpoints and reads back a design", async () => {
+    const { env } = makeEnv();
+    const room = await makeRoom(env, "flow", "URL shortener");
+
+    const ops: Op[] = [
+      { op: "add_frame", ref: "hld", name: "High-level design" },
+      // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
+      { op: "add_node", ref: "c", label: "Client", shape: "ellipse", frame: "hld" },
+      { op: "add_node", ref: "api", label: "API", place: { right_of: "c" } },
+      // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
+      { op: "add_node", ref: "db", label: "DB", shape: "ellipse", place: { right_of: "api" } },
+      { op: "connect", from: "c", to: "api" },
+      { op: "connect", from: "api", to: "db" },
+      { op: "add_note", text: "QPS ~ 10k", place: { near: "api" } },
+    ];
+
+    const applied = await room.applyPatch(ops, "agent");
+    expect(applied.results.every((r) => r.ok)).toBe(true);
+    const tidied = await room.tidy();
+    expect(tidied.changed).toBeGreaterThanOrEqual(0);
+    await room.snapshot("checkpoint", "named");
+    const g = await graphOf(room);
+    expect(
+      requiredTestValue(g.nodes)
+        .map((n) => n.label)
+        .toSorted(),
+    ).toEqual(["API", "Client", "DB"]);
+    expect(g.edges).toHaveLength(2);
+    expect(requiredTestValue(g.frames).map((f) => f.name)).toEqual(["High-level design"]);
+    expect((await room.listSnapshots()).some((s) => s.name === "checkpoint")).toBe(true);
+  });
+});
+
+describe("tombstone collection", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it("records when each element was deleted", async () => {
+    const { ctx, gone } = await roomWithDelete();
+    expect(gone).not.toHaveLength(0);
+    expect([...ctx.sql.tombstones.keys()].toSorted()).toEqual([...gone].toSorted());
+  });
+
+  it("drops tombstones only once they are older than the TTL", async () => {
+    const { room, ctx, deletedAt, gone, keptId } = await roomWithDelete();
+    expect(collect(room, deletedAt + DAY)).toBe(0);
+    expect(collect(room, deletedAt + TOMBSTONE_TTL_MS + 1000)).toBe(gone.length);
+
+    for (const id of gone) {
+      expect(ctx.sql.elements.has(id)).toBe(false);
+    }
+
+    expect(ctx.sql.tombstones.size).toBe(0);
+    expect(ctx.sql.elements.has(keptId)).toBe(true);
+    expect(((await graphOf(room)).nodes ?? []).map((n) => n.label)).toEqual(["Kept"]);
+  });
+
+  it("keeps tombstones while a tab is connected", async () => {
+    const { room, ctx, deletedAt, gone } = await roomWithDelete();
+    ctx.addWs(makeWs());
+    expect(collect(room, deletedAt + TOMBSTONE_TTL_MS + 1000)).toBe(0);
+
+    for (const id of gone) {
+      expect(ctx.sql.elements.has(id)).toBe(true);
+    }
+  });
+
+  it("forgets the deletion when a restore brings the element back", async () => {
+    const { room, ctx, deletedAt, gone, beforeDelete } = await roomWithDelete();
+    await room.restore(beforeDelete.id);
+    expect(ctx.sql.tombstones.size).toBe(0);
+    expect(collect(room, deletedAt + TOMBSTONE_TTL_MS + 1000)).toBe(0);
+
+    for (const id of gone) {
+      expect(ctx.sql.elements.has(id)).toBe(true);
+    }
+
+    expect(((await graphOf(room)).nodes ?? []).map((n) => n.label).toSorted()).toEqual([
+      "Gone",
+      "Kept",
+    ]);
+  });
+
+  it("starts the TTL for tombstones stored before tracking existed, and reloads it", async () => {
+    const { env } = makeEnv();
+    const ctx = makeRoomCtx();
+
+    const old: El = {
+      id: "old",
+      type: "rectangle",
+      x: 0,
+      y: 0,
+      width: 10,
+      height: 10,
+      version: 3,
+      versionNonce: 1,
+      isDeleted: true,
+    };
+
+    ctx.sql.elements.set(old.id, JSON.stringify(old));
+    const loadedAt = Date.now();
+    const room = new DiagramRoom(ctx.ctx, env);
+    await room.init("d", "D");
+    expect(ctx.sql.tombstones.get("old")).toBeGreaterThanOrEqual(loadedAt);
+
+    const reloaded = new DiagramRoom(ctx.ctx, env);
+    expect(collect(reloaded, loadedAt + DAY)).toBe(0);
+    expect(collect(reloaded, Date.now() + TOMBSTONE_TTL_MS)).toBe(1);
+    expect(ctx.sql.elements.has("old")).toBe(false);
+  });
+});

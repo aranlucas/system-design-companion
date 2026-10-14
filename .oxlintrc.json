@@ -3,8 +3,7 @@
   "extends": [
     "./node_modules/@aranlucas/oxforge/configs/recommended.json",
     "./node_modules/@aranlucas/oxforge/configs/react.json",
-    "./node_modules/@aranlucas/oxforge/configs/vitest.json",
-    "./node_modules/@aranlucas/oxforge/configs/type-aware.json"
+    "./node_modules/@aranlucas/oxforge/configs/vitest.json"
   ],
   "plugins": ["eslint", "typescript", "react", "unicorn", "oxc", "import", "jsx-a11y", "promise"],
   "categories": {
@@ -14,12 +13,6 @@
   },
   "rules": {
     "eslint/no-underscore-dangle": "error",
-    "import/no-unassigned-import": [
-      "error",
-      {
-        "allow": ["**/*.css"]
-      }
-    ],
     "unicorn/filename-case": [
       "error",
       {
@@ -30,9 +23,9 @@
   "overrides": [
     {
       "files": [
-        "tests/helpers/strict-fake.ts",
-        "tests/helpers/sqlite-statement.ts",
-        "tests/helpers/awaited-rpc.ts",
+        "test/helpers/strict-fake.ts",
+        "test/helpers/sqlite-statement.ts",
+        "test/helpers/awaited-rpc.ts",
         "src/app/validation.ts"
       ],
       "rules": {
