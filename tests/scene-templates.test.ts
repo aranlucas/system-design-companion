@@ -1,10 +1,11 @@
+import { requiredTestValue } from "./helpers/required-test-value.ts";
 // Built-in templates: every starter layout applies cleanly and reads back correctly.
 import { describe, expect, it } from "vitest";
 import { BUILTIN_TEMPLATES } from "../src/worker/templates.ts";
 import { Scene, graphView } from "../src/worker/scene.ts";
 
 function applied(id: string): Scene {
-  const t = BUILTIN_TEMPLATES.find((x) => x.id === id)!;
+  const t = requiredTestValue(BUILTIN_TEMPLATES.find((x) => x.id === id));
   expect(t).toBeDefined();
   const s = new Scene([]);
   const res = s.apply(t.ops, "template");
@@ -45,7 +46,7 @@ describe("builtin templates", () => {
     const s = applied("builtin:web-baseline");
     expect(counts(s)).toMatchObject({ nodes: 9, edges: 8 });
     const g = graphView(s);
-    const pairs = g.edges!.map((e) => `${e.from}->${e.to}`);
+    const pairs = requiredTestValue(g.edges).map((e) => `${e.from}->${e.to}`);
     expect(pairs).toContain("Client->CDN");
     expect(pairs).toContain("Client->Load Balancer");
   });

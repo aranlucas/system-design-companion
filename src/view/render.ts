@@ -29,7 +29,9 @@ function node<K extends keyof SVGElementTagNameMap>(
 ): SVGElementTagNameMap[K] {
   const el = document.createElementNS(SVG_NS, tag);
 
-  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+  for (const [k, v] of Object.entries(attrs)) {
+    el.setAttribute(k, String(v));
+  }
 
   return el;
 }
@@ -49,7 +51,9 @@ function bounds(els: El[]) {
             [e.x + e.width, e.y + e.height],
           ];
 
-    if (e.type === "frame") pts.push([e.x, e.y - 24]); // frame title sits above the frame
+    if (e.type === "frame") {
+      pts.push([e.x, e.y - 24]);
+    } // frame title sits above the frame
 
     for (const [x, y] of pts) {
       x0 = Math.min(x0, x);
@@ -90,7 +94,9 @@ function roughOptions(e: El): Options {
 function cornerRadius(e: El) {
   const x = Math.min(e.width, e.height);
 
-  if (e.roundness?.type === 3) return x <= 128 ? x * 0.25 : 32;
+  if (e.roundness?.type === 3) {
+    return x <= 128 ? x * 0.25 : 32;
+  }
 
   return x * 0.25;
 }
@@ -195,7 +201,7 @@ function drawText(e: El, byId: Map<string, El>, fits: (() => void)[]): SVGGEleme
       ? container.y + container.height - lines.length * lh - 5
       : cy - (lines.length * lh) / 2;
 
-    if (container.type === "arrow" || container.type === "line")
+    if (container.type === "arrow" || container.type === "line") {
       g.append(
         node("rect", {
           x: cx - e.width / 2 - 4,
@@ -205,6 +211,7 @@ function drawText(e: El, byId: Map<string, El>, fits: (() => void)[]): SVGGEleme
           fill: "#ffffff",
         }),
       );
+    }
   } else if (e.textAlign === "center") {
     anchor = "middle";
     x = e.x + e.width / 2;
@@ -301,7 +308,9 @@ function drawPrimitive(
     case "line": {
       const pts = absPoints(e);
 
-      if (pts.length < 2) return null;
+      if (pts.length < 2) {
+        return null;
+      }
 
       const line =
         e.roundness && !e.elbowed && pts.length > 2
@@ -310,9 +319,13 @@ function drawPrimitive(
 
       const out = [line];
 
-      if (e.endArrowhead) out.push(...arrowhead(rc, e.endArrowhead, pts.at(-1)!, pts.at(-2)!, o));
+      if (e.endArrowhead) {
+        out.push(...arrowhead(rc, e.endArrowhead, pts.at(-1)!, pts.at(-2)!, o));
+      }
 
-      if (e.startArrowhead) out.push(...arrowhead(rc, e.startArrowhead, pts[0], pts[1], o));
+      if (e.startArrowhead) {
+        out.push(...arrowhead(rc, e.startArrowhead, pts[0], pts[1], o));
+      }
 
       return out;
     }
@@ -347,7 +360,9 @@ function drawPrimitive(
 async function fitWhenFontsLoad(fits: (() => void)[]) {
   await document.fonts.ready;
 
-  for (const fit of fits) fit();
+  for (const fit of fits) {
+    fit();
+  }
 }
 
 /** Replace the contents of `svg` with a drawing of `elements` (already in z-order, non-deleted). */
@@ -355,7 +370,10 @@ export function renderScene(svg: SVGSVGElement, elements: El[]) {
   svg.replaceChildren();
   const els = elements.filter((e) => !e.isDeleted);
 
-  if (!els.length) return;
+  if (!els.length) {
+    return;
+  }
+
   const byId = new Map(els.map((e) => [e.id, e]));
   const b = bounds(els);
   svg.setAttribute("viewBox", `${b.x} ${b.y} ${b.w} ${b.h}`);
@@ -366,23 +384,37 @@ export function renderScene(svg: SVGSVGElement, elements: El[]) {
   const fits: (() => void)[] = [];
 
   // Frames go underneath everything, like Excalidraw.
-  for (const e of els) if (e.type === "frame" || e.type === "magicframe") svg.append(drawFrame(e));
+  for (const e of els) {
+    if (e.type === "frame" || e.type === "magicframe") {
+      svg.append(drawFrame(e));
+    }
+  }
 
   for (const e of els) {
-    if (e.type === "frame" || e.type === "magicframe") continue;
+    if (e.type === "frame" || e.type === "magicframe") {
+      continue;
+    }
+
     const drawn = e.type === "text" ? drawText(e, byId, fits) : drawPrimitive(rc, e);
 
-    if (!drawn) continue;
+    if (!drawn) {
+      continue;
+    }
+
     const g = node("g");
     g.append(...(Array.isArray(drawn) ? drawn : [drawn]));
 
-    if ((e.opacity ?? 100) < 100) g.setAttribute("opacity", String(e.opacity / 100));
+    if ((e.opacity ?? 100) < 100) {
+      g.setAttribute("opacity", String(e.opacity / 100));
+    }
 
-    if (e.angle)
+    if (e.angle) {
       g.setAttribute(
         "transform",
         `rotate(${(e.angle * 180) / Math.PI} ${e.x + e.width / 2} ${e.y + e.height / 2})`,
       );
+    }
+
     svg.append(g);
   }
 

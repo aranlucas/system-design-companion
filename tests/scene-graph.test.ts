@@ -1,3 +1,4 @@
+import { requiredTestValue } from "./helpers/required-test-value.ts";
 // Read model: graph(), graphView(), selection, inferred edges, sketches.
 import { describe, expect, it } from "vitest";
 import type { El, Point } from "../src/shared/protocol.ts";
@@ -68,9 +69,13 @@ function arrow(
     strokeStyle: "solid",
   };
 
-  if (startId) element.startBinding = { elementId: startId, focus: 0, gap: 8, fixedPoint: null };
+  if (startId) {
+    element.startBinding = { elementId: startId, focus: 0, gap: 8, fixedPoint: null };
+  }
 
-  if (endId) element.endBinding = { elementId: endId, focus: 0, gap: 8, fixedPoint: null };
+  if (endId) {
+    element.endBinding = { elementId: endId, focus: 0, gap: 8, fixedPoint: null };
+  }
 
   return element;
 }
@@ -102,13 +107,13 @@ describe("graph()", () => {
     ]);
 
     const g = view(s);
-    expect(g.frames![0].name).toBe("HLD");
+    expect(requiredTestValue(g.frames)[0].name).toBe("HLD");
     expect(g.nodes).toHaveLength(2);
-    expect(g.nodes![0].frame).toBe("HLD");
-    expect(g.nodes![0].kind).toBe("service");
-    expect(g.nodes![0].by).toBe("agent");
-    expect(g.edges![0]).toMatchObject({ from: "API", to: "DB", label: "reads" });
-    expect(g.notes![0].frame).toBe("HLD");
+    expect(requiredTestValue(g.nodes)[0].frame).toBe("HLD");
+    expect(requiredTestValue(g.nodes)[0].kind).toBe("service");
+    expect(requiredTestValue(g.nodes)[0].by).toBe("agent");
+    expect(requiredTestValue(g.edges)[0]).toMatchObject({ from: "API", to: "DB", label: "reads" });
+    expect(requiredTestValue(g.notes)[0].frame).toBe("HLD");
   });
 
   it("disambiguates duplicate labels with #id suffixes", () => {
@@ -121,8 +126,8 @@ describe("graph()", () => {
     const g = view(s);
     const aId = s.resolve("a").id;
     const bId = s.resolve("b").id;
-    expect(g.edges![0].from).toBe(`API#${aId}`);
-    expect(g.edges![0].to).toBe(`API#${bId}`);
+    expect(requiredTestValue(g.edges)[0].from).toBe(`API#${aId}`);
+    expect(requiredTestValue(g.edges)[0].to).toBe(`API#${bId}`);
   });
 
   it("marks the current selection", () => {
@@ -132,8 +137,12 @@ describe("graph()", () => {
     ]);
 
     const g = view(s, new Set([s.resolve("a").id]));
-    expect(g.nodes!.find((n) => n.label === "A")!.selected).toBe(true);
-    expect(g.nodes!.find((n) => n.label === "B")!.selected).toBeUndefined();
+    expect(
+      requiredTestValue(requiredTestValue(g.nodes).find((n) => n.label === "A")).selected,
+    ).toBe(true);
+    expect(
+      requiredTestValue(requiredTestValue(g.nodes).find((n) => n.label === "B")).selected,
+    ).toBeUndefined();
   });
 
   it("infers edges for unbound arrows that touch two nodes", () => {
@@ -155,7 +164,11 @@ describe("graph()", () => {
 
     const g = view(s);
     expect(g.edges).toHaveLength(1);
-    expect(g.edges![0]).toMatchObject({ from: "Alpha", to: "Beta", inferred: true });
+    expect(requiredTestValue(g.edges)[0]).toMatchObject({
+      from: "Alpha",
+      to: "Beta",
+      inferred: true,
+    });
   });
 
   it("reports stray arrows and freedraw as sketches", () => {
@@ -169,7 +182,11 @@ describe("graph()", () => {
 
     const g = view(s);
     expect(g.edges ?? []).toHaveLength(0);
-    expect(g.sketches!.map((x) => x.id).toSorted()).toEqual(["lonely", "scribble"]);
+    expect(
+      requiredTestValue(g.sketches)
+        .map((x) => x.id)
+        .toSorted(),
+    ).toEqual(["lonely", "scribble"]);
   });
 
   it("hides internal raw edges from the agent view", () => {

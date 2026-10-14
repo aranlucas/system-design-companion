@@ -46,7 +46,10 @@ type WorkerEnv = { Bindings: Env; Variables: DiagramVariables };
 const app = new Hono<WorkerEnv>();
 
 app.onError((error, c) => {
-  if (error instanceof HTTPException) return c.json({ error: error.message }, error.status);
+  if (error instanceof HTTPException) {
+    return c.json({ error: error.message }, error.status);
+  }
+
   console.error(JSON.stringify({ event: "worker_error", name: error.name }));
 
   return c.json({ error: "Unexpected server error. Please try again." }, 500);
@@ -79,7 +82,10 @@ app.get("/api/templates", async (c) => {
 });
 
 app.use("/api/*", async (c, next) => {
-  if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method)) requireSameOrigin(c.req.raw);
+  if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method)) {
+    requireSameOrigin(c.req.raw);
+  }
+
   await next();
 });
 
@@ -113,10 +119,14 @@ const authorizeDiagram: MiddlewareHandler<WorkerEnv> = async (c, next) => {
   const id = c.req.param("id")!;
   const diagram = await verifyKey(c.env, id, c.req.query("k"));
 
-  if (!diagram) return c.json({ error: "invalid link" }, 403);
+  if (!diagram) {
+    return c.json({ error: "invalid link" }, 403);
+  }
 
-  if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method))
+  if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method)) {
     await takeBudget(c.env, `board-write:${id}`, 120);
+  }
+
   c.set("diagram", diagram);
   c.set("room", room(c.env, id));
   await next();
@@ -125,7 +135,10 @@ const authorizeDiagram: MiddlewareHandler<WorkerEnv> = async (c, next) => {
 };
 
 const deleteAuthorizedDiagram: Handler<WorkerEnv> = async (c) => {
-  if (c.var.diagram.is_template) return c.json({ error: "Templates cannot be deleted here" }, 400);
+  if (c.var.diagram.is_template) {
+    return c.json({ error: "Templates cannot be deleted here" }, 400);
+  }
+
   requireSameOrigin(c.req.raw);
   await requireOwner(c.env, c.var.diagram.id, await requireBrowserUser(c.req.raw, c.env));
   await deleteDiagram(c.env, c.var.diagram.id);
@@ -203,8 +216,10 @@ app.route("/ws/:id{[A-Za-z0-9_-]+}", sockets);
 // The provider owns the OAuth protocol endpoints but forwards /authorize and
 // /github/callback here, so they are Hono routes that load the provider lazily.
 const interactive: Handler<WorkerEnv> = async (c) => {
-  if (c.req.path === CALLBACK_PATH && isBrowserCallback(c.req.raw))
+  if (c.req.path === CALLBACK_PATH && isBrowserCallback(c.req.raw)) {
     return browserCallback(c.req.raw, c.env);
+  }
+
   const { oauthRoutes } = await import("./oauth.ts");
 
   return oauthRoutes(c.req.raw, c.env);
@@ -225,18 +240,25 @@ export default {
         : MAX_JSON_BYTES;
 
       try {
-        if (Number(request.headers.get("Content-Length") ?? 0) > maxBytes)
+        if (Number(request.headers.get("Content-Length") ?? 0) > maxBytes) {
           return Response.json({ error: "Request body is too large." }, { status: 413 });
+        }
+
         const body = await readBounded(request.body, maxBytes);
         request = new Request(request, { method: request.method, body });
       } catch (error) {
-        if (error instanceof HTTPException)
+        if (error instanceof HTTPException) {
           return Response.json({ error: error.message }, { status: error.status });
+        }
+
         throw error;
       }
     }
 
-    if (!isOAuthPath(new URL(request.url).pathname)) return app.fetch(request, env, ctx);
+    if (!isOAuthPath(new URL(request.url).pathname)) {
+      return app.fetch(request, env, ctx);
+    }
+
     const { oauthProvider } = await import("./oauth.ts");
 
     return oauthProvider(new URL(request.url).origin, app).fetch(request, env, ctx);

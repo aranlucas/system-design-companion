@@ -45,8 +45,9 @@ describe("small home-route validation boundaries", () => {
       { ...created, extra: { nested: true } },
     ];
 
-    for (const value of entryValues)
+    for (const value of entryValues) {
       expect(isCreatedDiagram(value)).toBe(entry.safeParse(value).success);
+    }
 
     const page = z.object({
       items: z.array(entry.extend({ createdAt: z.number() })),

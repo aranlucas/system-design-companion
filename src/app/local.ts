@@ -9,7 +9,10 @@ function read<T>(k: string, fallback: T, guard: Guard<T>): T {
   try {
     const v = localStorage.getItem(k);
 
-    if (!v) return fallback;
+    if (!v) {
+      return fallback;
+    }
+
     const parsed: unknown = JSON.parse(v);
     assertBoundary(parsed, guard);
 

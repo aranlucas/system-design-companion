@@ -12,7 +12,9 @@ export async function viewHtml(env: Env, origin: string): Promise<string> {
     const html = await res.text();
 
     // The SPA fallback answers 200 with index.html when the view wasn't built.
-    if (!res.ok || !html.includes('name="mcp-view"')) throw new Error(`status ${res.status}`);
+    if (!res.ok || !html.includes('name="mcp-view"')) {
+      throw new Error(`status ${res.status}`);
+    }
 
     // The font is served from this worker, which the resource's CSP allows via resourceDomains.
     return html.replaceAll("__ORIGIN__", origin);

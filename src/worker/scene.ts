@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { elementPoints } from "../shared/schemas.ts";
+import { elementPoints, requiredPoint } from "../shared/schemas.ts";
 import { errorMessage } from "../shared/errors.ts";
 // Scene engine: semantic ops ⇄ Excalidraw elements. Pure logic, no Workers APIs.
 import { graphlib, layout as layoutGraph } from "@dagrejs/dagre";
@@ -81,7 +81,7 @@ export type Op =
       ref?: string;
       kind?: string;
       label?: string;
-      "shape"?: Geometry;
+      shape?: Geometry;
       color?: string;
       text_color?: string;
       width?: number;
@@ -105,7 +105,7 @@ export type Op =
       label?: string;
       color?: string;
       text_color?: string;
-      "shape"?: Geometry;
+      shape?: Geometry;
       dashed?: boolean;
       width?: number;
       height?: number;
@@ -194,7 +194,7 @@ interface NodeMetadata {
 interface GraphNode {
   id: string;
   label: string;
-  "shape": string;
+  shape: string;
   x: number;
   y: number;
   w: number;
@@ -271,7 +271,9 @@ const ID_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
 export function newId(): string {
   let s = "";
 
-  for (let i = 0; i < 21; i++) s += ID_CHARS[Math.floor(Math.random() * ID_CHARS.length)];
+  for (let i = 0; i < 21; i++) {
+    s += ID_CHARS[Math.floor(Math.random() * ID_CHARS.length)];
+  }
 
   return s;
 }
@@ -300,7 +302,10 @@ export function wrapText(text: string, max = NOTE_WRAP): string {
   return text
     .split("\n")
     .map((line) => {
-      if (line.length <= max) return line;
+      if (line.length <= max) {
+        return line;
+      }
+
       const lead = line.match(/^\s*(?:[-*•]|\d+[.)])?\s*/)?.[0] ?? "";
       const hang = " ".repeat(lead.length);
       const out: string[] = [];
@@ -311,7 +316,10 @@ export function wrapText(text: string, max = NOTE_WRAP): string {
         if (!empty && cur.length + 1 + w.length > max) {
           out.push(cur);
           cur = hang + w;
-        } else cur = empty ? cur + w : `${cur} ${w}`;
+        } else {
+          cur = empty ? cur + w : `${cur} ${w}`;
+        }
+
         empty = false;
       }
 
@@ -376,7 +384,10 @@ const overlaps = (a: Box, b: Box, m = 20) =>
   a.x < b.x + b.w + m && b.x < a.x + a.w + m && a.y < b.y + b.h + m && b.y < a.y + a.h + m;
 
 const unionBox = (bs: Box[]): Box | null => {
-  if (!bs.length) return null;
+  if (!bs.length) {
+    return null;
+  }
+
   const x = Math.min(...bs.map((b) => b.x));
   const y = Math.min(...bs.map((b) => b.y));
   const r = Math.max(...bs.map((b) => b.x + b.w));
@@ -392,15 +403,21 @@ function borderPoint(b: Box, toward: Pt, gap: number, geometry = "rectangle") {
   const dx = toward.x - c.x;
   const dy = toward.y - c.y;
 
-  if (dx === 0 && dy === 0) return c;
+  if (dx === 0 && dy === 0) {
+    return c;
+  }
+
   const a = b.w / 2 + gap;
   const bb = b.h / 2 + gap;
   let t: number;
 
-  if (geometry === "ellipse") t = 1 / Math.hypot(dx / a, dy / bb);
-  else if (geometry === "diamond") t = 1 / (Math.abs(dx) / a + Math.abs(dy) / bb);
-  else
+  if (geometry === "ellipse") {
+    t = 1 / Math.hypot(dx / a, dy / bb);
+  } else if (geometry === "diamond") {
+    t = 1 / (Math.abs(dx) / a + Math.abs(dy) / bb);
+  } else {
     t = Math.min(dx !== 0 ? a / Math.abs(dx) : Infinity, dy !== 0 ? bb / Math.abs(dy) : Infinity);
+  }
 
   return { x: c.x + dx * t, y: c.y + dy * t };
 }
@@ -412,14 +429,19 @@ function clusters<T>(items: T[], key: (t: T) => number, tol: number): T[][] {
 
   for (const t of items.toSorted((a, b) => key(a) - key(b))) {
     if (cur.length && key(t) - key(cur[0]) > tol) {
-      if (cur.length > 1) out.push(cur);
+      if (cur.length > 1) {
+        out.push(cur);
+      }
+
       cur = [];
     }
 
     cur.push(t);
   }
 
-  if (cur.length > 1) out.push(cur);
+  if (cur.length > 1) {
+    out.push(cur);
+  }
 
   return out;
 }
@@ -481,14 +503,18 @@ export class Scene {
    */
   enforceBindings() {
     for (const a of this.live()) {
-      if (a.type !== "arrow" || (!a.startBinding && !a.endBinding)) continue;
+      if (a.type !== "arrow" || (!a.startBinding && !a.endBinding)) {
+        continue;
+      }
 
       const touched =
         this.changed.has(a.id) ||
         (a.startBinding && this.changed.has(a.startBinding.elementId)) ||
         (a.endBinding && this.changed.has(a.endBinding.elementId));
 
-      if (touched) this.routeArrow(a);
+      if (touched) {
+        this.routeArrow(a);
+      }
     }
   }
 
@@ -497,19 +523,26 @@ export class Scene {
     for (const id of this.changed) {
       const t = this.els.get(id);
 
-      if (!t || t.type !== "text" || !t.containerId || t.isDeleted) continue;
+      if (t?.type !== "text" || !t.containerId || t.isDeleted) {
+        continue;
+      }
+
       const c = this.els.get(t.containerId);
 
-      if (c && c.index && t.index && t.index <= c.index)
+      if (c?.index && t.index && t.index <= c.index) {
         this.mutate(t, { index: generateKeyBetween(this.maxIndex(), null) });
+      }
     }
   }
 
   private maxIndex(): string | null {
     let max: string | null = null;
 
-    for (const e of this.els.values())
-      if (e.index && (max === null || e.index > max)) max = e.index;
+    for (const e of this.els.values()) {
+      if (e.index && (max === null || e.index > max)) {
+        max = e.index;
+      }
+    }
 
     return max;
   }
@@ -528,8 +561,10 @@ export class Scene {
     if (
       patch &&
       Object.entries(patch).every(([k, v]) => JSON.stringify(el[k]) === JSON.stringify(v))
-    )
+    ) {
       return el;
+    }
+
     Object.assign(el, patch);
     el.version = (el.version ?? 0) + 1;
     el.versionNonce = rnd();
@@ -604,26 +639,37 @@ export class Scene {
         (e) => e.customData?.componentLabel && group && e.groupIds?.includes(group),
       );
 
-      if (caption) return caption;
+      if (caption) {
+        return caption;
+      }
     }
 
     const ref = (container.boundElements ?? []).find((b: any) => b.type === "text");
     const t = ref ? this.els.get(ref.id) : undefined;
 
-    if (t && !t.isDeleted) return t;
+    if (t && !t.isDeleted) {
+      return t;
+    }
 
-    for (const e of this.els.values())
-      if (!e.isDeleted && e.type === "text" && e.containerId === container.id) return e;
+    for (const e of this.els.values()) {
+      if (!e.isDeleted && e.type === "text" && e.containerId === container.id) {
+        return e;
+      }
+    }
 
     return undefined;
   }
 
   labelOf(e: El): string {
-    if (e.type === "frame" || e.type === "magicframe") return e.name ?? "";
+    if (e.type === "frame" || e.type === "magicframe") {
+      return e.name ?? "";
+    }
 
-    if (e.type === "text") return e.text ?? "";
+    if (e.type === "text") {
+      return e.text ?? "";
+    }
 
-    return this.boundText(e)?.text?.replace(/\n/g, " ") ?? "";
+    return this.boundText(e)?.text?.replaceAll("\n", " ") ?? "";
   }
 
   /** Node an unbound arrow end at `p` points at: the closest within ARROW_REACH, centre breaks ties. */
@@ -635,7 +681,10 @@ export class Scene {
       const b = boxOf(n);
       const d = distToBox(p, b);
 
-      if (d > ARROW_REACH) continue;
+      if (d > ARROW_REACH) {
+        continue;
+      }
+
       const c = center(b);
       const key = [d, Math.hypot(p.x - c.x, p.y - c.y)];
 
@@ -654,7 +703,10 @@ export class Scene {
 
   /** The node an icon piece or caption belongs to; anything else is its own owner. */
   owner(e: El): El {
-    if (!e.customData?.componentPart && !e.customData?.componentLabel) return e;
+    if (!e.customData?.componentPart && !e.customData?.componentLabel) {
+      return e;
+    }
+
     const group = e.groupIds?.at(-1);
 
     return (
@@ -676,10 +728,16 @@ export class Scene {
   resolve(target: string): El {
     const refId = this.refs.get(target);
 
-    if (refId) return this.els.get(refId)!;
+    if (refId) {
+      return this.els.get(refId)!;
+    }
+
     const byId = this.els.get(target);
 
-    if (byId && !byId.isDeleted) return byId;
+    if (byId && !byId.isDeleted) {
+      return byId;
+    }
+
     const want = target.trim().toLowerCase();
 
     const matches = this.live().filter(
@@ -688,7 +746,9 @@ export class Scene {
         this.labelOf(e).trim().toLowerCase() === want,
     );
 
-    if (matches.length === 1) return matches[0];
+    if (matches.length === 1) {
+      return matches[0];
+    }
 
     if (matches.length > 1) {
       throw new Error(
@@ -700,10 +760,15 @@ export class Scene {
   }
 
   private frameOf(target: string | undefined | null): El | null {
-    if (!target) return null;
+    if (!target) {
+      return null;
+    }
+
     const f = this.resolve(target);
 
-    if (f.type !== "frame") throw new Error(`"${target}" is not a frame`);
+    if (f.type !== "frame") {
+      throw new Error(`"${target}" is not a frame`);
+    }
 
     return f;
   }
@@ -798,11 +863,12 @@ export class Scene {
 
     // Nudge off anything we'd overlap; inside a frame wrap onto new rows.
     const obs = this.obstacles(exclude);
-    let box = { x, y, w, h };
+    const box = { x, y, w, h };
 
     for (let i = 0; i < 60 && obs.some((o) => overlaps(box, o)); i++) {
-      if (axis === "y") box.y += h + 40;
-      else {
+      if (axis === "y") {
+        box.y += h + 40;
+      } else {
         box.x += w + 40;
 
         if (frame && box.x + w > frame.x + frame.width - PAD) {
@@ -835,7 +901,10 @@ export class Scene {
 
     const u = unionBox(kids);
 
-    if (!u) return false;
+    if (!u) {
+      return false;
+    }
+
     const parsedAuto = autoFitSchema.safeParse(frame.customData?.autoFit);
     const auto = parsedAuto.success ? parsedAuto.data : undefined;
     const current = { x: frame.x, y: frame.y, w: frame.width, h: frame.height };
@@ -857,8 +926,9 @@ export class Scene {
       ny === frame.y &&
       nr === frame.x + frame.width &&
       nb === frame.y + frame.height
-    )
+    ) {
       return false;
+    }
 
     const autoFit = {
       dx: chosen.x - nx,
@@ -902,10 +972,16 @@ export class Scene {
 
   /** Frame to use for a new element: explicit, else the placement anchor's frame. */
   private impliedFrame(explicit: string | undefined, place: Placement | undefined): El | null {
-    if (explicit) return this.frameOf(explicit);
+    if (explicit) {
+      return this.frameOf(explicit);
+    }
+
     const anchor = place?.right_of ?? place?.left_of ?? place?.below ?? place?.above ?? place?.near;
 
-    if (!anchor) return null;
+    if (!anchor) {
+      return null;
+    }
+
     const a = this.resolve(anchor);
     const fid = a.type === "frame" ? a.id : a.frameId;
 
@@ -913,21 +989,34 @@ export class Scene {
   }
 
   private setFrame(el: El, frame: El | null) {
-    if ((el.frameId ?? null) === (frame?.id ?? null)) return;
+    if ((el.frameId ?? null) === (frame?.id ?? null)) {
+      return;
+    }
+
     this.mutate(el, { frameId: frame?.id ?? null });
 
-    for (const part of this.iconParts(el)) this.mutate(part, { frameId: frame?.id ?? null });
+    for (const part of this.iconParts(el)) {
+      this.mutate(part, { frameId: frame?.id ?? null });
+    }
+
     const t = this.boundText(el);
 
-    if (t) this.mutate(t, { frameId: frame?.id ?? null });
+    if (t) {
+      this.mutate(t, { frameId: frame?.id ?? null });
+    }
   }
 
   /** Translate a frame together with everything in it, re-routing arrows that leave it. */
   private moveFrameBy(frame: El, dx: number, dy: number) {
-    if (!dx && !dy) return;
+    if (!dx && !dy) {
+      return;
+    }
 
     const kids = this.live().filter((e) => {
-      if (e.frameId !== frame.id || isBoundArrow(e)) return false;
+      if (e.frameId !== frame.id || isBoundArrow(e)) {
+        return false;
+      }
+
       const c = e.containerId ? this.els.get(e.containerId) : undefined;
 
       return !(c && isBoundArrow(c)); // arrow labels follow their arrow
@@ -935,7 +1024,9 @@ export class Scene {
 
     this.mutate(frame, { x: frame.x + dx, y: frame.y + dy });
 
-    for (const k of kids) this.mutate(k, { x: k.x + dx, y: k.y + dy });
+    for (const k of kids) {
+      this.mutate(k, { x: k.x + dx, y: k.y + dy });
+    }
     // Bound arrows are re-routed from their shapes by enforceBindings().
   }
 
@@ -949,10 +1040,14 @@ export class Scene {
       let changed = false;
 
       for (const a of frames) {
-        if (!fixed.has(a.id)) continue;
+        if (!fixed.has(a.id)) {
+          continue;
+        }
 
         for (const b of frames) {
-          if (b.id === a.id || !overlaps(boxOf(a), boxOf(b), FRAME_GAP / 2 - 1)) continue;
+          if (b.id === a.id || !overlaps(boxOf(a), boxOf(b), FRAME_GAP / 2 - 1)) {
+            continue;
+          }
 
           // Of two seeds, the one later in reading order yields.
           const [anchor, mover] =
@@ -961,7 +1056,10 @@ export class Scene {
           const right = anchor.x + anchor.width + FRAME_GAP - mover.x;
           const down = anchor.y + anchor.height + FRAME_GAP - mover.y;
 
-          if (right <= 0 && down <= 0) continue;
+          if (right <= 0 && down <= 0) {
+            continue;
+          }
+
           const byRight = right > 0 && (down <= 0 || right <= down);
           this.moveFrameBy(mover, byRight ? right : 0, byRight ? 0 : down);
           fixed.add(mover.id);
@@ -970,7 +1068,9 @@ export class Scene {
         }
       }
 
-      if (!changed) break;
+      if (!changed) {
+        break;
+      }
     }
 
     return moves;
@@ -981,7 +1081,9 @@ export class Scene {
   private centerLabel(container: El) {
     const t = this.boundText(container);
 
-    if (!t) return;
+    if (!t) {
+      return;
+    }
 
     if (container.type === "arrow") {
       const pts = elementPoints(container);
@@ -1053,18 +1155,26 @@ export class Scene {
       const s0 = this.els.get(a.startBinding?.elementId);
       const t0 = this.els.get(a.endBinding?.elementId);
 
-      if (!s0 || !t0 || s0.isDeleted || t0.isDeleted) continue;
+      if (!s0 || !t0 || s0.isDeleted || t0.isDeleted) {
+        continue;
+      }
+
       // An arrow bound to an icon's artwork or caption belongs to the icon node.
       const s = this.owner(s0);
       const t = this.owner(t0);
 
-      if (s.id === t.id || (!a.elbowed && !convert)) continue;
+      if (s.id === t.id || (!a.elbowed && !convert)) {
+        continue;
+      }
 
       for (const [side, from, to] of [
         ["startBinding", s0, s],
         ["endBinding", t0, t],
       ] as const) {
-        if (from.id === to.id) continue;
+        if (from.id === to.id) {
+          continue;
+        }
+
         this.removeBound(from, a.id);
         this.addBound(to, { id: a.id, type: "arrow" });
         this.mutate(a, { [side]: { ...a[side], elementId: to.id } });
@@ -1094,7 +1204,9 @@ export class Scene {
 
       const options: RouteOptions = { fixed };
 
-      if (frame) options.bounds = boxOf(frame);
+      if (frame) {
+        options.bounds = boxOf(frame);
+      }
 
       const routes = routeOrthogonal(
         group.map((a) => {
@@ -1106,7 +1218,9 @@ export class Scene {
             to: boxOf(this.els.get(a.endBinding.elementId)!),
           };
 
-          if (t) request.label = { w: t.width, h: t.height };
+          if (t) {
+            request.label = { w: t.width, h: t.height };
+          }
 
           return request;
         }),
@@ -1117,7 +1231,9 @@ export class Scene {
       for (const a of group) {
         const route = routes.get(a.id);
 
-        if (route && this.setRoute(a, route)) changed.add(a.id);
+        if (route && this.setRoute(a, route)) {
+          changed.add(a.id);
+        }
       }
     }
 
@@ -1130,13 +1246,16 @@ export class Scene {
 
     const ends: BindingEnd[] = [
       [arrow.startBinding, pts[0]],
-      [arrow.endBinding, pts[pts.length - 1]],
+      [arrow.endBinding, requiredPoint(pts, -1)],
     ];
 
     return ends.every(([b, [px, py]]) => {
       const el = this.els.get(b.elementId);
 
-      if (!el || el.isDeleted || !Array.isArray(b.fixedPoint)) return false;
+      if (!el || el.isDeleted || !Array.isArray(b.fixedPoint)) {
+        return false;
+      }
+
       const box = boxOf(el);
       const x = box.x + b.fixedPoint[0] * box.w;
       const y = box.y + b.fixedPoint[1] * box.h;
@@ -1192,11 +1311,17 @@ export class Scene {
     const labelAt = route.labelAt !== undefined ? Math.round(route.labelAt * 1e4) / 1e4 : null;
     const labelSame = !text || (text.labelPosition ?? null) === labelAt;
 
-    if (!same) this.mutate(arrow, patch);
+    if (!same) {
+      this.mutate(arrow, patch);
+    }
 
-    if (text && !labelSame) this.mutate(text, { labelPosition: labelAt });
+    if (text && !labelSame) {
+      this.mutate(text, { labelPosition: labelAt });
+    }
 
-    if (!same || !labelSame) this.centerLabel(arrow);
+    if (!same || !labelSame) {
+      this.centerLabel(arrow);
+    }
 
     return !same || !labelSame;
   }
@@ -1204,14 +1329,21 @@ export class Scene {
   /** Re-derive a bound arrow's geometry from the shapes it is bound to (bends are kept). */
   private routeArrow(arrow: El, shiftBends = true) {
     if (arrow.elbowed && arrow.startBinding && arrow.endBinding) {
-      if (!this.deferRouting && !this.endsInPlace(arrow)) this.routeArrows([arrow]);
+      if (!this.deferRouting && !this.endsInPlace(arrow)) {
+        this.routeArrows([arrow]);
+      }
 
       return;
     }
 
     const pts = elementPoints(arrow);
     const absStart = { x: arrow.x + pts[0][0], y: arrow.y + pts[0][1] };
-    const absEnd = { x: arrow.x + pts[pts.length - 1][0], y: arrow.y + pts[pts.length - 1][1] };
+
+    const absEnd = {
+      x: arrow.x + requiredPoint(pts, -1)[0],
+      y: arrow.y + requiredPoint(pts, -1)[1],
+    };
+
     const s = arrow.startBinding ? this.els.get(arrow.startBinding.elementId) : undefined;
     const t = arrow.endBinding ? this.els.get(arrow.endBinding.elementId) : undefined;
     const sOk = s && !s.isDeleted ? s : undefined;
@@ -1221,7 +1353,7 @@ export class Scene {
 
     const lastBend =
       pts.length > 2
-        ? { x: arrow.x + pts[pts.length - 2][0], y: arrow.y + pts[pts.length - 2][1] }
+        ? { x: arrow.x + requiredPoint(pts, -2)[0], y: arrow.y + requiredPoint(pts, -2)[1] }
         : null;
 
     const sc = sOk ? center(boxOf(sOk)) : absStart;
@@ -1240,9 +1372,13 @@ export class Scene {
     if (firstBend && lastBend && (shift.x || shift.y)) {
       const moved = (p: Pt) => ({ x: p.x + shift.x, y: p.y + shift.y });
 
-      if (sOk) start = borderPoint(boxOf(sOk), moved(firstBend), 8, sOk.type);
+      if (sOk) {
+        start = borderPoint(boxOf(sOk), moved(firstBend), 8, sOk.type);
+      }
 
-      if (tOk) end = borderPoint(boxOf(tOk), moved(lastBend), 8, tOk.type);
+      if (tOk) {
+        end = borderPoint(boxOf(tOk), moved(lastBend), 8, tOk.type);
+      }
     }
 
     const abs = [
@@ -1271,21 +1407,26 @@ export class Scene {
       arrow.x === patch.x &&
       arrow.y === patch.y &&
       JSON.stringify(arrow.points) === JSON.stringify(points)
-    )
+    ) {
       return;
+    }
+
     this.mutate(arrow, patch);
     this.centerLabel(arrow);
   }
 
   /** Move a node (and its label) and re-route attached arrows. */
   private moveNode(el: El, box: Box) {
-    if (el.x === box.x && el.y === box.y && el.width === box.w && el.height === box.h) return;
+    if (el.x === box.x && el.y === box.y && el.width === box.w && el.height === box.h) {
+      return;
+    }
+
     const previous = boxOf(el);
     this.mutate(el, { x: box.x, y: box.y, width: box.w, height: box.h });
 
     for (const part of this.iconParts(el)) {
-      const sx = box.w / previous.w,
-        sy = box.h / previous.h;
+      const sx = box.w / previous.w;
+      const sy = box.h / previous.h;
 
       const patch: Partial<El> = {
         x: box.x + (part.x - previous.x) * sx,
@@ -1294,13 +1435,18 @@ export class Scene {
         height: part.height * sy,
       };
 
-      if (part.points) patch.points = elementPoints(part).map(([x, y]) => [x * sx, y * sy]);
+      if (part.points) {
+        patch.points = elementPoints(part).map(([x, y]) => [x * sx, y * sy]);
+      }
+
       this.mutate(part, patch);
     }
 
     this.centerLabel(el);
 
-    for (const a of this.arrowsBoundTo(el.id)) this.routeArrow(a);
+    for (const a of this.arrowsBoundTo(el.id)) {
+      this.routeArrow(a);
+    }
   }
 
   private addBound(container: El, ref: BoundRef) {
@@ -1309,7 +1455,10 @@ export class Scene {
   }
 
   private removeBound(container: El, id: string) {
-    if (!container.boundElements?.some((b: any) => b.id === id)) return;
+    if (!container.boundElements?.some((b: any) => b.id === id)) {
+      return;
+    }
+
     this.mutate(container, {
       boundElements: container.boundElements.filter((b: any) => b.id !== id),
     });
@@ -1335,7 +1484,7 @@ export class Scene {
         frameId: container.frameId ?? null,
       };
 
-      if (caption)
+      if (caption) {
         Object.assign(extra, {
           customData: { componentLabel: true, author },
           groupIds: container.groupIds,
@@ -1343,6 +1492,7 @@ export class Scene {
           textAlign: "center",
           strokeColor: "#1e1e1e",
         });
+      }
 
       const t = this.add(
         this.textEl(
@@ -1354,15 +1504,18 @@ export class Scene {
         ),
       );
 
-      if (!caption) this.addBound(container, { id: t.id, type: "text" });
+      if (!caption) {
+        this.addBound(container, { id: t.id, type: "text" });
+      }
     }
 
     if (container.type !== "arrow" && !caption) {
       const w = Math.max(container.width, m.width + PAD);
       const h = Math.max(container.height, m.height + PAD);
 
-      if (w !== container.width || h !== container.height)
+      if (w !== container.width || h !== container.height) {
         this.moveNode(container, { x: container.x, y: container.y, w, h });
+      }
     }
 
     this.centerLabel(container);
@@ -1372,22 +1525,32 @@ export class Scene {
   private setTextColor(el: El, color: string) {
     const text = el.type === "text" ? el : this.boundText(el);
 
-    if (!text) throw new Error("text_color needs a label to color");
+    if (!text) {
+      throw new Error("text_color needs a label to color");
+    }
+
     this.mutate(text, { strokeColor: textColor(color) });
 
     // A sticky note's stroke is its ink: Excalidraw keeps it equal to the label's color.
-    if (el.type === "stickynote") this.mutate(el, { strokeColor: textColor(color) });
+    if (el.type === "stickynote") {
+      this.mutate(el, { strokeColor: textColor(color) });
+    }
   }
 
   /** The invisible binding target covers only artwork, never its caption. */
   private fitIconBounds(node: El) {
     const bounds = unionBox(this.iconParts(node).map(boxOf));
 
-    if (bounds) this.mutate(node, { x: bounds.x, y: bounds.y, width: bounds.w, height: bounds.h });
+    if (bounds) {
+      this.mutate(node, { x: bounds.x, y: bounds.y, width: bounds.w, height: bounds.h });
+    }
   }
 
   private iconParts(el: El): El[] {
-    if (!el.customData?.icon) return [];
+    if (!el.customData?.icon) {
+      return [];
+    }
+
     const group = el.groupIds?.at(-1);
 
     return this.live().filter(
@@ -1396,41 +1559,59 @@ export class Scene {
   }
 
   private deleteEl(el: El) {
-    if (el.isDeleted) return;
+    if (el.isDeleted) {
+      return;
+    }
 
-    for (const part of this.iconParts(el)) this.mutate(part, { isDeleted: true });
+    for (const part of this.iconParts(el)) {
+      this.mutate(part, { isDeleted: true });
+    }
+
     this.mutate(el, { isDeleted: true });
     const t = this.boundText(el);
 
-    if (t) this.mutate(t, { isDeleted: true });
+    if (t) {
+      this.mutate(t, { isDeleted: true });
+    }
 
     if (el.type === "arrow" || el.type === "line") {
       for (const end of [el.startBinding, el.endBinding]) {
         const n = end ? this.els.get(end.elementId) : undefined;
 
-        if (n) this.removeBound(n, el.id);
+        if (n) {
+          this.removeBound(n, el.id);
+        }
       }
     }
 
     if (el.type === "frame") {
-      for (const k of this.live().filter((e) => e.frameId === el.id))
+      for (const k of this.live().filter((e) => e.frameId === el.id)) {
         this.mutate(k, { frameId: null });
+      }
     }
   }
 
   // ---------- ops ----------
 
   private setRef(ref: string | undefined, id: string) {
-    if (ref) this.refs.set(ref, id);
+    if (ref) {
+      this.refs.set(ref, id);
+    }
   }
 
   addNode(o: AddNodeOp, author: Author): El {
     const comp = o.kind ? componentByKind.get(o.kind) : undefined;
 
-    if (o.kind && !comp) throw new Error(`unknown kind "${o.kind}" (see the components resource)`);
+    if (o.kind && !comp) {
+      throw new Error(`unknown kind "${o.kind}" (see the components resource)`);
+    }
+
     const label = o.label ?? comp?.label;
 
-    if (!label) throw new Error("add_node needs a label or a kind");
+    if (!label) {
+      throw new Error("add_node needs a label or a kind");
+    }
+
     let frame = this.impliedFrame(o.frame, o.place);
     const m = measureText(label, 20);
     const icon = o.shape ? undefined : comp?.icon;
@@ -1442,12 +1623,14 @@ export class Scene {
 
     const h = Math.max(o.height ?? (icon ? 120 : NODE_MIN_H), m.height + (icon ? 95 : PAD));
     const box = this.place(o.place, w, h, frame);
-    const geometry = icon ? "rectangle" : (o.shape ?? comp?.shape ?? "rectangle");
+    const geometry = icon ? "rectangle" : (o.shape ?? comp?.geometry ?? "rectangle");
     const fill = o.color ? (colorValues.get(o.color) ?? o.color) : (comp?.fill ?? "transparent");
 
     const metadata: NodeMetadata = { author };
 
-    if (comp) metadata.kind = comp.kind;
+    if (comp) {
+      metadata.kind = comp.kind;
+    }
 
     if (icon) {
       metadata.icon = icon;
@@ -1469,7 +1652,9 @@ export class Scene {
 
     const node = this.add(this.base(geometry, box, author, extra));
 
-    if (!frame && (frame = this.frameAt(box))) this.setFrame(node, frame);
+    if (!frame && (frame = this.frameAt(box))) {
+      this.setFrame(node, frame);
+    }
 
     if (icon && comp) {
       for (const part of iconElements(comp, w)) {
@@ -1490,7 +1675,7 @@ export class Scene {
           customData: { componentPart: true, author },
         };
 
-        if (type === "line")
+        if (type === "line") {
           Object.assign(partOptions, {
             lastCommittedPoint: null,
             startBinding: null,
@@ -1498,18 +1683,28 @@ export class Scene {
             startArrowhead: null,
             endArrowhead: null,
           });
+        }
+
         this.add(
           this.base(type, { x: box.x + x, y: box.y + y, w: width, h: height }, author, partOptions),
         );
       }
     }
 
-    if (icon) this.fitIconBounds(node);
+    if (icon) {
+      this.fitIconBounds(node);
+    }
+
     this.setLabel(node, label, author);
 
-    if (o.text_color !== undefined) this.setTextColor(node, o.text_color);
+    if (o.text_color !== undefined) {
+      this.setTextColor(node, o.text_color);
+    }
 
-    if (frame) this.fitFrame(frame);
+    if (frame) {
+      this.fitFrame(frame);
+    }
+
     this.lastPlaced = node.id;
     this.setRef(o.ref, node.id);
 
@@ -1520,7 +1715,9 @@ export class Scene {
     const a = this.resolve(o.from);
     const b = this.resolve(o.to);
 
-    if (a.id === b.id) throw new Error("cannot connect an element to itself");
+    if (a.id === b.id) {
+      throw new Error("cannot connect an element to itself");
+    }
 
     const arrow = this.add(
       this.base("arrow", { x: 0, y: 0, w: 0, h: 0 }, author, {
@@ -1546,9 +1743,13 @@ export class Scene {
     this.addBound(b, { id: arrow.id, type: "arrow" });
     this.routeArrow(arrow);
 
-    if (o.label) this.setLabel(arrow, o.label, author);
+    if (o.label) {
+      this.setLabel(arrow, o.label, author);
+    }
 
-    if (o.text_color !== undefined) this.setTextColor(arrow, o.text_color);
+    if (o.text_color !== undefined) {
+      this.setTextColor(arrow, o.text_color);
+    }
 
     return arrow;
   }
@@ -1563,7 +1764,10 @@ export class Scene {
       return ends.has(a.id) && ends.has(b.id);
     });
 
-    if (!between.length) throw new Error(`no arrow between "${o.from}" and "${o.to}"`);
+    if (!between.length) {
+      throw new Error(`no arrow between "${o.from}" and "${o.to}"`);
+    }
+
     between.forEach((e) => this.deleteEl(e));
 
     return between.length;
@@ -1573,9 +1777,11 @@ export class Scene {
     const el = this.resolve(o.target);
 
     if (o.label !== undefined) {
-      if (el.type === "frame") this.mutate(el, { name: o.label });
-      else if (el.type === "stickynote") this.layoutSticky(el, o.label);
-      else if (el.type === "text") {
+      if (el.type === "frame") {
+        this.mutate(el, { name: o.label });
+      } else if (el.type === "stickynote") {
+        this.layoutSticky(el, o.label);
+      } else if (el.type === "text") {
         const text = el.containerId ? o.label : wrapText(o.label);
         const m = measureText(text, el.fontSize ?? 20);
         this.mutate(el, {
@@ -1585,11 +1791,17 @@ export class Scene {
           height: m.height,
         });
 
-        if (el.frameId) this.fitFrame(this.els.get(el.frameId)!);
-      } else this.setLabel(el, o.label, author);
+        if (el.frameId) {
+          this.fitFrame(this.els.get(el.frameId)!);
+        }
+      } else {
+        this.setLabel(el, o.label, author);
+      }
     }
 
-    if (o.text_color !== undefined) this.setTextColor(el, o.text_color);
+    if (o.text_color !== undefined) {
+      this.setTextColor(el, o.text_color);
+    }
 
     if (o.color !== undefined) {
       const color = colorValues.get(o.color) ?? o.color;
@@ -1597,14 +1809,20 @@ export class Scene {
       if (el.customData?.icon) {
         this.mutate(el, { customData: { ...el.customData, iconFill: color } });
 
-        for (const part of this.iconParts(el))
-          if (part.backgroundColor !== "transparent") this.mutate(part, { backgroundColor: color });
-      } else this.mutate(el, { backgroundColor: color });
+        for (const part of this.iconParts(el)) {
+          if (part.backgroundColor !== "transparent") {
+            this.mutate(part, { backgroundColor: color });
+          }
+        }
+      } else {
+        this.mutate(el, { backgroundColor: color });
+      }
     }
 
     if (o.dashed !== undefined) {
-      for (const part of [el, ...this.iconParts(el)])
+      for (const part of [el, ...this.iconParts(el)]) {
         this.mutate(part, { strokeStyle: o.dashed ? "dashed" : "solid" });
+      }
     }
 
     if (o.shape && GEOMETRY_TYPES.has(el.type)) {
@@ -1616,7 +1834,10 @@ export class Scene {
         this.addBound(el, { id: caption.id, type: "text" });
       }
 
-      for (const part of this.iconParts(el)) this.mutate(part, { isDeleted: true });
+      for (const part of this.iconParts(el)) {
+        this.mutate(part, { isDeleted: true });
+      }
+
       const { icon: _icon, iconFill, ...data } = el.customData ?? {};
 
       const patch: Partial<El> = {
@@ -1646,11 +1867,14 @@ export class Scene {
           el.x + el.width <= f.x + f.width &&
           el.y + el.height <= f.y + f.height;
 
-        if (!inside)
+        if (!inside) {
           this.moveNode(el, this.place(undefined, el.width, el.height, f, new Set([el.id])));
+        }
       }
 
-      if (f) this.fitFrame(f);
+      if (f) {
+        this.fitFrame(f);
+      }
     }
 
     if (el.type === "frame" && (o.move || o.width || o.height)) {
@@ -1663,7 +1887,10 @@ export class Scene {
 
       this.moveFrameBy(el, box.x - el.x, box.y - el.y);
 
-      if (w !== el.width || h !== el.height) this.mutate(el, { width: w, height: h });
+      if (w !== el.width || h !== el.height) {
+        this.mutate(el, { width: w, height: h });
+      }
+
       this.fitFrame(el);
       this.grownFrames.add(el.id);
     } else if (o.move || o.width || o.height) {
@@ -1676,7 +1903,9 @@ export class Scene {
 
       this.moveNode(el, box);
 
-      if (el.frameId) this.fitFrame(this.els.get(el.frameId)!);
+      if (el.frameId) {
+        this.fitFrame(this.els.get(el.frameId)!);
+      }
     }
 
     this.customTag(el, author);
@@ -1693,7 +1922,12 @@ export class Scene {
   remove(o: RemoveOp) {
     const el = this.resolve(o.target);
 
-    if (this.isNode(el)) for (const a of this.arrowsBoundTo(el.id)) this.deleteEl(a);
+    if (this.isNode(el)) {
+      for (const a of this.arrowsBoundTo(el.id)) {
+        this.deleteEl(a);
+      }
+    }
+
     this.deleteEl(el);
 
     return el;
@@ -1766,7 +2000,10 @@ export class Scene {
     this.addBound(note, { id: t.id, type: "text" });
     this.layoutSticky(note, o.text);
 
-    if (frame) this.fitFrame(frame);
+    if (frame) {
+      this.fitFrame(frame);
+    }
+
     this.setRef(o.ref, note.id);
 
     return note;
@@ -1776,7 +2013,10 @@ export class Scene {
   private layoutSticky(note: El, label: string) {
     const t = this.boundText(note);
 
-    if (!t) return;
+    if (!t) {
+      return;
+    }
+
     const text = wrapText(label, STICKY_WRAP);
     const m = measureText(text, t.fontSize ?? 20);
     const size = stickySize(text, t.fontSize ?? 20);
@@ -1785,8 +2025,11 @@ export class Scene {
     const h = Math.max(note.baseHeight ?? note.height, size.height);
     this.mutate(note, { baseHeight: Math.min(note.baseHeight ?? h, h) });
 
-    if (w !== note.width || h !== note.height) this.moveNode(note, { x: note.x, y: note.y, w, h });
-    else this.centerLabel(note);
+    if (w !== note.width || h !== note.height) {
+      this.moveNode(note, { x: note.x, y: note.y, w, h });
+    } else {
+      this.centerLabel(note);
+    }
   }
 
   apply(ops: Op[], author: Author): OpResult[] {
@@ -1845,7 +2088,10 @@ export class Scene {
     for (const id of this.changed) {
       const e = this.els.get(id);
 
-      if (!e || e.isDeleted) continue;
+      if (!e || e.isDeleted) {
+        continue;
+      }
+
       out.add(e.type === "frame" ? e.id : (e.frameId ?? null));
     }
 
@@ -1889,19 +2135,27 @@ export class Scene {
     const nodes0 = this.live().filter((e) => this.isNode(e));
 
     for (const a of this.live()) {
-      if (a.type !== "arrow" || !inScope(a.frameId) || (a.startBinding && a.endBinding)) continue;
+      if (a.type !== "arrow" || !inScope(a.frameId) || (a.startBinding && a.endBinding)) {
+        continue;
+      }
+
       const pts = elementPoints(a);
       const end = (p: Point) => this.nodeAt({ x: a.x + p[0], y: a.y + p[1] }, nodes0);
       const from = a.startBinding ? this.els.get(a.startBinding.elementId) : end(pts[0]);
-      const to = a.endBinding ? this.els.get(a.endBinding.elementId) : end(pts[pts.length - 1]);
+      const to = a.endBinding ? this.els.get(a.endBinding.elementId) : end(requiredPoint(pts, -1));
 
-      if (!from || !to || from.id === to.id) continue;
+      if (!from || !to || from.id === to.id) {
+        continue;
+      }
 
       for (const [side, n] of [
         ["startBinding", from],
         ["endBinding", to],
       ] as const) {
-        if (a[side]) continue;
+        if (a[side]) {
+          continue;
+        }
+
         this.mutate(a, { [side]: { elementId: n.id, fixedPoint: [0.5, 0.5], mode: "orbit" } });
         this.addBound(n, { id: a.id, type: "arrow" });
         stats.bound++;
@@ -1910,7 +2164,10 @@ export class Scene {
 
     // 1. Attach loose nodes/notes to the frame they sit in.
     for (const e of this.live()) {
-      if (!isBlock(e) || e.frameId) continue;
+      if (!isBlock(e) || e.frameId) {
+        continue;
+      }
+
       const f = this.frameAt(boxOf(e));
 
       if (f && inScope(f.id)) {
@@ -1921,7 +2178,10 @@ export class Scene {
 
     // Connections between siblings belong to that frame, even when their bends are outside it.
     for (const arrow of this.live()) {
-      if (arrow.type !== "arrow") continue;
+      if (arrow.type !== "arrow") {
+        continue;
+      }
+
       const source = this.els.get(arrow.startBinding?.elementId);
       const target = this.els.get(arrow.endBinding?.elementId);
 
@@ -1930,12 +2190,17 @@ export class Scene {
           ? this.els.get(source.frameId)
           : undefined;
 
-      if (frame && inScope(frame.id) && arrow.frameId !== frame.id) this.setFrame(arrow, frame);
+      if (frame && inScope(frame.id) && arrow.frameId !== frame.id) {
+        this.setFrame(arrow, frame);
+      }
     }
 
     // 2. Wrap notes that are far too wide.
     for (const e of this.live()) {
-      if (e.type !== "text" || e.containerId || e.groupIds?.length || !inScope(e.frameId)) continue;
+      if (e.type !== "text" || e.containerId || e.groupIds?.length || !inScope(e.frameId)) {
+        continue;
+      }
+
       const wrapped = wrapText(e.text ?? "");
 
       if (wrapped !== e.text) {
@@ -1970,11 +2235,18 @@ export class Scene {
         );
 
         moves.forEach((m, i) => {
-          if (!m.dx && !m.dy) return;
+          if (!m.dx && !m.dy) {
+            return;
+          }
+
           blocks[i].move(m.dx, m.dy);
 
-          if (m.aligned) stats.aligned++;
-          else stats.separated++;
+          if (m.aligned) {
+            stats.aligned++;
+          } else {
+            stats.separated++;
+          }
+
           changed++;
         });
         const nodes = blocks.flatMap((b) => (b.node ? [b.node] : []));
@@ -1982,7 +2254,9 @@ export class Scene {
         const spaced = this.spaceEvenly(nodes, others);
         stats.spaced += spaced;
 
-        if (!changed && !spaced) break;
+        if (!changed && !spaced) {
+          break;
+        }
       }
     }
 
@@ -1990,7 +2264,12 @@ export class Scene {
     //    Before routing, so connections are routed within the frames' final boxes.
     const frames = this.live().filter((f) => f.type === "frame" && inScope(f.id));
 
-    for (const f of frames) if (this.fitFrame(f, true)) stats.framesFitted++;
+    for (const f of frames) {
+      if (this.fitFrame(f, true)) {
+        stats.framesFitted++;
+      }
+    }
+
     stats.framesMoved = this.separateFrames(
       scope ? [...this.grownFrames, ...frames.map((f) => f.id)] : frames.map((f) => f.id),
     );
@@ -2006,14 +2285,17 @@ export class Scene {
     // Loose arrows with only one bound end keep their shape and just follow that end.
     this.deferRouting = false;
 
-    for (const a of this.live())
+    for (const a of this.live()) {
       if (
         a.type === "arrow" &&
         !(a.startBinding && a.endBinding) &&
         (a.startBinding || a.endBinding) &&
         inScope(a.frameId)
-      )
+      ) {
         this.routeArrow(a);
+      }
+    }
+
     stats.rerouted = rerouted.size;
 
     return stats;
@@ -2038,11 +2320,17 @@ export class Scene {
     );
 
     for (const e of live) {
-      if (!inScope(e.frameId) || e.customData?.componentPart) continue;
+      if (!inScope(e.frameId) || e.customData?.componentPart) {
+        continue;
+      }
+
       const gid = e.groupIds?.at(-1);
 
       if (!gid || (e.customData?.icon && e.groupIds.length === 1)) {
-        if (!isBlock(e)) continue;
+        if (!isBlock(e)) {
+          continue;
+        }
+
         add(e.frameId, {
           node: this.isNode(e) ? e : undefined,
           ids: [e.id],
@@ -2055,11 +2343,17 @@ export class Scene {
         continue;
       }
 
-      if (seen.has(gid)) continue;
+      if (seen.has(gid)) {
+        continue;
+      }
+
       seen.add(gid);
       const members = live.filter((m) => m.groupIds?.includes(gid));
 
-      if (!members.some(isBlock)) continue; // a pure sketch: left alone, like ungrouped ones
+      if (!members.some(isBlock)) {
+        continue;
+      } // a pure sketch: left alone, like ungrouped ones
+
       const ids = new Set(members.map((m) => m.id));
 
       const labels = members.flatMap((m) => {
@@ -2072,10 +2366,17 @@ export class Scene {
         ids: [...ids],
         box: () => unionBox(members.map(boxOf))!,
         move: (dx, dy) => {
-          for (const m of [...members, ...labels]) this.mutate(m, { x: m.x + dx, y: m.y + dy });
+          for (const m of [...members, ...labels]) {
+            this.mutate(m, { x: m.x + dx, y: m.y + dy });
+          }
 
-          for (const m of members)
-            for (const a of this.arrowsBoundTo(m.id)) if (!ids.has(a.id)) this.routeArrow(a);
+          for (const m of members) {
+            for (const a of this.arrowsBoundTo(m.id)) {
+              if (!ids.has(a.id)) {
+                this.routeArrow(a);
+              }
+            }
+          }
         },
       });
     }
@@ -2106,16 +2407,24 @@ export class Scene {
         for (const e of row.slice(1)) {
           runs.at(-1)!.push(e);
 
-          if (pinned(e)) runs.push([e]);
+          if (pinned(e)) {
+            runs.push([e]);
+          }
         }
 
         for (const run of runs) {
-          if (run.length < 3) continue;
+          if (run.length < 3) {
+            continue;
+          }
+
           const gaps = run.slice(1).map((e, i) => e[along] - (run[i][along] + run[i][len]));
           const lo = Math.min(...gaps);
           const hi = Math.max(...gaps);
 
-          if (lo <= 0 || hi > 3 * lo || hi - lo <= 2) continue;
+          if (lo <= 0 || hi > 3 * lo || hi - lo <= 2) {
+            continue;
+          }
+
           const even = gaps.reduce((a, b) => a + b, 0) / gaps.length;
           let widths = 0;
 
@@ -2124,10 +2433,16 @@ export class Scene {
             widths += run[i - 1][len];
             const target = Math.round(run[0][along] + widths + i * even);
 
-            if (target === e[along]) continue;
+            if (target === e[along]) {
+              continue;
+            }
+
             const box = { ...boxOf(e), [along]: target };
 
-            if (others(e).some((o) => overlaps(box, o, 23))) continue;
+            if (others(e).some((o) => overlaps(box, o, 23))) {
+              continue;
+            }
+
             this.moveNode(e, box);
             moved++;
           }
@@ -2148,7 +2463,10 @@ export class Scene {
       (e) => this.isNode(e) && (frame ? e.frameId === frame.id : !e.frameId),
     );
 
-    if (!nodes.length) throw new Error("nothing to lay out");
+    if (!nodes.length) {
+      throw new Error("nothing to lay out");
+    }
+
     const ids = new Set(nodes.map((n) => n.id));
     const before = unionBox(nodes.map(boxOf))!;
     const g = new graphlib.Graph();
@@ -2161,10 +2479,16 @@ export class Scene {
     });
     g.setDefaultEdgeLabel(() => ({}));
 
-    for (const n of nodes) g.setNode(n.id, { width: n.width, height: n.height });
+    for (const n of nodes) {
+      g.setNode(n.id, { width: n.width, height: n.height });
+    }
 
-    for (const e of this.graph().rawEdges)
-      if (ids.has(e.fromId ?? "") && ids.has(e.toId ?? "")) g.setEdge(e.fromId!, e.toId!);
+    for (const e of this.graph().rawEdges) {
+      if (ids.has(e.fromId ?? "") && ids.has(e.toId ?? "")) {
+        g.setEdge(e.fromId!, e.toId!);
+      }
+    }
+
     layoutGraph(g);
 
     for (const n of nodes) {
@@ -2177,7 +2501,9 @@ export class Scene {
       });
     }
 
-    if (frame) this.fitFrame(frame);
+    if (frame) {
+      this.fitFrame(frame);
+    }
 
     return nodes.length;
   }
@@ -2192,7 +2518,10 @@ export class Scene {
 
     const u = unionBox(live.map(boxOf));
 
-    if (!u) return 0;
+    if (!u) {
+      return 0;
+    }
+
     const target = this.place(undefined, u.w, u.h, null);
     const dx = target.x - u.x;
     const dy = target.y - u.y;
@@ -2208,8 +2537,10 @@ export class Scene {
         customData: { ...e.customData, author },
       };
 
-      if (author === "agent" && el.type !== "text" && el.strokeColor !== "transparent")
+      if (author === "agent" && el.type !== "text" && el.strokeColor !== "transparent") {
         el.strokeColor = AGENT_STROKE;
+      }
+
       this.add(el);
     }
 
@@ -2221,7 +2552,9 @@ export class Scene {
     const want = new Map(target.map((e) => [e.id, e]));
 
     for (const cur of this.els.values()) {
-      if (!want.has(cur.id) && !cur.isDeleted) this.mutate(cur, { isDeleted: true });
+      if (!want.has(cur.id) && !cur.isDeleted) {
+        this.mutate(cur, { isDeleted: true });
+      }
     }
 
     for (const t of want.values()) {
@@ -2251,7 +2584,10 @@ export class Scene {
     }
 
     const display = (e: El | undefined) => {
-      if (!e) return undefined;
+      if (!e) {
+        return;
+      }
+
       const l = this.labelOf(e);
 
       return l && labelCounts.get(l) === 1 ? l : `${l || e.type}#${e.id}`;
@@ -2263,7 +2599,10 @@ export class Scene {
     const sketches: Sketch[] = [];
 
     for (const e of live) {
-      if (e.type !== "arrow" && e.type !== "line") continue;
+      if (e.type !== "arrow" && e.type !== "line") {
+        continue;
+      }
+
       const pts = elementPoints(e);
       let from = e.startBinding ? this.els.get(e.startBinding.elementId) : undefined;
       let to = e.endBinding ? this.els.get(e.endBinding.elementId) : undefined;
@@ -2276,8 +2615,8 @@ export class Scene {
 
       if (!to) {
         to = hit({
-          x: e.x + pts[pts.length - 1][0],
-          y: e.y + pts[pts.length - 1][1],
+          x: e.x + requiredPoint(pts, -1)[0],
+          y: e.y + requiredPoint(pts, -1)[1],
         });
         inferred ||= !!to;
       }
@@ -2295,13 +2634,22 @@ export class Scene {
           ...reportTextColor(labelEl),
         };
 
-        if (label) edge.label = label;
+        if (label) {
+          edge.label = label;
+        }
 
-        if (e.strokeStyle !== "solid") edge.dashed = true;
+        if (e.strokeStyle !== "solid") {
+          edge.dashed = true;
+        }
 
-        if (e.startArrowhead && e.endArrowhead) edge.both = true;
+        if (e.startArrowhead && e.endArrowhead) {
+          edge.both = true;
+        }
 
-        if (inferred) edge.inferred = true;
+        if (inferred) {
+          edge.inferred = true;
+        }
+
         edges.push(edge);
       } else {
         sketches.push({
@@ -2330,7 +2678,7 @@ export class Scene {
       }
     }
 
-    const sel = selection && selection.size ? selection : undefined;
+    const sel = selection?.size ? selection : undefined;
 
     return {
       frames: frames.map((f) => ({
@@ -2345,33 +2693,49 @@ export class Scene {
         const node: GraphNode = {
           id: n.id,
           label: this.labelOf(n),
-          "shape": n.type,
+          shape: n.type,
           x: Math.round(n.x),
           y: Math.round(n.y),
           w: Math.round(n.width),
           h: Math.round(n.height),
         };
 
-        if (n.frameId) node.frame = frameName(n.frameId);
+        if (n.frameId) {
+          node.frame = frameName(n.frameId);
+        }
+
         const fill = n.customData?.iconFill ?? n.backgroundColor;
 
-        if (fill && fill !== "transparent") node.color = COLOR_NAMES[fill] ?? fill;
+        if (fill && fill !== "transparent") {
+          node.color = COLOR_NAMES[fill] ?? fill;
+        }
+
         Object.assign(node, reportTextColor(this.boundText(n)));
 
-        if (n.customData?.icon) node.icon = n.customData.icon;
+        if (n.customData?.icon) {
+          node.icon = n.customData.icon;
+        }
 
-        if (n.customData?.kind) node.kind = n.customData.kind;
+        if (n.customData?.kind) {
+          node.kind = n.customData.kind;
+        }
 
-        if (n.customData?.author === "agent") node.by = "agent";
+        if (n.customData?.author === "agent") {
+          node.by = "agent";
+        }
 
-        if (sel?.has(n.id)) node.selected = true;
+        if (sel?.has(n.id)) {
+          node.selected = true;
+        }
 
         return node;
       }),
       edges: edges.map(({ fromId: _fromId, toId: _toId, ...rest }): SelectedEdge => {
         const edge: SelectedEdge = rest;
 
-        if (sel?.has(rest.id)) edge.selected = true;
+        if (sel?.has(rest.id)) {
+          edge.selected = true;
+        }
 
         return edge;
       }),
@@ -2387,15 +2751,25 @@ export class Scene {
             y: Math.round(n.y),
           };
 
-          if (n.type === "stickynote") note.sticky = true;
+          if (n.type === "stickynote") {
+            note.sticky = true;
+          }
 
-          if (n.frameId) note.frame = frameName(n.frameId);
+          if (n.frameId) {
+            note.frame = frameName(n.frameId);
+          }
 
-          if (t) Object.assign(note, reportTextColor(t));
+          if (t) {
+            Object.assign(note, reportTextColor(t));
+          }
 
-          if (n.customData?.author === "agent") note.by = "agent";
+          if (n.customData?.author === "agent") {
+            note.by = "agent";
+          }
 
-          if (sel?.has(n.id)) note.selected = true;
+          if (sel?.has(n.id)) {
+            note.selected = true;
+          }
 
           return note;
         }),
@@ -2413,15 +2787,25 @@ export function graphView(scene: Scene, selection?: Set<string>): GraphView {
   const { rawEdges: _rawEdges, ...g } = scene.graph(selection);
   const out: GraphView = {};
 
-  if (g.frames.length) out.frames = g.frames;
+  if (g.frames.length) {
+    out.frames = g.frames;
+  }
 
-  if (g.nodes.length) out.nodes = g.nodes;
+  if (g.nodes.length) {
+    out.nodes = g.nodes;
+  }
 
-  if (g.edges.length) out.edges = g.edges;
+  if (g.edges.length) {
+    out.edges = g.edges;
+  }
 
-  if (g.notes.length) out.notes = g.notes;
+  if (g.notes.length) {
+    out.notes = g.notes;
+  }
 
-  if (g.sketches.length) out.sketches = g.sketches;
+  if (g.sketches.length) {
+    out.sketches = g.sketches;
+  }
 
   return out;
 }

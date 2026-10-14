@@ -12,7 +12,9 @@ const schemas = new WeakMap<D1Database, Promise<unknown>>();
 export function ensureSchema(env: Env) {
   const cached = schemas.get(env.DB);
 
-  if (cached) return cached;
+  if (cached) {
+    return cached;
+  }
 
   const ready = env.DB.batch([
     env.DB.prepare(
@@ -109,8 +111,9 @@ export async function ownsDiagram(env: Env, id: string, userId: string) {
 }
 
 export async function requireOwner(env: Env, id: string, userId: string) {
-  if (!(await ownsDiagram(env, id, userId)))
+  if (!(await ownsDiagram(env, id, userId))) {
     throw new HTTPException(403, { message: "Only the diagram owner can do this." });
+  }
 }
 
 export async function verifyKey(
@@ -118,7 +121,10 @@ export async function verifyKey(
   id: string,
   key: string | null | undefined,
 ): Promise<DiagramRow | null> {
-  if (!key) return null;
+  if (!key) {
+    return null;
+  }
+
   await ensureSchema(env);
 
   const row = await env.DB.prepare(
@@ -128,11 +134,17 @@ export async function verifyKey(
     .bind(id)
     .first<KeyedDiagramRow>();
 
-  if (!row) return null;
+  if (!row) {
+    return null;
+  }
 
-  if (row.key_hash === (await sha256(key))) return row;
+  if (row.key_hash === (await sha256(key))) {
+    return row;
+  }
 
-  if (row.is_template) return null;
+  if (row.is_template) {
+    return null;
+  }
 
   const entry = await env.DB.prepare("SELECT access_key FROM diagram_library WHERE diagram_id = ?")
     .bind(id)
@@ -184,12 +196,17 @@ const diagramCursorSchema = z.object({
 });
 
 export function parseDiagramCursor(value: string): DiagramCursor | null {
-  if (value.length > 256) return null;
+  if (value.length > 256) {
+    return null;
+  }
 
   try {
     const parsed = diagramCursorSchema.safeParse(JSON.parse(atob(value)));
 
-    if (!parsed.success) return null;
+    if (!parsed.success) {
+      return null;
+    }
+
     const cursor = parsed.data;
 
     return { createdAt: cursor.createdAt, id: cursor.id };
@@ -199,7 +216,10 @@ export function parseDiagramCursor(value: string): DiagramCursor | null {
 }
 
 export async function listDiagrams(env: Env, limit = 50, cursor?: DiagramCursor, userId?: string) {
-  if (!userId) return { items: [], nextCursor: null };
+  if (!userId) {
+    return { items: [], nextCursor: null };
+  }
+
   await ensureSchema(env);
   const boundary = cursor ? "AND (d.created_at, d.id) < (?, ?)" : "";
   const params = cursor ? [userId, cursor.createdAt, cursor.id, limit + 1] : [userId, limit + 1];
@@ -217,7 +237,10 @@ export async function listDiagrams(env: Env, limit = 50, cursor?: DiagramCursor,
 
   const items = await Promise.all(
     results.slice(0, limit).map(async (item) => {
-      if (item.key) return { ...item, key: item.key };
+      if (item.key) {
+        return { ...item, key: item.key };
+      }
+
       // Backfill only this page, preserving old share links and concurrent-reader safety.
       await env.DB.prepare(
         "INSERT OR IGNORE INTO diagram_library (diagram_id, access_key) VALUES (?, ?)",
@@ -231,7 +254,9 @@ export async function listDiagrams(env: Env, limit = 50, cursor?: DiagramCursor,
         .bind(item.id)
         .first<AccessKeyRow>();
 
-      if (!entry) throw new Error("Could not create diagram library link");
+      if (!entry) {
+        throw new Error("Could not create diagram library link");
+      }
 
       return { ...item, key: entry.access_key };
     }),
@@ -274,7 +299,10 @@ async function eraseObjects(env: Env, prefix: string) {
     // oxlint-disable-next-line no-await-in-loop -- delete one bounded page at a time
     const page = await env.BUCKET.list({ prefix, limit: 1000 });
 
-    if (!page.objects.length) return;
+    if (!page.objects.length) {
+      return;
+    }
+
     // oxlint-disable-next-line no-await-in-loop -- finish this page before listing again
     await env.BUCKET.delete(page.objects.map((item) => item.key));
   }
@@ -283,12 +311,15 @@ async function eraseObjects(env: Env, prefix: string) {
 export async function createDiagram(env: Env, name: string, template?: string, userId?: string) {
   await ensureSchema(env);
 
-  if (userId) await takeBudget(env, `create:${userId}`, 10);
+  if (userId) {
+    await takeBudget(env, `create:${userId}`, 10);
+  }
 
   // Validate private template access before creating any persistent artifacts.
   if (template && !BUILTIN_TEMPLATES.some((item) => item.id === template)) {
-    if (!userId || !(await ownsDiagram(env, template, userId)))
+    if (!userId || !(await ownsDiagram(env, template, userId))) {
       throw new HTTPException(403, { message: "Template is not available to this account." });
+    }
 
     const row = await env.DB.prepare(
       `SELECT id, name, is_template, description FROM diagrams WHERE id = ?
@@ -297,11 +328,12 @@ export async function createDiagram(env: Env, name: string, template?: string, u
       .bind(template)
       .first<DiagramRow>();
 
-    if (!row?.is_template || !(await env.BUCKET.head(`templates/${template}.json`)))
+    if (!row?.is_template || !(await env.BUCKET.head(`templates/${template}.json`))) {
       throw new HTTPException(404, { message: "Template not found." });
+    }
   }
 
-  const id = newId().replace(/[_-]/g, "x");
+  const id = newId().replaceAll(/[_-]/g, "x");
   const key = newId() + newId();
   const now = Date.now();
 
@@ -321,7 +353,10 @@ export async function createDiagram(env: Env, name: string, template?: string, u
       } else {
         const obj = await env.BUCKET.get(`templates/${template}.json`);
 
-        if (!obj) throw new Error(`unknown template "${template}"`);
+        if (!obj) {
+          throw new Error(`unknown template "${template}"`);
+        }
+
         const elements = storedElementsSchema.parse(await obj.json());
         await copyFiles(env, template, id, elements);
         await stub.seed(elements);
@@ -346,8 +381,11 @@ export async function saveAsTemplate(
 ) {
   await ensureSchema(env);
 
-  if (userId) await requireOwner(env, sourceId, userId);
-  const id = "tpl" + newId().replace(/[_-]/g, "x");
+  if (userId) {
+    await requireOwner(env, sourceId, userId);
+  }
+
+  const id = "tpl" + newId().replaceAll(/[_-]/g, "x");
   const now = Date.now();
 
   const metadata = env.DB.prepare(
@@ -374,13 +412,15 @@ async function publishDiagram(
 ) {
   const statements = [metadata];
 
-  if (userId)
+  if (userId) {
     statements.push(
       env.DB.prepare("INSERT INTO diagram_owners (diagram_id, user_id) VALUES (?, ?)").bind(
         id,
         userId,
       ),
     );
+  }
+
   await env.DB.batch(statements);
 }
 
@@ -413,13 +453,20 @@ const fileKey = (diagramId: string, fileId: string) => `files/${diagramId}/${fil
 export async function putFile(env: Env, diagramId: string, fileId: string, request: Request) {
   const type = request.headers.get("Content-Type") ?? "";
 
-  if (!type.startsWith("image/")) return Response.json({ error: "images only" }, { status: 415 });
+  if (!type.startsWith("image/")) {
+    return Response.json({ error: "images only" }, { status: 415 });
+  }
 
-  if (Number(request.headers.get("Content-Length") ?? 0) > MAX_FILE_BYTES)
+  if (Number(request.headers.get("Content-Length") ?? 0) > MAX_FILE_BYTES) {
     return Response.json({ error: "file too large" }, { status: 413 });
+  }
+
   const key = fileKey(diagramId, fileId);
 
-  if (await env.BUCKET.head(key)) return new Response(null, { status: 204 });
+  if (await env.BUCKET.head(key)) {
+    return new Response(null, { status: 204 });
+  }
+
   const bytes = await readBounded(request.body, MAX_FILE_BYTES);
   await env.BUCKET.put(key, bytes, { httpMetadata: { contentType: type } });
 
@@ -441,7 +488,9 @@ export async function putFile(env: Env, diagramId: string, fileId: string, reque
 export async function getFile(env: Env, diagramId: string, fileId: string) {
   const obj = await env.BUCKET.get(fileKey(diagramId, fileId));
 
-  if (!obj) return Response.json({ error: "not found" }, { status: 404 });
+  if (!obj) {
+    return Response.json({ error: "not found" }, { status: 404 });
+  }
 
   return new Response(obj.body, {
     headers: {
@@ -464,13 +513,16 @@ export async function copyFiles(env: Env, from: string, to: string, elements: El
     [...ids].map(async (fileId) => {
       const obj = await env.BUCKET.get(fileKey(from, fileId));
 
-      if (obj)
+      if (obj) {
         await env.BUCKET.put(fileKey(to, fileId), obj.body, { httpMetadata: obj.httpMetadata });
+      }
     }),
   );
 
   // A rejected copy must not race cleanup with another still-running destination write.
   const failure = copied.find((result) => result.status === "rejected");
 
-  if (failure) throw failure.reason;
+  if (failure) {
+    throw failure.reason;
+  }
 }

@@ -45,14 +45,19 @@ function clusters(ids: number[], key: (i: number) => number, tol: number): numbe
 
   for (const i of ids.toSorted((a, b) => key(a) - key(b))) {
     if (cur.length && key(i) - key(cur[0]) > tol) {
-      if (cur.length > 1) out.push(cur);
+      if (cur.length > 1) {
+        out.push(cur);
+      }
+
       cur = [];
     }
 
     cur.push(i);
   }
 
-  if (cur.length > 1) out.push(cur);
+  if (cur.length > 1) {
+    out.push(cur);
+  }
 
   return out;
 }
@@ -72,7 +77,10 @@ function alignmentTargets(items: LayoutItem[], tol: number) {
       const anchor = group.reduce((m, i) => (area(i) > area(m) ? i : m));
       const centre = mid(items[anchor].box, axis);
 
-      for (const i of group) target[i][axis] = centre - items[i].box[size(axis)] / 2;
+      for (const i of group) {
+        target[i][axis] = centre - items[i].box[size(axis)] / 2;
+      }
+
       groups[axis].push(group);
     }
   }
@@ -121,13 +129,17 @@ function solveAxis(
   for (const line of lines) {
     const order = line.toSorted((a, b) => mid(boxes[a], axis) - mid(boxes[b], axis));
 
-    for (let k = 1; k < order.length; k++) cs.push(separate(order[k - 1], order[k]));
+    for (let k = 1; k < order.length; k++) {
+      cs.push(separate(order[k - 1], order[k]));
+    }
   }
 
   for (const group of equal) {
     const [a, ...rest] = group;
 
-    for (const b of rest) cs.push(new Constraint(vars[a], vars[b], desired[b] - desired[a], true));
+    for (const b of rest) {
+      cs.push(new Constraint(vars[a], vars[b], desired[b] - desired[a], true));
+    }
   }
 
   new Solver(vars, cs).solve();
@@ -177,9 +189,13 @@ export function solveLayout(items: LayoutItem[], opts: SolveOptions): LayoutMove
     const moved = items.map((it, i) => ({ ...it.box, x: it.box.x + dx[i], y: it.box.y + dy[i] }));
     let clear = true;
 
-    for (let i = 0; i < moved.length && clear; i++)
-      for (let j = i + 1; j < moved.length && clear; j++)
-        if (overlapping(moved[i], moved[j], opts.gap - 1)) clear = false;
+    for (let i = 0; i < moved.length && clear; i++) {
+      for (let j = i + 1; j < moved.length && clear; j++) {
+        if (overlapping(moved[i], moved[j], opts.gap - 1)) {
+          clear = false;
+        }
+      }
+    }
 
     const moves = items.map((it, i) => {
       const wanted = {
@@ -201,7 +217,9 @@ export function solveLayout(items: LayoutItem[], opts: SolveOptions): LayoutMove
   try {
     const aligned = attempt(true);
 
-    if (aligned.clear) return aligned.moves;
+    if (aligned.clear) {
+      return aligned.moves;
+    }
   } catch {
     // unsatisfiable equalities: fall through to separation alone
   }

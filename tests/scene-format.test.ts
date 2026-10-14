@@ -1,3 +1,4 @@
+import { requiredTestValue } from "./helpers/required-test-value.ts";
 import { storedElementsSchema } from "../src/shared/schemas.ts";
 // Formatting: wrapText/measureText, tidy guarantees, layout, addForeign, restoreTo.
 import { describe, expect, it } from "vitest";
@@ -27,7 +28,7 @@ const overlaps = (s: Scene) => {
   const blocks = s.live().filter((e) => s.isNode(e) || (e.type === "text" && !e.containerId));
   let n = 0;
 
-  for (let i = 0; i < blocks.length; i++)
+  for (let i = 0; i < blocks.length; i++) {
     for (let j = i + 1; j < blocks.length; j++) {
       const a = blocks[i];
       const b = blocks[j];
@@ -37,9 +38,11 @@ const overlaps = (s: Scene) => {
         b.x < a.x + a.width &&
         a.y < b.y + b.height &&
         b.y < a.y + a.height
-      )
+      ) {
         n++;
+      }
     }
+  }
 
   return n;
 };
@@ -66,7 +69,9 @@ describe("wrapText / measureText", () => {
     const [first, ...rest] = out.split("\n");
     expect(first.startsWith("- ")).toBe(true);
 
-    for (const line of rest) expect(line.startsWith("  ")).toBe(true);
+    for (const line of rest) {
+      expect(line.startsWith("  ")).toBe(true);
+    }
   });
 
   it("measures longest line and line count", () => {
@@ -101,7 +106,10 @@ describe("tidy", () => {
       },
     ]);
 
-    const arrow = s.live().find((e) => e.type === "arrow" && e.strokeStyle === "dashed")!;
+    const arrow = requiredTestValue(
+      s.live().find((e) => e.type === "arrow" && e.strokeStyle === "dashed"),
+    );
+
     // Saved geometry from the old midpoint-only router.
     s.mutate(arrow, {
       x: 4520,
@@ -123,15 +131,23 @@ describe("tidy", () => {
     const source = s.resolve("Geofence processor");
 
     // Right angles only, and never running on top of the neighbouring transition arrow.
-    for (let i = 1; i < path.length; i++)
+    for (let i = 1; i < path.length; i++) {
       expect(path[i][0] === path[i - 1][0] || path[i][1] === path[i - 1][1]).toBe(true);
-    const other = s.live().find((e) => e.type === "arrow" && e.strokeStyle !== "dashed")!;
+    }
+
+    const other = requiredTestValue(
+      s.live().find((e) => e.type === "arrow" && e.strokeStyle !== "dashed"),
+    );
+
     const otherPath = other.points.map(([x, y]: number[]) => [other.x + x, other.y + y]);
 
-    for (let i = 1; i < path.length; i++)
-      for (let j = 1; j < otherPath.length; j++)
+    for (let i = 1; i < path.length; i++) {
+      for (let j = 1; j < otherPath.length; j++) {
         expect(runsOn(path[i - 1], path[i], otherPath[j - 1], otherPath[j])).toBe(false);
-    const caption = s.boundText(source)!;
+      }
+    }
+
+    const caption = requiredTestValue(s.boundText(source));
 
     // Check every segment, not just the control points, clears the caption.
     for (let i = 1; i < path.length; i++) {

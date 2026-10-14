@@ -1,3 +1,4 @@
+import { requiredTestValue } from "./helpers/required-test-value.ts";
 import { storedElementSchema } from "../src/shared/schemas.ts";
 // DiagramRoom on fake storage: ops layer, snapshots, merge rule, presence.
 import { describe, expect, it, vi } from "vitest";
@@ -30,12 +31,12 @@ async function roomWithNode() {
   const { env } = makeEnv();
   const room = await makeRoom(env);
   const [r] = (await room.applyPatch([{ op: "add_node", label: "X" }], "human")).results;
-  const cur = (await room.getRaw()).find((e) => e.id === r.id)!;
+  const cur = requiredTestValue((await room.getRaw()).find((e) => e.id === r.id));
 
   const send = (el: El) =>
     room.webSocketMessage(makeWs(), JSON.stringify({ type: "update", elements: [el] }));
 
-  const versionOf = async () => (await room.getRaw()).find((e) => e.id === r.id)!;
+  const versionOf = async () => requiredTestValue((await room.getRaw()).find((e) => e.id === r.id));
 
   return { room, cur, send, versionOf };
 }
@@ -66,7 +67,7 @@ async function roomWithDelete() {
     return element.isDeleted ? [element.id] : [];
   });
 
-  return { room, ctx, deletedAt, gone, beforeDelete, keptId: out.results[1].id! };
+  return { room, ctx, deletedAt, gone, beforeDelete, keptId: requiredTestValue(out.results[1].id) };
 }
 
 describe("DiagramRoom ops layer", () => {
@@ -115,7 +116,11 @@ describe("DiagramRoom ops layer", () => {
 
     const g = await graphOf(room);
     expect(g.diagram).toBe("Test");
-    expect(g.nodes!.map((n) => n.label).toSorted()).toEqual(["API", "DB"]);
+    expect(
+      requiredTestValue(g.nodes)
+        .map((n) => n.label)
+        .toSorted(),
+    ).toEqual(["API", "DB"]);
     expect(g.edges).toHaveLength(1);
     const raw = await room.getRaw();
     expect(raw.filter((e) => e.type !== "text").every((e) => e.strokeColor === AGENT_STROKE)).toBe(
@@ -145,7 +150,7 @@ describe("DiagramRoom ops layer", () => {
       "Before: Model devices separately from users",
     );
     expect((await graphOf(room)).nodes).toHaveLength(1);
-    await room.restore(out.snapshotId!);
+    await room.restore(requiredTestValue(out.snapshotId));
     expect((await graphOf(room)).nodes ?? []).toHaveLength(0);
   });
 
@@ -154,7 +159,7 @@ describe("DiagramRoom ops layer", () => {
     const room = await makeRoom(env);
     await room.applyPatch([{ op: "add_node", kind: "database" }]);
     expect((await room.listSnapshots())[0].name).toBe("Before: Add Database");
-    const node = (await graphOf(room)).nodes![0];
+    const node = requiredTestValue((await graphOf(room)).nodes)[0];
     const out = await room.applyPatch([{ op: "update", target: node.id, label: "Events DB" }]);
     const snap = (await room.listSnapshots()).find((s) => s.id === out.snapshotId);
     expect(snap?.name).toBe("Before: Rename Database to Events DB");
@@ -183,7 +188,7 @@ describe("DiagramRoom ops layer", () => {
     const snapshot = room.snapshot.bind(room);
     vi.spyOn(room, "snapshot").mockImplementationOnce(async (...args) => {
       const meta = await snapshot(...args);
-      const b = (await room.getRaw()).find((e) => e.id === "b")!;
+      const b = requiredTestValue((await room.getRaw()).find((e) => e.id === "b"));
       await room.webSocketMessage(
         makeWs(),
         JSON.stringify({
@@ -196,7 +201,9 @@ describe("DiagramRoom ops layer", () => {
     });
     const tidy = await room.tidy();
     expect(tidy.separated).toBeGreaterThan(0);
-    expect((await room.getRaw()).find((e) => e.id === "b")!.strokeColor).toBe("#e03131");
+    expect(requiredTestValue((await room.getRaw()).find((e) => e.id === "b")).strokeColor).toBe(
+      "#e03131",
+    );
   });
 
   it("tidy can be scoped to a list of frames, with null for the top level", async () => {
@@ -215,7 +222,10 @@ describe("DiagramRoom ops layer", () => {
 
     // Only the top-level pair was separated; the framed pair still overlaps.
     const moved = (await room.getRaw()).filter(
-      (e) => e.type === "rectangle" && (e.x !== before.get(e.id)!.x || e.y !== before.get(e.id)!.y),
+      (e) =>
+        e.type === "rectangle" &&
+        (e.x !== requiredTestValue(before.get(e.id)).x ||
+          e.y !== requiredTestValue(before.get(e.id)).y),
     );
 
     expect(moved.map((e) => e.id).toSorted()).toEqual(["c", "d"]);
@@ -322,8 +332,9 @@ describe("failed batch persistence", () => {
       let writes = 0;
 
       const spy = vi.spyOn(sql, "exec").mockImplementation((query, ...params) => {
-        if (query.startsWith("INSERT OR REPLACE INTO elements") && ++writes === 2)
+        if (query.startsWith("INSERT OR REPLACE INTO elements") && ++writes === 2) {
           throw new Error("injected write failure");
+        }
 
         return exec(query, ...params);
       });
@@ -396,8 +407,8 @@ describe("presence and tab RPC", () => {
     const room = new DiagramRoom(ctx, env);
     await room.init("collab", "Collab");
 
-    const a = makeWs(),
-      b = makeWs();
+    const a = makeWs();
+    const b = makeWs();
 
     a.serializeAttachment({ sid: "a", selection: [], focusedAt: 0 });
     b.serializeAttachment({ sid: "b", selection: [], focusedAt: 0 });
@@ -431,8 +442,8 @@ describe("presence and tab RPC", () => {
     const room = new DiagramRoom(ctx, env);
     await room.init("rename-test", "Before");
 
-    const a = makeWs(),
-      b = makeWs();
+    const a = makeWs();
+    const b = makeWs();
 
     addWs(a);
     addWs(b);
@@ -491,7 +502,7 @@ describe("presence and tab RPC", () => {
       "human",
     );
 
-    const idA = out.results[0].id!;
+    const idA = requiredTestValue(out.results[0].id);
     const ws = makeWs();
     addWs(ws);
     const send = room.webSocketMessage.bind(room);
@@ -531,9 +542,9 @@ describe("room-level interview flow", () => {
 
     const ops: Op[] = [
       { op: "add_frame", ref: "hld", name: "High-level design" },
-      { op: "add_node", ref: "c", label: "Client", "shape": "ellipse", frame: "hld" },
+      { op: "add_node", ref: "c", label: "Client", shape: "ellipse", frame: "hld" },
       { op: "add_node", ref: "api", label: "API", place: { right_of: "c" } },
-      { op: "add_node", ref: "db", label: "DB", "shape": "ellipse", place: { right_of: "api" } },
+      { op: "add_node", ref: "db", label: "DB", shape: "ellipse", place: { right_of: "api" } },
       { op: "connect", from: "c", to: "api" },
       { op: "connect", from: "api", to: "db" },
       { op: "add_note", text: "QPS ~ 10k", place: { near: "api" } },
@@ -545,9 +556,13 @@ describe("room-level interview flow", () => {
     expect(tidied.changed).toBeGreaterThanOrEqual(0);
     await room.snapshot("checkpoint", "named");
     const g = await graphOf(room);
-    expect(g.nodes!.map((n) => n.label).toSorted()).toEqual(["API", "Client", "DB"]);
+    expect(
+      requiredTestValue(g.nodes)
+        .map((n) => n.label)
+        .toSorted(),
+    ).toEqual(["API", "Client", "DB"]);
     expect(g.edges).toHaveLength(2);
-    expect(g.frames!.map((f) => f.name)).toEqual(["High-level design"]);
+    expect(requiredTestValue(g.frames).map((f) => f.name)).toEqual(["High-level design"]);
     expect((await room.listSnapshots()).some((s) => s.name === "checkpoint")).toBe(true);
   });
 });
@@ -566,7 +581,10 @@ describe("tombstone collection", () => {
     expect(collect(room, deletedAt + DAY)).toBe(0);
     expect(collect(room, deletedAt + TOMBSTONE_TTL_MS + 1000)).toBe(gone.length);
 
-    for (const id of gone) expect(ctx.sql.elements.has(id)).toBe(false);
+    for (const id of gone) {
+      expect(ctx.sql.elements.has(id)).toBe(false);
+    }
+
     expect(ctx.sql.tombstones.size).toBe(0);
     expect(ctx.sql.elements.has(keptId)).toBe(true);
     expect(((await graphOf(room)).nodes ?? []).map((n) => n.label)).toEqual(["Kept"]);
@@ -577,7 +595,9 @@ describe("tombstone collection", () => {
     ctx.addWs(makeWs());
     expect(collect(room, deletedAt + TOMBSTONE_TTL_MS + 1000)).toBe(0);
 
-    for (const id of gone) expect(ctx.sql.elements.has(id)).toBe(true);
+    for (const id of gone) {
+      expect(ctx.sql.elements.has(id)).toBe(true);
+    }
   });
 
   it("forgets the deletion when a restore brings the element back", async () => {
@@ -586,7 +606,10 @@ describe("tombstone collection", () => {
     expect(ctx.sql.tombstones.size).toBe(0);
     expect(collect(room, deletedAt + TOMBSTONE_TTL_MS + 1000)).toBe(0);
 
-    for (const id of gone) expect(ctx.sql.elements.has(id)).toBe(true);
+    for (const id of gone) {
+      expect(ctx.sql.elements.has(id)).toBe(true);
+    }
+
     expect(((await graphOf(room)).nodes ?? []).map((n) => n.label).toSorted()).toEqual([
       "Gone",
       "Kept",

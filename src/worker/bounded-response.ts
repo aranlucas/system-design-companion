@@ -1,6 +1,9 @@
 /** Read a small untrusted response without buffering an unbounded body. */
 export async function boundedResponse(response: Response): Promise<string> {
-  if (!response.body) return "";
+  if (!response.body) {
+    return "";
+  }
+
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -10,10 +13,16 @@ export async function boundedResponse(response: Response): Promise<string> {
       // oxlint-disable-next-line no-await-in-loop -- consume a bounded stream
       const { done, value } = await reader.read();
 
-      if (done) break;
+      if (done) {
+        break;
+      }
+
       size += value.length;
 
-      if (size > 4096) throw new Error("verification response too large");
+      if (size > 4096) {
+        throw new Error("verification response too large");
+      }
+
       chunks.push(value);
     }
   } finally {

@@ -1,3 +1,4 @@
+import { requiredTestValue } from "./helpers/required-test-value.ts";
 import type { JsonInput } from "./helpers/response-schemas.ts";
 import { z } from "zod";
 import { jsonObjectSchema, rpcResultSchema, tokensSchema } from "./helpers/response-schemas.ts";
@@ -113,7 +114,7 @@ async function consent(scope = "mcp:read mcp:write") {
   expect(page.status).toBe(200);
   expect(page.headers.get("content-security-policy")).toContain("frame-ancestors");
   const html = await page.text();
-  const handle = /name="handle" value="([^"]+)"/.exec(html)![1];
+  const handle = requiredTestValue(/name="handle" value="([^"]+)"/.exec(html))[1];
 
   return { clientId, verifier, handle, cookie: cookies(page), html };
 }
@@ -122,7 +123,9 @@ async function authorize(scope = "mcp:read mcp:write"): Promise<Authorization> {
   const started = await consent(scope);
   const form = new URLSearchParams({ handle: started.handle, decision: "allow" });
 
-  for (const item of scope.split(" ")) form.append("scope", item);
+  for (const item of scope.split(" ")) {
+    form.append("scope", item);
+  }
 
   const approved = await call("/authorize", {
     method: "POST",
@@ -131,18 +134,18 @@ async function authorize(scope = "mcp:read mcp:write"): Promise<Authorization> {
   });
 
   expect(approved.status).toBe(302);
-  const githubUrl = new URL(approved.headers.get("location")!);
+  const githubUrl = new URL(requiredTestValue(approved.headers.get("location")));
   expect(githubUrl.hostname).toBe("github.com");
   expect(githubUrl.searchParams.get("code_challenge_method")).toBe("S256");
   expect(githubUrl.searchParams.get("scope")).toBe("");
 
   const callback = await call(
-    `/github/callback?${new URLSearchParams({ state: githubUrl.searchParams.get("state")!, code: "github-code" }).toString()}`,
+    `/github/callback?${new URLSearchParams({ state: requiredTestValue(githubUrl.searchParams.get("state")), code: "github-code" }).toString()}`,
     { headers: { cookie: cookies(approved) } },
   );
 
   expect(callback.status).toBe(302);
-  const redirected = new URL(callback.headers.get("location")!);
+  const redirected = new URL(requiredTestValue(callback.headers.get("location")));
   expect(redirected.origin + redirected.pathname).toBe(REDIRECT);
   expect(redirected.searchParams.get("state")).toBe("client-state");
   expect(redirected.searchParams.get("code")).toBeTruthy();
@@ -157,7 +160,11 @@ function exchange(authorization: Authorization, overrides: Record<string, string
       grant_type: "authorization_code",
       client_id: authorization.clientId,
       redirect_uri: REDIRECT,
-      code: new URL(authorization.callback.headers.get("location")!).searchParams.get("code")!,
+      code: requiredTestValue(
+        new URL(requiredTestValue(authorization.callback.headers.get("location"))).searchParams.get(
+          "code",
+        ),
+      ),
       code_verifier: authorization.verifier,
       resource: RESOURCE,
       ...overrides,
@@ -184,7 +191,9 @@ function rpc(token: string, method: string, params: Record<string, JsonInput> = 
 
   const requestName = z.string().safeParse(params.name);
 
-  if (requestName.success) headers.set("mcp-name", requestName.data);
+  if (requestName.success) {
+    headers.set("mcp-name", requestName.data);
+  }
 
   return call("/mcp", {
     method: "POST",
@@ -233,17 +242,21 @@ describe("OAuth authorization", () => {
     const { auth, tokens: issued } = await tokens();
     const diagram = await createDiagram(env.env, "Watched");
     const deliveries: string[] = [];
-    const upstream = github.getMockImplementation()!;
+    const upstream = requiredTestValue(github.getMockImplementation());
     github.mockImplementation(async (input: string | URL, init?: RequestInit) => {
       const url = new URL(input);
 
-      if (url.hostname === "cloudflare-dns.com")
+      if (url.hostname === "cloudflare-dns.com") {
         return Response.json({ Status: 0, TC: false, Answer: [{ type: 1, data: "8.8.8.8" }] });
+      }
 
       if (url.hostname === "receiver.example.com") {
         const body = jsonObjectSchema.parse(JSON.parse(z.string().parse(init?.body)));
 
-        if (body.type === "verification") return Response.json({ challenge: body.challenge });
+        if (body.type === "verification") {
+          return Response.json({ challenge: body.challenge });
+        }
+
         deliveries.push(z.string().parse(init?.body));
 
         return new Response(null, { status: 204 });
@@ -381,9 +394,9 @@ describe("OAuth authorization", () => {
     });
 
     expect(response.status).toBe(302);
-    expect(new URL(response.headers.get("location")!).searchParams.get("error")).toBe(
-      "access_denied",
-    );
+    expect(
+      new URL(requiredTestValue(response.headers.get("location"))).searchParams.get("error"),
+    ).toBe("access_denied");
     expect(github).not.toHaveBeenCalled();
   });
 

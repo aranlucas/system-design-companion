@@ -14,8 +14,9 @@ function isSqlInput(value: unknown): value is SQLInputValue {
     typeof value === "number" ||
     typeof value === "bigint" ||
     ArrayBuffer.isView(value)
-  )
+  ) {
     return true;
+  }
 
   return false;
 }
@@ -29,7 +30,10 @@ class SQLiteStatement {
 
   bind(...values: unknown[]) {
     const params = values.map((value) => {
-      if (isSqlInput(value)) return value;
+      if (isSqlInput(value)) {
+        return value;
+      }
+
       throw new Error("Unsupported SQL parameter");
     });
 

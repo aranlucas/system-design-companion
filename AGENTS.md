@@ -12,7 +12,7 @@ Things we've learned from this:
 
 ## TypeScript: named types
 
-Declare object and tuple types as named module-level `type`s or `interface`s, not inline in signatures, casts, generics or function bodies. `pnpm lint` enforces this with `local/no-inline-types` (`lint/types-plugin.ts`, loaded as an oxlint JS plugin).
+Declare object and tuple types as named module-level `type`s or `interface`s, not inline in signatures, casts, generics or function bodies. `pnpm lint` enforces this with `oxforge/no-inline-types` from the shared Oxforge preset.
 
 ## File names
 

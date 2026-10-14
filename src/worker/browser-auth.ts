@@ -37,7 +37,9 @@ function cookieValue(request: Request, suffix: string) {
 export async function browserUser(request: Request, env: Env): Promise<string | null> {
   const token = cookieValue(request, "session");
 
-  if (!token || !/^[a-f0-9-]{36}$/.test(token)) return null;
+  if (!token || !/^[a-f0-9-]{36}$/.test(token)) {
+    return null;
+  }
 
   const session = await env.OAUTH_KV.get<BrowserSession>(
     `browser-session:${await sha256(token)}`,
@@ -50,21 +52,25 @@ export async function browserUser(request: Request, env: Env): Promise<string | 
 export async function requireBrowserUser(request: Request, env: Env) {
   const user = await browserUser(request, env);
 
-  if (!user)
+  if (!user) {
     throw new HTTPException(401, { message: "Sign in with GitHub to manage your diagrams." });
+  }
 
   return user;
 }
 
 /** Cookie-authenticated mutations must originate from our own page. */
 export function requireSameOrigin(request: Request) {
-  if (request.headers.get("Origin") !== new URL(request.url).origin)
+  if (request.headers.get("Origin") !== new URL(request.url).origin) {
     throw new HTTPException(403, { message: "A same-origin request is required." });
+  }
 }
 
 export async function browserLogin(request: Request, env: Env): Promise<Response> {
-  if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET)
+  if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET) {
     throw new HTTPException(503, { message: "GitHub sign-in is not configured." });
+  }
+
   await takeBudget(
     env,
     `browser-login:${request.headers.get("CF-Connecting-IP") ?? "unknown"}`,
@@ -108,17 +114,21 @@ export function isBrowserCallback(request: Request) {
 }
 
 export async function browserCallback(request: Request, env: Env): Promise<Response> {
-  if (request.method !== "GET")
+  if (request.method !== "GET") {
     throw new HTTPException(405, { message: "Use GET for the sign-in callback." });
+  }
+
   const url = new URL(request.url);
   const binding = cookieValue(request, "login");
   const key = binding ? `browser-login:${await sha256(binding)}` : "";
   const login = key ? await env.OAUTH_KV.get<LoginState>(key, "json") : null;
 
-  if (!login || login.state !== url.searchParams.get("state") || login.expiresAt <= Date.now())
+  if (!login || login.state !== url.searchParams.get("state") || login.expiresAt <= Date.now()) {
     throw new HTTPException(400, {
       message: "Sign-in expired or was not started in this browser.",
     });
+  }
+
   await env.OAUTH_KV.delete(key);
   const headers = new Headers({ "Cache-Control": "no-store" });
   headers.append("Set-Cookie", cookie(request, "login", "", 0));
@@ -131,8 +141,9 @@ export async function browserCallback(request: Request, env: Env): Promise<Respo
 
   const code = url.searchParams.get("code");
 
-  if (!code)
+  if (!code) {
     throw new HTTPException(400, { message: "GitHub did not return an authorization code." });
+  }
 
   const exchanged = await fetch("https://github.com/login/oauth/access_token", {
     method: "POST",
@@ -152,8 +163,9 @@ export async function browserCallback(request: Request, env: Env): Promise<Respo
     JSON.parse(new TextDecoder().decode(await readBounded(exchanged.body, 16 * 1024))),
   );
 
-  if (!exchanged.ok || !token.access_token)
+  if (!exchanged.ok || !token.access_token) {
     throw new HTTPException(502, { message: "GitHub sign-in failed." });
+  }
 
   const identityResponse = await fetch("https://api.github.com/user", {
     redirect: "error",
@@ -169,8 +181,10 @@ export async function browserCallback(request: Request, env: Env): Promise<Respo
     JSON.parse(new TextDecoder().decode(await readBounded(identityResponse.body, 16 * 1024))),
   );
 
-  if (!identityResponse.ok || !identity.success)
+  if (!identityResponse.ok || !identity.success) {
     throw new HTTPException(502, { message: "Could not read your GitHub identity." });
+  }
+
   const sessionToken = crypto.randomUUID();
 
   const session: BrowserSession = {
@@ -191,7 +205,9 @@ export async function browserLogout(request: Request, env: Env): Promise<Respons
   requireSameOrigin(request);
   const token = cookieValue(request, "session");
 
-  if (token) await env.OAUTH_KV.delete(`browser-session:${await sha256(token)}`);
+  if (token) {
+    await env.OAUTH_KV.delete(`browser-session:${await sha256(token)}`);
+  }
 
   return new Response(null, {
     status: 204,

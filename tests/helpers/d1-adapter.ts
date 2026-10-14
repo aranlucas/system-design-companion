@@ -33,8 +33,9 @@ export function d1Adapter<S extends StatementCore>(source: DatabaseSource<S>): D
     const statement = strictFake<D1PreparedStatement>({
       bind: (...next) => prepare(query, next),
       async first<T>(column?: string): Promise<T | null> {
-        if (column !== undefined)
+        if (column !== undefined) {
           throw new Error("Column selection is not implemented by this fake");
+        }
 
         return underlying.first<T>();
       },
@@ -59,7 +60,9 @@ export function d1Adapter<S extends StatementCore>(source: DatabaseSource<S>): D
       const originals = batch.map((statement) => {
         const original = statements.get(statement);
 
-        if (!original) throw new Error("Statement belongs to another fake database");
+        if (!original) {
+          throw new Error("Statement belongs to another fake database");
+        }
 
         return original;
       });

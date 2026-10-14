@@ -45,9 +45,13 @@ export const oauthContextSchema = z.object({
 export function toMcpPrincipal(ctx: PrincipalContext): McpPrincipal {
   const { auth, props } = ctx;
 
-  if (!props?.authorizationId) throw new Error("access token carried no authorization identity");
+  if (!props?.authorizationId) {
+    throw new Error("access token carried no authorization identity");
+  }
 
-  if (!auth.userId) throw new Error("access token carried no subject");
+  if (!auth.userId) {
+    throw new Error("access token carried no subject");
+  }
 
   return {
     userId: auth.userId,

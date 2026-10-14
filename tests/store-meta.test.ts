@@ -1,3 +1,4 @@
+import { requiredTestValue } from "./helpers/required-test-value.ts";
 // Capability links, diagram lifecycle (store.ts), component catalog, rubric.
 import { describe, expect, it } from "vitest";
 import { AGENT_STROKE } from "../src/shared/protocol.ts";
@@ -58,7 +59,7 @@ describe("diagram lifecycle (store.ts + real rooms on fake bindings)", () => {
   it("creates from a builtin template through the room", async () => {
     const { env, rooms } = makeEnv();
     const d = await createDiagram(env, "Web", "builtin:web-baseline");
-    const g = await rooms.get(d.id)!.getGraph();
+    const g = await requiredTestValue(rooms.get(d.id)).getGraph();
     expect(g.nodes).toHaveLength(9);
     expect(g.edges).toHaveLength(8);
   });
@@ -80,7 +81,7 @@ describe("diagram lifecycle (store.ts + real rooms on fake bindings)", () => {
     expect(listed.some((t) => t.id === "builtin:interview")).toBe(true);
 
     const d2 = await createDiagram(env, "Copy", tpl.id, "github%3A1");
-    const g = await rooms.get(d2.id)!.getGraph();
+    const g = await requiredTestValue(rooms.get(d2.id)).getGraph();
     expect(g.nodes).toHaveLength(6);
     expect(g.edges).toHaveLength(5);
   });
@@ -94,7 +95,7 @@ describe("component catalog", () => {
     const groups = new Set(["Clients", "Edge", "Compute", "Data", "Messaging", "External"]);
 
     for (const c of COMPONENTS) {
-      expect(["rectangle", "ellipse", "diamond"]).toContain(c.shape);
+      expect(["rectangle", "ellipse", "diamond"]).toContain(c.geometry);
       expect(groups.has(c.group)).toBe(true);
       expect(componentByKind.get(c.kind)?.label).toBe(c.label);
     }
@@ -111,7 +112,9 @@ describe("rubric", () => {
     const items = RUBRIC.match(/^\d+\. /gm);
     expect(items).toHaveLength(10);
 
-    for (const word of ["Requirements", "Estimates", "Trade-offs"]) expect(RUBRIC).toContain(word);
+    for (const word of ["Requirements", "Estimates", "Trade-offs"]) {
+      expect(RUBRIC).toContain(word);
+    }
   });
 
   it("keeps agent stroke distinct from the violet fill", () => {

@@ -1,3 +1,4 @@
+import { requiredTestValue } from "./helpers/required-test-value.ts";
 // Semantic ops: every MCP apply_patch variant, target resolution, authorship.
 import { describe, expect, it } from "vitest";
 import { AGENT_STROKE } from "../src/shared/protocol.ts";
@@ -69,7 +70,7 @@ describe("add_node", () => {
       ),
     );
 
-    const arrow = s.live().find((e) => e.type === "arrow")!;
+    const arrow = requiredTestValue(s.live().find((e) => e.type === "arrow"));
     expect(arrow.x).toBeLessThanOrEqual(right + 10);
     expect(root.width).toBeLessThanOrEqual(84);
     expect(s.boundText(root)?.containerId).toBeNull();
@@ -160,7 +161,7 @@ describe("add_node", () => {
     const s = fresh();
     applyOk(s, [{ op: "add_node", label: "DB" }], "human");
     applyOk(s, [{ op: "update", target: "DB", label: "DB v2" }], "agent");
-    const el = s.live().find((e) => e.type !== "text")!;
+    const el = requiredTestValue(s.live().find((e) => e.type !== "text"));
     expect(el.customData.author).toBe("human");
     expect(el.customData.editedBy).toBe("agent");
   });
@@ -179,7 +180,7 @@ describe("connect / disconnect", () => {
     expect(g.edges[0].from).toBe("Client");
     expect(g.edges[0].to).toBe("API");
     expect(g.edges[0].label).toBe("HTTPS");
-    const arrow = s.live().find((e) => e.type === "arrow")!;
+    const arrow = requiredTestValue(s.live().find((e) => e.type === "arrow"));
     expect(arrow.startBinding.elementId).toBe(g.nodes[0].id);
     expect(arrow.endBinding.elementId).toBe(g.nodes[1].id);
   });
@@ -233,7 +234,7 @@ describe("update / remove", () => {
   it("renames, recolors and reshapes", () => {
     const s = fresh();
     applyOk(s, [{ op: "add_node", ref: "a", label: "A" }]);
-    applyOk(s, [{ op: "update", target: "a", label: "B", color: "blue", "shape": "ellipse" }]);
+    applyOk(s, [{ op: "update", target: "a", label: "B", color: "blue", shape: "ellipse" }]);
     const g = graph(s);
     expect(g.nodes[0].label).toBe("B");
     expect(g.nodes[0].color).toBe("blue");
@@ -290,15 +291,18 @@ describe("add_frame / add_note", () => {
     const s = fresh();
     const long = `word `.repeat(30).trim();
     const [r] = applyOk(s, [{ op: "add_note", text: long }]);
-    const note = s.resolve(r.id!);
+    const note = s.resolve(requiredTestValue(r.id));
     expect(note).toMatchObject({ type: "stickynote", strokeColor: AGENT_STROKE });
     expect(note.created).toEqual(expect.any(Number));
     expect(note.baseHeight).toBeLessThanOrEqual(note.height);
-    const label = s.boundText(note)!;
+    const label = requiredTestValue(s.boundText(note));
     expect(label).toMatchObject({ containerId: note.id, originalText: long, baseFontSize: 20 });
     expect(label.text).toContain("\n");
 
-    for (const line of label.text.split("\n")) expect(line.length).toBeLessThanOrEqual(28);
+    for (const line of label.text.split("\n")) {
+      expect(line.length).toBeLessThanOrEqual(28);
+    }
+
     // The label sits inside the note, clear of the date footer.
     expect(label.x).toBeGreaterThanOrEqual(note.x + 16);
     expect(label.x + label.width).toBeLessThanOrEqual(note.x + note.width - 16);
@@ -314,7 +318,7 @@ describe("add_frame / add_note", () => {
       { op: "update", target: "n", label: `longer `.repeat(20).trim() },
     ]);
     const note = s.resolve("n");
-    const label = s.boundText(note)!;
+    const label = requiredTestValue(s.boundText(note));
     expect(label.originalText).toBe(`longer `.repeat(20).trim());
     expect(label.y + label.height).toBeLessThanOrEqual(note.y + note.height - 36);
     expect(s.resolve("longer ".repeat(20).trim()).id).toBe(note.id);
@@ -333,14 +337,21 @@ describe("add_frame / add_note", () => {
     expect(s2.tidy().separated).toBeGreaterThan(0);
     const moved = s2.resolve(note.id);
     expect(moved.x !== before.x || moved.y !== before.y).toBe(true);
-    const after = s2.boundText(moved)!;
+    const after = requiredTestValue(s2.boundText(moved));
     expect({ x: after.x - moved.x, y: after.y - moved.y }).toEqual(offset);
   });
 
   it("still reports free text as a note", () => {
     const s = new Scene([]);
     applyOk(s, [{ op: "add_node", label: "A" }]);
-    const text = { ...s.boundText(s.resolve("A"))!, id: "t1", containerId: null, text: "loose" };
+
+    const text = {
+      ...requiredTestValue(s.boundText(s.resolve("A"))),
+      id: "t1",
+      containerId: null,
+      text: "loose",
+    };
+
     const s2 = new Scene([...s.live(), text]);
     expect(graph(s2).notes).toEqual([expect.objectContaining({ id: "t1", text: "loose" })]);
     expect(graph(s2).notes[0]).not.toHaveProperty("sticky");
@@ -368,9 +379,9 @@ describe("text_color", () => {
       { op: "add_note", text: "Hot path", text_color: "blue" },
     ]);
 
-    expect(textOf(s, a.id!)?.strokeColor).toBe("#e03131");
-    expect(textOf(s, arrow.id!)?.strokeColor).toBe("#123456");
-    expect(textOf(s, note.id!)?.strokeColor).toBe("#1971c2");
+    expect(textOf(s, requiredTestValue(a.id))?.strokeColor).toBe("#e03131");
+    expect(textOf(s, requiredTestValue(arrow.id))?.strokeColor).toBe("#123456");
+    expect(textOf(s, requiredTestValue(note.id))?.strokeColor).toBe("#1971c2");
     // Only the text changes, not the shape's outline.
     expect(s.resolve("a").strokeColor).toBe(AGENT_STROKE);
 
@@ -394,13 +405,13 @@ describe("text_color", () => {
     applyOk(s, [
       { op: "update", target: "db", text_color: "green" },
       { op: "update", target: "n", text_color: "orange" },
-      { op: "update", target: db.id!, label: "Orders DB" },
+      { op: "update", target: requiredTestValue(db.id), label: "Orders DB" },
     ]);
     const g = graph(s);
     expect(g.nodes.find((n) => n.label === "Orders DB")?.text_color).toBe("green");
-    expect(textOf(s, note.id!)?.strokeColor).toBe("#e8590c");
+    expect(textOf(s, requiredTestValue(note.id))?.strokeColor).toBe("#e8590c");
     // A sticky note's ink is one color: the note follows its label.
-    expect(s.resolve(note.id!).strokeColor).toBe("#e8590c");
+    expect(s.resolve(requiredTestValue(note.id)).strokeColor).toBe("#e8590c");
   });
 
   it("fails when there is no text to color", () => {
@@ -425,7 +436,7 @@ describe("target resolution", () => {
     ]);
 
     expect(graph(s).nodes[0].label).toBe("API Service v2");
-    expect(s.resolve(r.id!).id).toBe(r.id);
+    expect(s.resolve(requiredTestValue(r.id)).id).toBe(r.id);
   });
 
   it("rejects ambiguous labels and suggests ids", () => {
@@ -472,7 +483,7 @@ describe("sync invariants", () => {
   it("bumps versions on mutate and tracks changed elements", () => {
     const s = fresh();
     const [r] = applyOk(s, [{ op: "add_node", label: "A" }]);
-    const el = s.resolve(r.id!);
+    const el = s.resolve(requiredTestValue(r.id));
     const v = el.version;
     s.mutate(el, { x: el.x + 5 });
     expect(el.version).toBe(v + 1);
@@ -483,8 +494,8 @@ describe("sync invariants", () => {
     const s = fresh();
     applyOk(s, [{ op: "add_node", ref: "a", label: "A" }]);
     const node = s.resolve("a");
-    const label = s.boundText(node)!;
+    const label = requiredTestValue(s.boundText(node));
     s.changedElements(); // runs fixLabelOrder
-    expect(label.index! > node.index!).toBe(true);
+    expect(requiredTestValue(label.index) > requiredTestValue(node.index)).toBe(true);
   });
 });

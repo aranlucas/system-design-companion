@@ -2,18 +2,23 @@ import { componentByKind } from "../shared/components.ts";
 import type { Op, Scene } from "./scene.ts";
 
 const compact = (value: string, limit: number) => {
-  const text = value.replace(/\s+/g, " ").trim();
+  const text = value.replaceAll(/\s+/g, " ").trim();
 
   return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
 };
 
 /** Snapshots contain the state BEFORE the requested edit, not its result. */
 export function patchSnapshotName(ops: Op[], scene: Scene, summary?: string): string {
-  if (summary?.trim()) return `Before: ${compact(summary, 120)}`;
+  if (summary?.trim()) {
+    return `Before: ${compact(summary, 120)}`;
+  }
+
   const refs = new Map<string, string>();
 
   const label = (target: string) => {
-    if (refs.has(target)) return refs.get(target)!;
+    if (refs.has(target)) {
+      return refs.get(target)!;
+    }
 
     try {
       return compact(scene.labelOf(scene.resolve(target)) || target, 40);
@@ -27,17 +32,23 @@ export function patchSnapshotName(ops: Op[], scene: Scene, summary?: string): st
       case "add_node": {
         const name = compact(op.label || componentByKind.get(op.kind ?? "")?.label || "node", 40);
 
-        if (op.ref) refs.set(op.ref, name);
+        if (op.ref) {
+          refs.set(op.ref, name);
+        }
 
         return `Add ${name}`;
       }
 
       case "add_frame":
-        if (op.ref) refs.set(op.ref, compact(op.name, 40));
+        if (op.ref) {
+          refs.set(op.ref, compact(op.name, 40));
+        }
 
         return `Add ${compact(op.name, 40)} frame`;
       case "add_note":
-        if (op.ref) refs.set(op.ref, compact(op.text, 40));
+        if (op.ref) {
+          refs.set(op.ref, compact(op.text, 40));
+        }
 
         return `Add note: ${compact(op.text, 40)}`;
       case "connect":

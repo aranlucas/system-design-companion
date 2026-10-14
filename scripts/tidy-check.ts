@@ -20,4 +20,6 @@ again.tidy();
 
 console.log("idempotent (2nd pass changes):", again.changedElements().length);
 
-if (process.argv[3]) writeFileSync(process.argv[3], JSON.stringify(s.live()));
+if (process.argv[3]) {
+  writeFileSync(process.argv[3], JSON.stringify(s.live()));
+}

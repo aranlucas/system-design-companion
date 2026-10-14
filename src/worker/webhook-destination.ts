@@ -28,7 +28,10 @@ export function callbackAllowed(env: Env, value: string): boolean {
  * trust boundary, not a claim that a DNS preflight by itself prevents rebinding.
  */
 export async function checkCallbackDestination(env: Env, value: string): Promise<void> {
-  if (!callbackAllowed(env, value)) throw new Error("callback host is not allowed");
+  if (!callbackAllowed(env, value)) {
+    throw new Error("callback host is not allowed");
+  }
+
   const hostname = new URL(value).hostname;
 
   const answers = await Promise.all(
@@ -43,7 +46,10 @@ export async function checkCallbackDestination(env: Env, value: string): Promise
         signal: AbortSignal.timeout(5_000),
       });
 
-      if (!response.ok) throw new Error("callback DNS lookup failed");
+      if (!response.ok) {
+        throw new Error("callback DNS lookup failed");
+      }
+
       const data = dnsResponse.parse(JSON.parse(await boundedResponse(response)));
 
       return (data.Answer ?? [])
@@ -54,6 +60,10 @@ export async function checkCallbackDestination(env: Env, value: string): Promise
 
   const addresses = answers.flat();
 
-  if (!addresses.length || addresses.some((address) => ipaddr.parse(address).range() !== "unicast"))
+  if (
+    !addresses.length ||
+    addresses.some((address) => ipaddr.parse(address).range() !== "unicast")
+  ) {
     throw new Error("callback DNS did not resolve exclusively to public addresses");
+  }
 }

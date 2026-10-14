@@ -1,3 +1,4 @@
+import { requiredTestValue } from "./helpers/required-test-value.ts";
 import { z } from "zod";
 import { createdSchema, librarySchema, stringRecordSchema } from "./helpers/response-schemas.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -20,7 +21,9 @@ async function request(env: TestEnv, path: string, token?: string, init: Request
   const headers = new Headers(init.headers);
   headers.set("Origin", "https://design.example");
 
-  if (token) headers.set("Cookie", `__Host-sdc-session=${token}`);
+  if (token) {
+    headers.set("Cookie", `__Host-sdc-session=${token}`);
+  }
 
   return worker.fetch(
     new Request(`https://design.example${path}`, { ...init, headers }),
@@ -103,7 +106,7 @@ describe("public service access boundaries", () => {
     const env = makeEnv();
     const token = await session(env, "github%3A1");
     const board = await createDiagram(env.env, "Erase", "builtin:web-baseline", "github%3A1");
-    await env.rooms.get(board.id)!.snapshot("Private version");
+    await requiredTestValue(env.rooms.get(board.id)).snapshot("Private version");
     await env.bucket.put(`files/${board.id}/picture`, "private image");
     await env.bucket.put("files/other-board/picture", "keep");
     const deleted = await request(env, `/api/diagrams/${board.id}`, token, { method: "DELETE" });
@@ -113,12 +116,12 @@ describe("public service access boundaries", () => {
     expect(env.db.snapshots.some((row) => row.diagram_id === board.id)).toBe(false);
     expect([...env.bucket.objects.keys()].some((key) => key.includes(`/${board.id}/`))).toBe(false);
     expect(env.bucket.objects.has("files/other-board/picture")).toBe(true);
-    expect(await env.rooms.get(board.id)!.getRaw()).toEqual([]);
+    expect(await requiredTestValue(env.rooms.get(board.id)).getRaw()).toEqual([]);
     expect(
       (await request(env, `/api/diagrams/${board.id}`, token, { method: "DELETE" })).status,
     ).toBe(204);
     await expect(
-      env.rooms.get(board.id)!.applyPatch([{ op: "add_node", label: "Revived" }]),
+      requiredTestValue(env.rooms.get(board.id)).applyPatch([{ op: "add_node", label: "Revived" }]),
     ).rejects.toThrow("deleted");
   });
 
@@ -203,9 +206,9 @@ describe("browser GitHub sign-in", () => {
       }),
     );
     const login = await request(env, "/api/auth/login");
-    const destination = new URL(login.headers.get("Location")!);
+    const destination = new URL(requiredTestValue(login.headers.get("Location")));
     expect(destination.searchParams.get("code_challenge_method")).toBe("S256");
-    const loginCookie = login.headers.get("Set-Cookie")!.split(";")[0];
+    const loginCookie = requiredTestValue(login.headers.get("Set-Cookie")).split(";")[0];
     const callback = `/github/callback?state=${destination.searchParams.get("state")}&code=test-code`;
     expect((await request(env, callback)).status).toBe(400);
 
@@ -216,10 +219,10 @@ describe("browser GitHub sign-in", () => {
     );
 
     expect(signedIn.status).toBe(302);
-    const cookies = signedIn.headers.get("Set-Cookie")!;
+    const cookies = requiredTestValue(signedIn.headers.get("Set-Cookie"));
     expect(cookies).toContain("HttpOnly");
     expect(cookies).toContain("Secure");
-    const token = cookies.match(/__Host-sdc-session=([a-f0-9-]+)/)![1];
+    const token = requiredTestValue(cookies.match(/__Host-sdc-session=([a-f0-9-]+)/))[1];
     expect((await request(env, "/api/diagrams", token)).status).toBe(200);
     expect(JSON.stringify([...env.kv.values])).not.toContain("upstream-token");
 

@@ -65,8 +65,9 @@ describe("component library import", () => {
       for (const element of item.elements) {
         for (const bound of z
           .array(z.object({ id: z.string() }))
-          .parse(element.boundElements ?? []))
+          .parse(element.boundElements ?? [])) {
           expect(ids.has(bound.id)).toBe(true);
+        }
 
         if (element.type === "text" && element.containerId) {
           expect(ids.has(z.string().parse(element.containerId))).toBe(true);

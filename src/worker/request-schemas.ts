@@ -21,7 +21,10 @@ export const paginationQuery = z.object({
     .transform((value, ctx) => {
       const cursor = parseDiagramCursor(value);
 
-      if (cursor !== null) return cursor;
+      if (cursor !== null) {
+        return cursor;
+      }
+
       ctx.addIssue({ code: "custom", message: "invalid cursor" });
 
       return z.NEVER;

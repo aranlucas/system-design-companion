@@ -19,24 +19,28 @@ interface SceneData {
 
 const POLL_MS = 4000;
 
-const byId = (id: string) => document.getElementById(id)!;
+const byId = (id: string) => document.querySelector(`#${id}`)!;
 
 const title = byId("title");
 
 const status = byId("status");
 
 function requireSvg(id: string): SVGSVGElement {
-  const element = document.getElementById(id);
+  const element = document.querySelector(`#${id}`);
 
-  if (!(element instanceof SVGSVGElement)) throw new Error(`Missing SVG: ${id}`);
+  if (!(element instanceof SVGSVGElement)) {
+    throw new Error(`Missing SVG: ${id}`);
+  }
 
   return element;
 }
 
 function requireButton(id: string): HTMLButtonElement {
-  const element = document.getElementById(id);
+  const element = document.querySelector(`#${id}`);
 
-  if (!(element instanceof HTMLButtonElement)) throw new Error(`Missing button: ${id}`);
+  if (!(element instanceof HTMLButtonElement)) {
+    throw new Error(`Missing button: ${id}`);
+  }
 
   return element;
 }
@@ -62,13 +66,19 @@ let displayMode = "inline";
 let poll: ReturnType<typeof setInterval> | undefined;
 
 async function load() {
-  if (!diagram) return;
+  if (!diagram) {
+    return;
+  }
+
   refreshBtn.disabled = true;
 
   try {
     const res = await app.callServerTool({ name: "render_scene", arguments: { diagram } });
 
-    if (res.isError) throw new Error(res.content.find((c) => c.type === "text")?.text ?? "error");
+    if (res.isError) {
+      throw new TypeError(res.content.find((c) => c.type === "text")?.text ?? "error");
+    }
+
     data = sceneDataSchema.parse(res.structuredContent);
     const sig = data.elements.map((e) => `${e.id}:${e.version}`).join(",");
 
@@ -97,7 +107,9 @@ function setDisplayMode(mode: string) {
   // Follow the canvas live only while it has the user's full attention.
   clearInterval(poll);
 
-  if (mode === "fullscreen") poll = setInterval(() => void load(), POLL_MS);
+  if (mode === "fullscreen") {
+    poll = setInterval(() => void load(), POLL_MS);
+  }
 }
 
 app.ontoolinput = ({ arguments: args }) => {
@@ -115,9 +127,13 @@ function applyContext(ctx: McpUiHostContext) {
     document.body.dataset.theme = ctx.theme;
   }
 
-  if (ctx.styles?.variables) applyHostStyleVariables(ctx.styles.variables);
+  if (ctx.styles?.variables) {
+    applyHostStyleVariables(ctx.styles.variables);
+  }
 
-  if (ctx.displayMode) setDisplayMode(ctx.displayMode);
+  if (ctx.displayMode) {
+    setDisplayMode(ctx.displayMode);
+  }
 }
 
 app.onhostcontextchanged = applyContext;
@@ -125,7 +141,9 @@ app.onhostcontextchanged = applyContext;
 refreshBtn.addEventListener("click", () => void load());
 
 openBtn.addEventListener("click", () => {
-  if (data) void app.openLink({ url: data.url });
+  if (data) {
+    void app.openLink({ url: data.url });
+  }
 });
 
 fullBtn.addEventListener("click", async () => {
@@ -138,7 +156,10 @@ async function start() {
   await app.connect();
   const ctx = app.getHostContext();
 
-  if (ctx) applyContext(ctx);
+  if (ctx) {
+    applyContext(ctx);
+  }
+
   fullBtn.hidden = !ctx?.availableDisplayModes?.includes("fullscreen");
 }
 

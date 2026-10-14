@@ -87,3 +87,14 @@ export const pointListSchema = z.array(z.tuple([z.number(), z.number()]));
 export function elementPoints(element: El): Point[] {
   return pointListSchema.parse(element.points);
 }
+
+/** Geometry operations require the selected endpoint to exist. */
+export function requiredPoint(points: Point[], index: number): Point {
+  const point = points.at(index);
+
+  if (point === undefined) {
+    throw new Error(`Missing geometry point at index ${index}`);
+  }
+
+  return point;
+}

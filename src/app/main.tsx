@@ -13,7 +13,7 @@ const m = location.pathname.match(/^\/d\/([A-Za-z0-9_-]+)/);
 
 const key = new URLSearchParams(location.search).get("k");
 
-createRoot(document.getElementById("root")!).render(
+createRoot(document.querySelector("#root")!).render(
   <QueryClientProvider client={queryClient}>
     {m && key ? (
       // Excalidraw cannot show its loading UI until the editor module has downloaded.

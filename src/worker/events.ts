@@ -235,26 +235,34 @@ export function registerEvents(server: McpServer, env: Env, principal: McpPrinci
 async function subscribe(env: Env, principal: McpPrincipal, params: SubscribeRequest) {
   requireRead(principal);
 
-  if (!byName.has(params.name))
+  if (!byName.has(params.name)) {
     throw protocolError(ERR_NOT_FOUND, "NotFound", { kind: "event", name: params.name });
+  }
 
   const { url, secret } = params.delivery;
 
-  if (!secret) throw invalidParams("delivery.secret is required for webhook delivery");
+  if (!secret) {
+    throw invalidParams("delivery.secret is required for webhook delivery");
+  }
+
   validateCallbackUrl(url);
 
-  if (!callbackAllowed(env, url))
+  if (!callbackAllowed(env, url)) {
     throw protocolError(ERR_CALLBACK, "CallbackEndpointError", {
       reason: "host_not_allowed",
       url: redacted(url),
     });
+  }
+
   assertSecretLength(secret);
 
   const args = validateArguments(params.name, params.arguments);
   const parsed = parseLink(args.diagram)!;
 
-  if (!(await verifyKey(env, parsed.id, parsed.key)))
+  if (!(await verifyKey(env, parsed.id, parsed.key))) {
     throw protocolError(ERR_FORBIDDEN, "Forbidden", { reason: "diagram link is not valid" });
+  }
+
   const diagramId = parsed.id;
   const keyHash = await sha256(parsed.key);
   const includeAgent = args.include_agent === true;
@@ -280,11 +288,13 @@ async function subscribe(env: Env, principal: McpPrincipal, params: SubscribeReq
   // flood someone else's URL. Cached per principal and URL, so varying arguments
   // cannot multiply challenges against one endpoint.
   if (!wasVerified(principal.userId, url)) {
-    if (!(await verifyCallback(env, sub)))
+    if (!(await verifyCallback(env, sub))) {
       throw protocolError(ERR_CALLBACK, "CallbackEndpointError", {
         reason: "challenge_failed",
         url: redacted(url),
       });
+    }
+
     markVerified(principal.userId, url);
   }
 
@@ -337,8 +347,10 @@ async function subscribe(env: Env, principal: McpPrincipal, params: SubscribeReq
 async function unsubscribe(env: Env, principal: McpPrincipal, params: UnsubscribeRequest) {
   requireRead(principal);
 
-  if (!byName.has(params.name))
+  if (!byName.has(params.name)) {
     throw protocolError(ERR_NOT_FOUND, "NotFound", { kind: "event", name: params.name });
+  }
+
   const args = validateArguments(params.name, params.arguments);
   const parsed = parseLink(args.diagram)!;
 
@@ -416,7 +428,10 @@ export async function deliverDiagramEvent(
     subs.map(async (sub) => {
       // Agent edits are withheld unless this subscriber asked for them, so an
       // agent never reacts to the change it just made.
-      if (name === "diagram.changed" && data.origin === "agent" && !sub.includeAgent) return;
+      if (name === "diagram.changed" && data.origin === "agent" && !sub.includeAgent) {
+        return;
+      }
+
       await sendWithBackoff(env, sub, event);
     }),
   );
@@ -463,11 +478,16 @@ async function sendWithBackoff(env: Env, sub: Subscription, body: DeliveryBody):
     // oxlint-disable-next-line no-await-in-loop -- one attempt at a time, by design
     const active = await activeSubscription(env, sub);
 
-    if (!active) return false;
+    if (!active) {
+      return false;
+    }
+
     // oxlint-disable-next-line no-await-in-loop -- sign a fresh attempt after checking access
     const res = await post(env, active, msgId, body);
 
-    if (res && res.status >= 200 && res.status < 300) return true;
+    if (res && res.status >= 200 && res.status < 300) {
+      return true;
+    }
 
     // 410 and 413 are the endpoint saying never to retry this delivery.
     if (res?.status === 410) {
@@ -477,9 +497,13 @@ async function sendWithBackoff(env: Env, sub: Subscription, body: DeliveryBody):
       return false;
     }
 
-    if (res?.status === 413) return false;
+    if (res?.status === 413) {
+      return false;
+    }
 
-    if (res && res.status < 500 && res.status !== 408 && res.status !== 429) return false;
+    if (res && res.status < 500 && res.status !== 408 && res.status !== 429) {
+      return false;
+    }
 
     if (attempt < MAX_ATTEMPTS) {
       // oxlint-disable-next-line no-await-in-loop -- backoff is the point
@@ -547,7 +571,10 @@ async function verifyCallback(env: Env, sub: Subscription): Promise<boolean> {
     challenge,
   });
 
-  if (!res || res.status < 200 || res.status >= 300) return false;
+  if (!res || res.status < 200 || res.status >= 300) {
+    return false;
+  }
+
   // The echo has to come back and match, compared in constant time.
   let echoed: string;
 
@@ -575,7 +602,9 @@ function wasVerified(userId: string, url: string): boolean {
   const key = JSON.stringify([userId, url]);
   const until = verified.get(key);
 
-  if (until === undefined) return false;
+  if (until === undefined) {
+    return false;
+  }
 
   if (until < Date.now()) {
     verified.delete(key);
@@ -587,9 +616,16 @@ function wasVerified(userId: string, url: string): boolean {
 }
 
 function markVerified(userId: string, url: string) {
-  for (const [key, until] of verified) if (until < Date.now()) verified.delete(key);
+  for (const [key, until] of verified) {
+    if (until < Date.now()) {
+      verified.delete(key);
+    }
+  }
 
-  if (verified.size >= 1024) verified.delete(verified.keys().next().value!);
+  if (verified.size >= 1024) {
+    verified.delete(verified.keys().next().value!);
+  }
+
   verified.set(JSON.stringify([userId, url]), Date.now() + VERIFICATION_TTL_MS);
 }
 
@@ -601,7 +637,9 @@ function redacted(url: string): string {
 // ---------- Standard Webhooks ----------
 
 function decodeSecret(secret: string): Uint8Array {
-  if (!/^whsec_[A-Za-z0-9+/]+={0,2}$/.test(secret)) throw new Error("missing whsec_ prefix");
+  if (!/^whsec_[A-Za-z0-9+/]+={0,2}$/.test(secret)) {
+    throw new Error("missing whsec_ prefix");
+  }
 
   return Uint8Array.from(atob(secret.slice("whsec_".length)), (c) => c.charCodeAt(0));
 }
@@ -615,8 +653,9 @@ function assertSecretLength(secret: string): void {
     throw invalidParams("delivery.secret must be whsec_ followed by base64 of 24-64 bytes");
   }
 
-  if (bytes.length < 24 || bytes.length > 64)
+  if (bytes.length < 24 || bytes.length > 64) {
     throw invalidParams("delivery.secret must be whsec_ followed by base64 of 24-64 bytes");
+  }
 }
 
 /** `v1,<base64 HMAC-SHA256(secretBytes, "<msgId>.<timestamp>.<body>")>` */
@@ -665,16 +704,21 @@ function validateArguments(
 ): EventArguments {
   const result = (name === "diagram.changed" ? changedArguments : diagramArguments).safeParse(args);
 
-  if (!result.success) throw invalidParams("arguments do not match the event inputSchema");
+  if (!result.success) {
+    throw invalidParams("arguments do not match the event inputSchema");
+  }
 
-  if (!parseLink(result.data.diagram)) throw invalidParams("diagram must be a valid share link");
+  if (!parseLink(result.data.diagram)) {
+    throw invalidParams("diagram must be a valid share link");
+  }
 
   return result.data;
 }
 
 function requireRead(principal: McpPrincipal): void {
-  if (!principal.scopes.includes("mcp:read"))
+  if (!principal.scopes.includes("mcp:read")) {
     throw protocolError(ERR_FORBIDDEN, "Forbidden", { reason: "mcp:read is required" });
+  }
 }
 
 function validateCallbackUrl(value: string): void {
@@ -701,10 +745,11 @@ function validateCallbackUrl(value: string): void {
     ["localhost", "local", "internal", "home", "test", "invalid"].some(
       (suffix) => host === suffix || host.endsWith(`.${suffix}`),
     )
-  )
+  ) {
     throw invalidParams(
       "delivery.url must identify a public HTTPS hostname without credentials or a fragment",
     );
+  }
 }
 
 async function signatures(
@@ -731,7 +776,9 @@ async function activeSubscription(env: Env, sub: Subscription): Promise<Subscrip
     .bind(sub.id)
     .first<SubscriptionRow>();
 
-  if (!current || current.expires_at <= Date.now()) return null;
+  if (!current || current.expires_at <= Date.now()) {
+    return null;
+  }
 
   const key = await env.DB.prepare(
     "SELECT key_hash FROM diagrams WHERE id = ? AND NOT EXISTS (SELECT 1 FROM deleted_diagrams WHERE diagram_id = ?)",

@@ -10,7 +10,9 @@ export function CopyRow({ label, text }: CopyRowProps) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
-      if (timer.current) clearTimeout(timer.current);
+      if (timer.current) {
+        clearTimeout(timer.current);
+      }
     },
     [],
   );
@@ -23,7 +25,9 @@ export function CopyRow({ label, text }: CopyRowProps) {
         type="button"
         aria-label={label ? `Copy ${label} command` : "Copy text"}
         onClick={async () => {
-          if (timer.current) clearTimeout(timer.current);
+          if (timer.current) {
+            clearTimeout(timer.current);
+          }
 
           try {
             await navigator.clipboard.writeText(text);

@@ -15,17 +15,25 @@ function isObject<T>(value: T): value is T & object {
 }
 
 function rejectDisposal<T>(value: T): T {
-  if (!isObject(value)) return value;
+  if (!isObject(value)) {
+    return value;
+  }
 
   return new Proxy(value, {
     get(target, key) {
-      if (key === Symbol.dispose)
+      if (key === Symbol.dispose) {
         throw new Error("RPC disposal is not implemented by this awaited-only fake");
+      }
 
       let descriptor: PropertyDescriptor | undefined;
 
-      for (let owner = target; owner !== null && !descriptor; owner = Object.getPrototypeOf(owner))
+      for (
+        let owner = target;
+        owner !== null && !descriptor;
+        owner = Object.getPrototypeOf(owner)
+      ) {
         descriptor = Object.getOwnPropertyDescriptor(owner, key);
+      }
 
       return descriptor?.get ? descriptor.get.call(target) : descriptor?.value;
     },
@@ -44,7 +52,10 @@ export function awaitedRpc<T extends Rpc.DurableObjectBranded>(
 ): DurableObjectStub<T> {
   const proxy = new Proxy(methods, {
     get(target, key) {
-      if (key === "fetch" && fetch) return fetch;
+      if (key === "fetch" && fetch) {
+        return fetch;
+      }
+
       let descriptor: PropertyDescriptor | undefined;
 
       for (
@@ -57,7 +68,9 @@ export function awaitedRpc<T extends Rpc.DurableObjectBranded>(
 
       const method = descriptor?.get ? descriptor.get.call(target) : descriptor?.value;
 
-      if (!isCallable(method)) throw new Error(`Unimplemented RPC capability: ${String(key)}`);
+      if (!isCallable(method)) {
+        throw new Error(`Unimplemented RPC capability: ${String(key)}`);
+      }
 
       return (...args: never[]) => {
         const pending = Promise.resolve()

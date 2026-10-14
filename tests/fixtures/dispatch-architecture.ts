@@ -33,7 +33,7 @@ export const DISPATCH_ARCHITECTURE: El[] = [
       author: "agent",
       autoFit: { dx: 0, dy: 27.3231, w: 1600, h: 1168, fw: 1600, fh: 1195.3231 },
     },
-    name: "2 \u00b7 Dispatch architecture",
+    name: "2 \u00B7 Dispatch architecture",
   },
   {
     id: "mej1TqRDx64ZtRN_689m4",

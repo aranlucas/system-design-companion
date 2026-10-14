@@ -1,3 +1,4 @@
+import { requiredPoint } from "../../src/shared/schemas.ts";
 // Layout problems in a scene, as counts. Shared by the tidy regression tests and scripts/tidy-check.ts.
 import type { El } from "../../src/shared/protocol.ts";
 import type { Scene } from "../../src/worker/scene.ts";
@@ -15,8 +16,13 @@ const overlap = (a: El, b: El) =>
 const pairs = <T>(xs: T[], hit: (a: T, b: T) => boolean) => {
   let n = 0;
 
-  for (let i = 0; i < xs.length; i++)
-    for (let j = i + 1; j < xs.length; j++) if (hit(xs[i], xs[j])) n++;
+  for (let i = 0; i < xs.length; i++) {
+    for (let j = i + 1; j < xs.length; j++) {
+      if (hit(xs[i], xs[j])) {
+        n++;
+      }
+    }
+  }
 
   return n;
 };
@@ -28,10 +34,10 @@ const distToEl = ([x, y]: Pt, e: El) =>
 const segmentsCross = (p: Pt, q: Pt, u: Pt, v: Pt) => {
   const d = (a: Pt, b: Pt, c: Pt) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
 
-  const d1 = d(u, v, p),
-    d2 = d(u, v, q),
-    d3 = d(p, q, u),
-    d4 = d(p, q, v);
+  const d1 = d(u, v, p);
+  const d2 = d(u, v, q);
+  const d3 = d(p, q, u);
+  const d4 = d(p, q, v);
 
   return d1 * d2 < 0 && d3 * d4 < 0;
 };
@@ -42,7 +48,9 @@ const passesThrough = (p: Pt, q: Pt, e: El) => {
     const x = p[0] + ((q[0] - p[0]) * i) / 20;
     const y = p[1] + ((q[1] - p[1]) * i) / 20;
 
-    if (x > e.x && x < e.x + e.width && y > e.y && y < e.y + e.height) return true;
+    if (x > e.x && x < e.x + e.width && y > e.y && y < e.y + e.height) {
+      return true;
+    }
   }
 
   return false;
@@ -84,7 +92,7 @@ export function layoutReport(s: Scene) {
 
     const ends: BoundEnd[] = [
       [a.startBinding && byId.get(a.startBinding.elementId), pts[0]],
-      [a.endBinding && byId.get(a.endBinding.elementId), pts[pts.length - 1]],
+      [a.endBinding && byId.get(a.endBinding.elementId), requiredPoint(pts, -1)],
     ];
 
     return ends.some(([n, p]) => n && distToEl(p, n) > 20);
@@ -105,10 +113,14 @@ export function layoutReport(s: Scene) {
 
   let arrowCrossings = 0;
 
-  for (let i = 0; i < bound.length; i++)
-    for (let j = i + 1; j < bound.length; j++)
-      for (const [p, q] of segs(bound[i]))
+  for (let i = 0; i < bound.length; i++) {
+    for (let j = i + 1; j < bound.length; j++) {
+      for (const [p, q] of segs(bound[i])) {
         for (const [u, v] of segs(bound[j])) if (segmentsCross(p, q, u, v)) arrowCrossings++;
+      }
+    }
+  }
+
   const captions = live.filter((e) => e.customData?.componentLabel);
   const texts = [...captions, ...live.filter((e) => s.isNote(e))];
 

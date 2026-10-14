@@ -1,3 +1,4 @@
+import { requiredTestValue } from "./required-test-value.ts";
 import type { JsonValue } from "../../src/shared/schemas.ts";
 
 const libraryInsertParamsSchema = z.tuple([
@@ -173,28 +174,39 @@ export class FakeKV {
     };
 
     const json = (value: string | null): T | null => {
-      if (value === null) return null;
+      if (value === null) {
+        return null;
+      }
 
       // SAFETY: KV's generic JSON overload delegates the serialized value contract to its caller, exactly as JSON.parse does; this fake does not claim schema validation.
       return JSON.parse(value) as T;
     };
 
     if (Array.isArray(key)) {
-      if (format !== undefined && format !== "text" && format !== "json")
+      if (format !== undefined && format !== "text" && format !== "json") {
         throw new Error("Unsupported multi-key KV format");
+      }
 
       return new Map(key.map((name) => [name, format === "json" ? json(read(name)) : read(name)]));
     }
 
     const value = read(key);
 
-    if (value === null) return null;
+    if (value === null) {
+      return null;
+    }
 
-    if (format === "json") return json(value);
+    if (format === "json") {
+      return json(value);
+    }
 
-    if (format === "arrayBuffer") return new Response(value).arrayBuffer();
+    if (format === "arrayBuffer") {
+      return new Response(value).arrayBuffer();
+    }
 
-    if (format === "stream") return new Response(value).body!;
+    if (format === "stream") {
+      return requiredTestValue(new Response(value).body);
+    }
 
     return value;
   }
@@ -221,8 +233,9 @@ export class FakeKV {
       .filter((name) => name.startsWith(options.prefix ?? ""))
       .filter(
         (name) =>
-          !this.values.get(name)!.expiration ||
-          this.values.get(name)!.expiration! > Date.now() / 1000,
+          !requiredTestValue(this.values.get(name)).expiration ||
+          requiredTestValue(requiredTestValue(this.values.get(name)).expiration) >
+            Date.now() / 1000,
       )
       .toSorted();
 
@@ -380,7 +393,9 @@ export class FakeD1 {
   }
 
   private run(sql: string, p: unknown[]): void {
-    if (sql.startsWith("CREATE ")) return;
+    if (sql.startsWith("CREATE ")) {
+      return;
+    }
 
     if (sql.includes("INSERT INTO diagram_owners")) {
       this.owners.set(z.string().parse(p[0]), z.string().parse(p[1]));
@@ -397,7 +412,9 @@ export class FakeD1 {
     if (sql.includes("INSERT OR IGNORE INTO diagram_library")) {
       const [id, key] = libraryInsertParamsSchema.parse(p);
 
-      if (!this.library.has(id)) this.library.set(id, key);
+      if (!this.library.has(id)) {
+        this.library.set(id, key);
+      }
 
       return;
     }
@@ -517,8 +534,11 @@ export class FakeD1 {
     }
 
     if (sql.includes("DELETE FROM mcp_event_subscriptions WHERE diagram_id")) {
-      for (const [id, row] of this.event_subscriptions)
-        if (row.diagram_id === p[0]) this.event_subscriptions.delete(id);
+      for (const [id, row] of this.event_subscriptions) {
+        if (row.diagram_id === p[0]) {
+          this.event_subscriptions.delete(id);
+        }
+      }
 
       return;
     }
@@ -539,7 +559,10 @@ export class FakeD1 {
       const limit = z.number().parse(p[2]);
       const existing = this.budgets.get(key);
 
-      if (existing?.window === window && existing.count >= limit) return null;
+      if (existing?.window === window && existing.count >= limit) {
+        return null;
+      }
+
       const count = existing?.window === window ? existing.count + 1 : 1;
       this.budgets.set(key, { window, count });
 
@@ -562,10 +585,12 @@ export class FakeD1 {
       return access_key ? { access_key } : null;
     }
 
-    if (sql.includes("FROM diagrams WHERE id = ?"))
+    if (sql.includes("FROM diagrams WHERE id = ?")) {
       return this.deleted.has(z.string().parse(p[0]))
         ? null
         : (this.diagrams.get(z.string().parse(p[0])) ?? null);
+    }
+
     throw new Error(`FakeD1.first: unsupported SQL: ${sql}`);
   }
 
@@ -634,7 +659,10 @@ export class FakeR2 {
     value: ReadableStream | ArrayBuffer | ArrayBufferView | string | null | Blob,
     options?: R2PutOptions,
   ): Promise<R2Object> {
-    if (options?.onlyIf) throw new Error("Conditional R2 writes are not implemented");
+    if (options?.onlyIf) {
+      throw new Error("Conditional R2 writes are not implemented");
+    }
+
     const text = z.string().safeParse(value);
 
     const bytes = text.success
@@ -664,7 +692,9 @@ export class FakeR2 {
   }
 
   async delete(keys: string | string[]) {
-    for (const key of [keys].flat()) this.objects.delete(key);
+    for (const key of [keys].flat()) {
+      this.objects.delete(key);
+    }
   }
 
   async head(key: string) {
@@ -672,17 +702,21 @@ export class FakeR2 {
   }
 
   async get(key: string, options?: R2GetOptions): Promise<R2ObjectBody | null> {
-    if (options?.onlyIf || options?.range)
+    if (options?.onlyIf || options?.range) {
       throw new Error("Conditional/ranged R2 reads are not implemented");
+    }
+
     const v = this.objects.get(key);
 
-    if (!v) return null;
+    if (!v) {
+      return null;
+    }
 
     return strictFake<R2ObjectBody>(
       {
         httpMetadata: v.httpMetadata ?? {},
         get body() {
-          return new Response(v.bytes).body!;
+          return requiredTestValue(new Response(v.bytes).body);
         },
         json: async <T>() => {
           // SAFETY: R2 json<T> uses the caller-selected decoded JSON contract; this mirrors that API rather than claiming runtime validation.
@@ -703,13 +737,17 @@ export class FakeDOSql {
   exec(query: string, ...params: unknown[]): Array<Record<string, string | number>> {
     const q = query.trim();
 
-    if (q.startsWith("CREATE TABLE")) return [];
+    if (q.startsWith("CREATE TABLE")) {
+      return [];
+    }
 
-    if (q.startsWith("SELECT json FROM elements"))
+    if (q.startsWith("SELECT json FROM elements")) {
       return [...this.elements.values()].map((json) => ({ json }));
+    }
 
-    if (q.startsWith("SELECT id, deleted_at FROM tombstones"))
+    if (q.startsWith("SELECT id, deleted_at FROM tombstones")) {
       return [...this.tombstones].map(([id, at]) => ({ id, deleted_at: at }));
+    }
 
     if (q.startsWith("INSERT OR REPLACE INTO tombstones")) {
       this.tombstones.set(z.string().parse(params[0]), z.number().parse(params[1]));
@@ -747,8 +785,9 @@ export class FakeDOSql {
       return [];
     }
 
-    if (q.startsWith("SELECT k, v FROM meta"))
+    if (q.startsWith("SELECT k, v FROM meta")) {
       return [...this.meta.entries()].map(([k, v]) => ({ k, v }));
+    }
 
     if (q.startsWith("INSERT OR REPLACE INTO meta")) {
       this.meta.set(z.string().parse(params[0]), z.string().parse(params[1]));
@@ -780,7 +819,9 @@ function sqliteCursor<T extends Record<string, SqlStorageValue>>(
     next: () => iterator.next(),
     toArray: () => [...typed],
     one: () => {
-      if (typed.length !== 1) throw new Error("Expected exactly one SQL row");
+      if (typed.length !== 1) {
+        throw new Error("Expected exactly one SQL row");
+      }
 
       return typed[0];
     },
@@ -822,7 +863,7 @@ export function makeRoomCtx() {
     acceptWebSocket: (ws: WebSocket) => {
       sockets.add(ws);
     },
-    blockConcurrencyWhile: async <T>(fn: () => Promise<T>) => await fn(),
+    blockConcurrencyWhile: async <T>(fn: () => Promise<T>) => fn(),
     waitUntil: (promise: Promise<unknown>) => {
       pending.push(promise);
     },
@@ -864,8 +905,10 @@ export function makeWs(): InspectableSocket {
     },
     deserializeAttachment: () => attachment,
     send: (data: string | ArrayBuffer | ArrayBufferView) => {
-      if (data instanceof ArrayBuffer || ArrayBuffer.isView(data))
-        throw new Error("Fake tab expects text frames");
+      if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+        throw new TypeError("Fake tab expects text frames");
+      }
+
       sent.push(data);
     },
     close: () => {},
