@@ -39,7 +39,9 @@ export interface ApiFailure {
 export type Guard<T> = (value: unknown) => value is T;
 
 export function assertBoundary<T>(value: unknown, guard: Guard<T>): asserts value is T {
-  if (!guard(value)) throw new TypeError("Invalid response or stored data");
+  if (!guard(value)) {
+    throw new TypeError("Invalid response or stored data");
+  }
 }
 
 export function isText(value: unknown): value is string {

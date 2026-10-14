@@ -13,7 +13,10 @@ export async function readBounded(
   body: ReadableStream<Uint8Array> | null,
   maxBytes: number,
 ): Promise<Uint8Array> {
-  if (!body) return new Uint8Array();
+  if (!body) {
+    return new Uint8Array();
+  }
+
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
   let length = 0;
@@ -23,11 +26,16 @@ export async function readBounded(
       // oxlint-disable-next-line no-await-in-loop -- consume the stream in order
       const { done, value } = await reader.read();
 
-      if (done) break;
+      if (done) {
+        break;
+      }
+
       length += value.byteLength;
 
-      if (length > maxBytes)
+      if (length > maxBytes) {
         throw new HTTPException(413, { message: "Request body is too large." });
+      }
+
       chunks.push(value);
     }
   } finally {
@@ -58,5 +66,7 @@ export async function takeBudget(env: Env, key: string, limit: number, seconds =
       .bind(key, Math.floor(Date.now() / (seconds * 1000)), limit)
       .first<BudgetRow>();
 
-  if (!row) throw new HTTPException(429, { message: "Too many requests. Try again shortly." });
+  if (!row) {
+    throw new HTTPException(429, { message: "Too many requests. Try again shortly." });
+  }
 }

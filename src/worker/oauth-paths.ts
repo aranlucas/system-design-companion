@@ -19,13 +19,21 @@ const PROTECTED_RESOURCE_METADATA = "/.well-known/oauth-protected-resource";
 
 /** Whether the OAuth provider handles this path, or Hono does. */
 export function isOAuthPath(pathname: string): boolean {
-  if (pathname === MCP_ROUTE || pathname === AUTHORIZE_ENDPOINT) return true;
+  if (pathname === MCP_ROUTE || pathname === AUTHORIZE_ENDPOINT) {
+    return true;
+  }
 
-  if (pathname === CALLBACK_PATH) return true;
+  if (pathname === CALLBACK_PATH) {
+    return true;
+  }
 
-  if (pathname === TOKEN_ENDPOINT || pathname === REGISTRATION_ENDPOINT) return true;
+  if (pathname === TOKEN_ENDPOINT || pathname === REGISTRATION_ENDPOINT) {
+    return true;
+  }
 
-  if (pathname === "/.well-known/oauth-authorization-server") return true;
+  if (pathname === "/.well-known/oauth-authorization-server") {
+    return true;
+  }
 
   // RFC 9728 documents are path-specific: /.well-known/oauth-protected-resource/mcp.
   return (

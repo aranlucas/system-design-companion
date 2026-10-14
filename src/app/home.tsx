@@ -53,7 +53,9 @@ export function Home() {
     queryFn: ({ pageParam, signal }) => {
       const params = new URLSearchParams({ limit: "50" });
 
-      if (pageParam) params.set("cursor", pageParam);
+      if (pageParam) {
+        params.set("cursor", pageParam);
+      }
 
       return getJson<DiagramPage>(`/api/diagrams?${params}`, signal, isDiagramPage);
     },
@@ -70,7 +72,9 @@ export function Home() {
     mutationFn: async (diagram: Diagram) => {
       const response = await fetch(`/api/diagrams/${diagram.id}`, { method: "DELETE" });
 
-      if (!response.ok) throw new Error("Could not delete diagram. Please try again.");
+      if (!response.ok) {
+        throw new Error("Could not delete diagram. Please try again.");
+      }
 
       return diagram.id;
     },
@@ -95,7 +99,9 @@ export function Home() {
     mutationFn: async () => {
       const response = await fetch("/api/auth/logout", { method: "POST" });
 
-      if (!response.ok) throw new Error("Could not sign out. Try again.");
+      if (!response.ok) {
+        throw new Error("Could not sign out. Try again.");
+      }
     },
     onSuccess: async () => {
       await queryClient.cancelQueries();
@@ -116,10 +122,11 @@ export function Home() {
 
       const body: unknown = await response.json();
 
-      if (!response.ok)
+      if (!response.ok) {
         throw new Error(
           apiErrorMessage(isApiFailure(body) ? body : {}, "Could not create the diagram."),
         );
+      }
 
       assertBoundary(body, isCreatedDiagram);
 
@@ -140,8 +147,9 @@ export function Home() {
       window.confirm(
         `Delete “${diagram.name}”? This permanently removes its canvas, images and saved versions for everyone.`,
       )
-    )
+    ) {
       remove.mutate(diagram);
+    }
   }
 
   return (
@@ -157,7 +165,12 @@ export function Home() {
           </div>
         </div>
         {signedIn && (
-          <button className="quiet" disabled={logout.isPending} onClick={() => logout.mutate()}>
+          <button
+            type="button"
+            className="quiet"
+            disabled={logout.isPending}
+            onClick={() => logout.mutate()}
+          >
             {logout.isPending ? "Signing out…" : "Sign out"}
           </button>
         )}
@@ -165,7 +178,9 @@ export function Home() {
       {session.error && (
         <div role="alert" className="notice error">
           <p>Could not check your sign-in. {session.error.message}</p>
-          <button onClick={() => void session.refetch()}>Retry sign-in check</button>
+          <button type="button" onClick={() => void session.refetch()}>
+            Retry sign-in check
+          </button>
         </div>
       )}
       {logout.error && (
@@ -207,7 +222,9 @@ export function Home() {
                 onSubmit={(event) => {
                   event.preventDefault();
 
-                  if (!creation.isPending) creation.mutate();
+                  if (!creation.isPending) {
+                    creation.mutate();
+                  }
                 }}
                 className="create-form"
               >
@@ -238,7 +255,7 @@ export function Home() {
                     ))}
                   </select>
                 </div>
-                <button className="primary" disabled={creation.isPending}>
+                <button type="submit" className="primary" disabled={creation.isPending}>
                   {creation.isPending ? "Creating…" : "Create diagram"}
                 </button>
               </form>
@@ -250,7 +267,7 @@ export function Home() {
               {templatesQuery.error && (
                 <div role="alert" className="notice error">
                   <p>Starting points could not be loaded. You can still create a blank canvas.</p>
-                  <button onClick={() => void templatesQuery.refetch()}>
+                  <button type="button" onClick={() => void templatesQuery.refetch()}>
                     Retry starting points
                   </button>
                 </div>
@@ -291,7 +308,9 @@ export function Home() {
               {diagrams.error && (
                 <div role="alert" className="notice error">
                   <p>{diagrams.error.message}</p>
-                  <button onClick={() => void diagrams.refetch()}>Retry diagrams</button>
+                  <button type="button" onClick={() => void diagrams.refetch()}>
+                    Retry diagrams
+                  </button>
                 </div>
               )}
               {remove.error && (
@@ -307,8 +326,11 @@ export function Home() {
                     appear here.
                   </p>
                   <button
+                    type="button"
                     className="quiet"
-                    onClick={() => document.getElementById("new-diagram-name")?.focus()}
+                    onClick={() =>
+                      document.querySelector<HTMLInputElement>("#new-diagram-name")?.focus()
+                    }
                   >
                     Name your first diagram
                   </button>
@@ -318,7 +340,7 @@ export function Home() {
                 <div className="empty-library">
                   <h3>No loaded diagrams match “{search}”.</h3>
                   <p className="muted">Try another name, or load more diagrams below.</p>
-                  <button className="quiet" onClick={() => setSearch("")}>
+                  <button type="button" className="quiet" onClick={() => setSearch("")}>
                     Clear search
                   </button>
                 </div>
@@ -338,6 +360,7 @@ export function Home() {
                       </span>
                     </a>
                     <button
+                      type="button"
                       className="quiet delete-diagram"
                       disabled={remove.isPending}
                       aria-label={`Delete ${d.name}`}
@@ -350,6 +373,7 @@ export function Home() {
               </ul>
               {diagrams.hasNextPage && (
                 <button
+                  type="button"
                   disabled={diagrams.isFetching}
                   onClick={() => void diagrams.fetchNextPage()}
                 >
@@ -375,8 +399,10 @@ export function Home() {
                     url.origin !== location.origin ||
                     !/^\/d\/[A-Za-z0-9_-]+\/?$/.test(url.pathname) ||
                     !url.searchParams.get("k")
-                  )
+                  ) {
                     throw new Error("invalid");
+                  }
+
                   location.assign(url.href);
                 } catch {
                   setJoinError(
@@ -401,7 +427,7 @@ export function Home() {
                   required
                 />
               </div>
-              <button>Open canvas</button>
+              <button type="submit">Open canvas</button>
             </form>
             {joinError && (
               <p id="join-error" role="alert" className="notice error">

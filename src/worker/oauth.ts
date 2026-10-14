@@ -79,7 +79,10 @@ const providers = new Map<string, OAuthProvider<Env>>();
 export function oauthProvider(origin: string, app: ExportedHandler<Env>) {
   const cached = providers.get(origin);
 
-  if (cached) return cached;
+  if (cached) {
+    return cached;
+  }
+
   const provider = new OAuthProvider<Env>(providerOptions(origin, app));
   providers.set(origin, provider);
 
@@ -119,8 +122,10 @@ const mcpApiHandler: McpApiHandler = {
   async fetch(request, env, ctx) {
     const context = oauthContextSchema.parse(ctx);
 
-    if (!context.auth.scope.includes("mcp:read"))
+    if (!context.auth.scope.includes("mcp:read")) {
       return insufficientScope(context.auth, ["mcp:read"]);
+    }
+
     const { handleMcp } = await import("./mcp.ts");
 
     // The provider puts `auth` on the context at runtime; its own
@@ -138,7 +143,10 @@ export function oauthConfigured(env: Env): boolean {
 export async function oauthRoutes(request: Request, env: Env): Promise<Response> {
   const origin = new URL(request.url).origin;
 
-  if (!oauthConfigured(env)) return notConfigured(origin);
+  if (!oauthConfigured(env)) {
+    return notConfigured(origin);
+  }
+
   // The provider object is only a vehicle for the helpers, so a throwaway one
   // is enough: nothing here dispatches through it.
   const oauth = getOAuthApi(providerOptions(origin, app), env);
@@ -146,20 +154,27 @@ export async function oauthRoutes(request: Request, env: Env): Promise<Response>
 
   try {
     if (pathname === CALLBACK_PATH) {
-      if (request.method !== "GET")
+      if (request.method !== "GET") {
         return new Response(null, { status: 405, headers: { Allow: "GET" } });
+      }
 
       return await callback(request, env, origin, oauth);
     }
 
-    if (request.method === "POST") return await decide(request, env, origin, oauth);
+    if (request.method === "POST") {
+      return await decide(request, env, origin, oauth);
+    }
 
-    if (request.method === "GET") return await startAuthorization(request, origin, oauth);
+    if (request.method === "GET") {
+      return await startAuthorization(request, origin, oauth);
+    }
 
     return new Response(null, { status: 405, headers: { Allow: "GET, POST" } });
   } catch (error) {
     if (error instanceof AuthorizationError) {
-      if (error.redirectTo) return Response.redirect(error.redirectTo, 302);
+      if (error.redirectTo) {
+        return Response.redirect(error.redirectTo, 302);
+      }
 
       return renderMessage(400, error.description);
     }
@@ -195,7 +210,10 @@ async function decide(
   const form = await request.formData();
   const parsedHandle = z.string().min(1).safeParse(form.get("handle"));
 
-  if (!parsedHandle.success) return renderMessage(400, "Malformed consent form.");
+  if (!parsedHandle.success) {
+    return renderMessage(400, "Malformed consent form.");
+  }
+
   const handle = parsedHandle.data;
 
   if (form.get("decision") !== "allow") {
@@ -254,7 +272,9 @@ async function callback(
 
   const code = new URL(request.url).searchParams.get("code");
 
-  if (!code) return renderMessage(400, "GitHub did not return an authorization code.");
+  if (!code) {
+    return renderMessage(400, "GitHub did not return an authorization code.");
+  }
 
   const { clientId, clientSecret } = githubConfig(env);
 
@@ -274,15 +294,18 @@ async function callback(
 
   const exchanged = githubTokenSchema.parse(await res.json());
 
-  if (!res.ok || !exchanged.access_token)
+  if (!res.ok || !exchanged.access_token) {
     return renderMessage(
       502,
       `GitHub rejected the code exchange (${exchanged.error ?? res.status}).`,
     );
+  }
 
   const user = await fetchGithubUser(exchanged.access_token);
 
-  if (!user) return renderMessage(502, "Could not read your GitHub profile.");
+  if (!user) {
+    return renderMessage(502, "Could not read your GitHub profile.");
+  }
 
   const authorizationId = crypto.randomUUID();
 
@@ -303,8 +326,9 @@ async function callback(
 function githubConfig(env: Env) {
   const { GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET } = env;
 
-  if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET)
+  if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET) {
     throw new Error("GitHub sign-in is not configured");
+  }
 
   return { clientId: GITHUB_CLIENT_ID, clientSecret: GITHUB_CLIENT_SECRET };
 }
@@ -320,7 +344,10 @@ async function fetchGithubUser(accessToken: string): Promise<GithubUser | null> 
     signal: AbortSignal.timeout(10_000),
   });
 
-  if (!res.ok) return null;
+  if (!res.ok) {
+    return null;
+  }
+
   const user = githubUserSchema.safeParse(await res.json());
 
   return user.success ? user.data : null;
@@ -329,7 +356,7 @@ async function fetchGithubUser(accessToken: string): Promise<GithubUser | null> 
 async function s256(verifier: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
 
-  return btoa(String.fromCharCode(...new Uint8Array(digest)))
+  return btoa(String.fromCodePoint(...new Uint8Array(digest)))
     .replaceAll("+", "-")
     .replaceAll("/", "_")
     .replace(/=+$/, "");
@@ -431,14 +458,17 @@ export async function eventAuthorizationActive(
     if (
       grants.items.some(
         (grant) =>
-          grant.metadata?.authorizationId === authorizationId &&
+          z.object({ authorizationId: z.string() }).safeParse(grant.metadata).data
+            ?.authorizationId === authorizationId &&
           grant.scope.includes("mcp:read") &&
           (grant.resource === resource ||
             (Array.isArray(grant.resource) && grant.resource.includes(resource))) &&
           (!grant.expiresAt || grant.expiresAt > Date.now() / 1000),
       )
-    )
+    ) {
       return true;
+    }
+
     cursor = grants.cursor;
   } while (cursor);
 

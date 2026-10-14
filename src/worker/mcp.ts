@@ -1,3 +1,5 @@
+import { storedElementsSchema } from "../shared/schemas.ts";
+
 const serverCapabilities = { tools: {}, prompts: {}, resources: {}, events: {} };
 
 import {
@@ -34,11 +36,13 @@ export async function handleMcp(request: Request, env: Env, principal: McpPrinci
   try {
     await takeBudget(env, `mcp:${principal.userId}`, 120);
   } catch (error) {
-    if (error instanceof HTTPException)
+    if (error instanceof HTTPException) {
       return Response.json(
         { error: error.message },
         { status: error.status, headers: { "Retry-After": "60" } },
       );
+    }
+
     throw error;
   }
 
@@ -139,7 +143,8 @@ const opSchema = z.discriminatedUnion("op", [
       .string()
       .optional()
       .describe("required unless kind is given; e.g. kind=sql_db, label='Orders DB'"),
-    "shape": z
+    // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
+    shape: z
       .enum(GEOMETRIES)
       .optional()
       .describe("rectangle (default: services), ellipse (datastores/clients), diamond (decisions)"),
@@ -166,7 +171,8 @@ const opSchema = z.discriminatedUnion("op", [
     label: z.string().optional().describe("new label (frame name / note text for those types)"),
     color: color.optional(),
     text_color: textColor.optional(),
-    "shape": z.enum(GEOMETRIES).optional(),
+    // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
+    shape: z.enum(GEOMETRIES).optional(),
     dashed: z.boolean().optional(),
     width: z.number().optional(),
     height: z.number().optional(),
@@ -239,10 +245,15 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
   async function pick(link: string) {
     const parsed = parseLink(link);
 
-    if (!parsed) throw new Error("`diagram` must be the share link, e.g. https://…/d/<id>?k=<key>");
+    if (!parsed) {
+      throw new Error("`diagram` must be the share link, e.g. https://…/d/<id>?k=<key>");
+    }
+
     const row = await verifyKey(env, parsed.id, parsed.key);
 
-    if (!row) throw new Error("invalid or revoked diagram link");
+    if (!row) {
+      throw new Error("invalid or revoked diagram link");
+    }
 
     return row;
   }
@@ -334,7 +345,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
 
       const data =
         format === "raw"
-          ? { elements: await room(env, d.id).getRaw() }
+          ? { elements: await Promise.resolve(room(env, d.id).getRaw()) }
           : await room(env, d.id).getGraph();
 
       return {
@@ -358,7 +369,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     },
     async ({ diagram }: DiagramArgs) => {
       const d = await pick(diagram);
-      const elements = await room(env, d.id).getRaw();
+      const elements = storedElementsSchema.parse(await Promise.resolve(room(env, d.id).getRaw()));
 
       return {
         content: [{ type: "text" as const, text: `${elements.length} elements` }],
@@ -717,16 +728,17 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     "components",
     "components://catalog",
     { title: "Standard system design components", mimeType: "application/json" },
-    async (uri: URL) => ({
+    (uri: URL) => ({
       contents: [
         {
           uri: uri.href,
           mimeType: "application/json",
           text: JSON.stringify(
-            COMPONENTS.map(({ kind, label, "shape": geometry, group, icon }) => ({
+            COMPONENTS.map(({ kind, label, geometry, group, icon }) => ({
               kind,
               label,
-              "shape": geometry,
+              // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
+              shape: geometry,
               group,
               icon,
             })),
@@ -740,7 +752,7 @@ export function buildServer(env: Env, ctx: McpRequestContext, principal: McpPrin
     "rubric",
     "rubric://system-design",
     { title: "System design interview rubric", mimeType: "text/markdown" },
-    async (uri: URL) => ({
+    (uri: URL) => ({
       contents: [{ uri: uri.href, mimeType: "text/markdown", text: RUBRIC }],
     }),
   );

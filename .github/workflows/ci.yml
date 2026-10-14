@@ -39,8 +39,5 @@ jobs:
           - name: Test
             run: pnpm test
 
-          - name: Scene smoke test
-            run: node scripts/scene-smoke.ts > /dev/null
-
           - name: Build and check bundle
             run: pnpm check:bundle

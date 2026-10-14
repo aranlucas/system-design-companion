@@ -1,3 +1,6 @@
+import { z } from "zod";
+import { promiseResult } from "../src/shared/promise-result.ts";
+import { requiredTestValue } from "./helpers/required-test-value.ts";
 import type { JsonInput } from "./helpers/response-schemas.ts";
 import {
   apiFailureSchema,
@@ -20,10 +23,13 @@ import { makeEnv, testCtx, type TestEnv } from "./helpers/fakes.ts";
 function req(path: string, init?: RequestInit): Request {
   const headers = new Headers(init?.headers);
 
-  if (!headers.has("Cookie"))
+  if (!headers.has("Cookie")) {
     headers.set("Cookie", "sdc-session=11111111-1111-1111-1111-111111111111");
+  }
 
-  if (!headers.has("Origin")) headers.set("Origin", "http://localhost");
+  if (!headers.has("Origin")) {
+    headers.set("Origin", "http://localhost");
+  }
 
   return new Request(`http://localhost${path}`, { ...init, headers });
 }
@@ -33,15 +39,17 @@ function call(env: TestEnv, request: Request) {
   return worker.fetch(request, env.env, testCtx());
 }
 
-async function post(env: TestEnv, path: string, payload: JsonInput) {
-  return call(
-    env,
-    req(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }),
-  );
+function post(env: TestEnv, path: string, payload: JsonInput) {
+  return promiseResult(() => {
+    return call(
+      env,
+      req(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+    );
+  });
 }
 
 /** Response bodies the API returns. */
@@ -100,7 +108,7 @@ describe("diagrams API", () => {
   it("lists existing and agent-created diagrams without browser history, preserving old links", async () => {
     const env = makeEnv();
     const old = await create(env, "Existing board");
-    env.db.diagrams.get(old.id)!.created_at = 1;
+    requiredTestValue(env.db.diagrams.get(old.id)).created_at = 1;
     // MCP uses the same createDiagram function, without any browser registration.
     const agent = await createDiagram(env.env, "Agent board", undefined, "github%3A1");
     await post(env, `/api/d/${old.id}/template?k=${old.key}`, { name: "Template" });
@@ -112,7 +120,7 @@ describe("diagrams API", () => {
     expect(listed.map((d) => d.id)).toEqual([agent.id, old.id]);
 
     const opened = await Promise.all(
-      listed.map(async (d) => call(env, req(`/api/d/${d.id}?k=${d.key}`))),
+      listed.map((d) => promiseResult(() => call(env, req(`/api/d/${d.id}?k=${d.key}`)))),
     );
 
     expect(opened.map((result) => result.status)).toEqual([200, 200]);
@@ -122,11 +130,8 @@ describe("diagrams API", () => {
     expect(await again.json()).toEqual(page);
     await post(env, `/api/d/${agent.id}/rename?k=${listed[0].key}`, { name: "Renamed" });
     const updated = await call(env, req("/api/diagrams"));
-    expect(await updated.json()).toEqual(
-      expect.objectContaining({
-        items: expect.arrayContaining([expect.objectContaining({ name: "Renamed" })]),
-      }),
-    );
+    const updatedPage = diagramPageSchema.parse(await updated.json());
+    expect(updatedPage.items.some((item) => item.name === "Renamed")).toBe(true);
   });
 
   it("returns an empty server library before any boards exist", async () => {
@@ -144,7 +149,9 @@ describe("diagrams API", () => {
       Array.from({ length: 5 }, (_, i) => create(env, `Board ${i}`)),
     );
 
-    for (const d of created) env.db.diagrams.get(d.id)!.created_at = 100;
+    for (const d of created) {
+      requiredTestValue(env.db.diagrams.get(d.id)).created_at = 100;
+    }
 
     const expected = created
       .map((d) => d.id)
@@ -166,7 +173,9 @@ describe("diagrams API", () => {
       await (
         await call(
           env,
-          req(`/api/diagrams?limit=2&cursor=${encodeURIComponent(first.nextCursor!)}`),
+          req(
+            `/api/diagrams?limit=2&cursor=${encodeURIComponent(requiredTestValue(first.nextCursor))}`,
+          ),
         )
       ).json(),
     ) satisfies typeof first;
@@ -177,7 +186,9 @@ describe("diagrams API", () => {
       await (
         await call(
           env,
-          req(`/api/diagrams?limit=2&cursor=${encodeURIComponent(second.nextCursor!)}`),
+          req(
+            `/api/diagrams?limit=2&cursor=${encodeURIComponent(requiredTestValue(second.nextCursor))}`,
+          ),
         )
       ).json(),
     ) satisfies typeof first;
@@ -202,7 +213,7 @@ describe("diagrams API", () => {
     ];
 
     const results = await Promise.all(
-      params.map(async (param) => call(env, req(`/api/diagrams?${param}`))),
+      params.map((param) => promiseResult(() => call(env, req(`/api/diagrams?${param}`)))),
     );
 
     expect(results.every((res) => res.status === 400)).toBe(true);
@@ -216,7 +227,7 @@ describe("diagrams API", () => {
       await (await call(env, req("/api/diagrams"))).json(),
     ) satisfies DiagramPage;
 
-    const libraryKey = page.items.find((d) => d.id === target.id)!.key;
+    const libraryKey = requiredTestValue(page.items.find((d) => d.id === target.id)).key;
     expect((await call(env, req(`/api/d/${target.id}?k=wrong`, { method: "DELETE" }))).status).toBe(
       403,
     );
@@ -231,7 +242,9 @@ describe("diagrams API", () => {
     expect(result.items.map((d) => d.id)).toEqual([keep.id]);
 
     const blocked = await Promise.all(
-      [target.key, libraryKey].map(async (key) => call(env, req(`/api/d/${target.id}?k=${key}`))),
+      [target.key, libraryKey].map((key) =>
+        promiseResult(() => call(env, req(`/api/d/${target.id}?k=${key}`))),
+      ),
     );
 
     expect(blocked.map((res) => res.status)).toEqual([403, 403]);
@@ -253,9 +266,14 @@ describe("diagrams API", () => {
     const env = makeEnv();
     const d = await create(env, "HLD");
     const paths = [`/api/d/${d.id}`, `/api/d/${d.id}?k=wrong`, `/api/d/unknown-id?k=${d.key}`];
-    const results = await Promise.all(paths.map(async (path) => call(env, req(path))));
 
-    for (const res of results) expect(res.status).toBe(403);
+    const results = await Promise.all(
+      paths.map((path) => promiseResult(() => call(env, req(path)))),
+    );
+
+    for (const res of results) {
+      expect(res.status).toBe(403);
+    }
   });
 
   it("renames through D1 and the room together", async () => {
@@ -265,7 +283,7 @@ describe("diagrams API", () => {
     expect(res.status).toBe(200);
     const got = await call(env, req(`/api/d/${d.id}?k=${d.key}`));
     expect(await body(got)).toMatchObject({ name: "New" });
-    expect((await env.rooms.get(d.id)!.info()).name).toBe("New");
+    expect((await requiredTestValue(env.rooms.get(d.id)).info()).name).toBe("New");
   });
 
   it("rejects invalid room names without changing the saved name", async () => {
@@ -278,7 +296,10 @@ describe("diagrams API", () => {
       ),
     );
 
-    for (const response of responses) expect(response.status).toBe(400);
+    for (const response of responses) {
+      expect(response.status).toBe(400);
+    }
+
     const response = await call(env, req(`/api/d/${d.id}?k=${d.key}`));
     expect(await body(response)).toMatchObject({ name: "Original" });
   });
@@ -286,7 +307,7 @@ describe("diagrams API", () => {
   it("creates from a builtin template into the live room", async () => {
     const env = makeEnv();
     const d = await create(env, "Web", "builtin:web-baseline");
-    const g = await env.rooms.get(d.id)!.getGraph();
+    const g = await requiredTestValue(env.rooms.get(d.id)).getGraph();
     expect(g.nodes).toHaveLength(9);
     expect(g.edges).toHaveLength(8);
   });
@@ -298,7 +319,7 @@ describe("diagrams API", () => {
     expect(tpl.status).toBe(200);
     const tplId = (withIdSchema.parse(await body(tpl)) satisfies WithId).id;
     const copy = await create(env, "Copy", tplId);
-    const g = await env.rooms.get(copy.id)!.getGraph();
+    const g = await requiredTestValue(env.rooms.get(copy.id)).getGraph();
     expect(g.nodes).toHaveLength(6);
   });
 
@@ -335,7 +356,7 @@ describe("snapshots API", () => {
   it("snapshots, lists and restores", async () => {
     const env = makeEnv();
     const d = await create(env, "V");
-    const room = env.rooms.get(d.id)!;
+    const room = requiredTestValue(env.rooms.get(d.id));
     await room.applyPatch([{ op: "add_node", label: "A" }], "human");
 
     const snap = await post(env, `/api/d/${d.id}/snapshots?k=${d.key}`, { name: "v1" });
@@ -352,13 +373,16 @@ describe("snapshots API", () => {
     const restore = await post(env, `/api/d/${d.id}/restore?k=${d.key}`, { snapshotId: meta.id });
     expect(restore.status).toBe(200);
     const g = await room.getGraph();
-    expect(g.nodes!.map((n) => n.label)).toEqual(["A"]);
+    expect(requiredTestValue(g.nodes).map((n) => n.label)).toEqual(["A"]);
   });
 
   it("tidies through HTTP as the system origin", async () => {
     const env = makeEnv();
     const d = await create(env, "T");
-    await env.rooms.get(d.id)!.applyPatch([{ op: "add_node", label: "A" }], "human");
+    await requiredTestValue(env.rooms.get(d.id)).applyPatch(
+      [{ op: "add_node", label: "A" }],
+      "human",
+    );
     const res = await post(env, `/api/d/${d.id}/tidy?k=${d.key}`, {});
     expect(res.status).toBe(200);
     // apply_patch already tidied it: nothing to change, so no snapshot.
@@ -400,7 +424,7 @@ describe("files API", () => {
   it("copies referenced images into templates and diagrams made from them", async () => {
     const env = makeEnv();
     const d = await create(env, "Source");
-    await env.rooms.get(d.id)!.seed([
+    await requiredTestValue(env.rooms.get(d.id)).seed([
       {
         id: "img",
         type: "image",
@@ -436,10 +460,8 @@ describe("request validation", () => {
     const response = await post(env, path, payload);
     expect(response.status).toBe(400);
     const failure = apiFailureSchema.parse(await response.json()) satisfies ApiFailure;
-    expect(failure).toMatchObject({
-      success: false,
-      error: { name: "ZodError", message: expect.any(String) },
-    });
+    expect(failure).toMatchObject({ success: false, error: { name: "ZodError" } });
+    expect(z.object({ message: z.string() }).parse(failure.error).message).toBeTypeOf("string");
     expect(apiErrorMessage(failure, "fallback")).not.toBe("fallback");
     expect(env.db.diagrams.size).toBe(1);
     expect(env.db.snapshots).toHaveLength(0);
@@ -510,7 +532,7 @@ describe("routing", () => {
     ];
 
     const responses = await Promise.all(
-      paths.map(async (path) => call(env, req(`${path}?k=wrong`))),
+      paths.map((path) => promiseResult(() => call(env, req(`${path}?k=wrong`)))),
     );
 
     expect(responses.map((response) => response.status)).toEqual(paths.map(() => 403));
@@ -526,7 +548,11 @@ describe("routing", () => {
     const env = makeEnv();
     const d = await create(env, "Socket");
     const response = new Response("room response", { headers: { "X-Room": d.id } });
-    const fetch = vi.spyOn(env.rooms.get(d.id)!, "fetch").mockResolvedValue(response);
+
+    const fetch = vi
+      .spyOn(requiredTestValue(env.rooms.get(d.id)), "fetch")
+      .mockResolvedValue(response);
+
     const request = req(`/ws/${d.id}?k=${d.key}`, { headers: { Upgrade: "websocket" } });
     expect(await call(env, request)).toBe(response);
     expect(fetch).toHaveBeenCalledExactlyOnceWith(request);
@@ -544,7 +570,10 @@ describe("routing", () => {
       "/api/diagrams/",
     ];
 
-    const responses = await Promise.all(paths.map(async (path) => call(env, req(path))));
+    const responses = await Promise.all(
+      paths.map((path) => promiseResult(() => call(env, req(path)))),
+    );
+
     expect(responses.map((response) => response.status)).toEqual(paths.map(() => 404));
   });
 

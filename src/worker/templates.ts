@@ -63,7 +63,8 @@ export const BUILTIN_TEMPLATES: BuiltinTemplate[] = [
         op: "add_node",
         ref: "client",
         label: "Client",
-        "shape": "ellipse",
+        // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
+        shape: "ellipse",
         place: { at: { x: 0, y: 200 } },
       },
       {
@@ -92,7 +93,8 @@ export const BUILTIN_TEMPLATES: BuiltinTemplate[] = [
         op: "add_node",
         ref: "db",
         label: "Primary DB",
-        "shape": "ellipse",
+        // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
+        shape: "ellipse",
         place: { right_of: "api" },
         color: "green",
       },
@@ -108,7 +110,8 @@ export const BUILTIN_TEMPLATES: BuiltinTemplate[] = [
         op: "add_node",
         ref: "blob",
         label: "Object Storage",
-        "shape": "ellipse",
+        // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
+        shape: "ellipse",
         place: { right_of: "worker" },
         color: "green",
       },
@@ -131,7 +134,8 @@ export const BUILTIN_TEMPLATES: BuiltinTemplate[] = [
         op: "add_node",
         ref: "client",
         label: "Client",
-        "shape": "ellipse",
+        // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
+        shape: "ellipse",
         place: { at: { x: 0, y: 200 } },
       },
       { op: "add_node", ref: "api", label: "API", place: { right_of: "client" }, color: "blue" },
@@ -147,7 +151,8 @@ export const BUILTIN_TEMPLATES: BuiltinTemplate[] = [
         op: "add_node",
         ref: "db",
         label: "DB (primary)",
-        "shape": "ellipse",
+        // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
+        shape: "ellipse",
         place: { right_of: "cache" },
         color: "green",
       },
@@ -155,7 +160,8 @@ export const BUILTIN_TEMPLATES: BuiltinTemplate[] = [
         op: "add_node",
         ref: "rep",
         label: "Read replicas",
-        "shape": "ellipse",
+        // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
+        shape: "ellipse",
         place: { below: "db", gap: 80 },
         color: "green",
       },
@@ -175,7 +181,8 @@ export const BUILTIN_TEMPLATES: BuiltinTemplate[] = [
         op: "add_node",
         ref: "client",
         label: "Clients",
-        "shape": "ellipse",
+        // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
+        shape: "ellipse",
         place: { at: { x: 0, y: 200 } },
       },
       {
@@ -203,7 +210,8 @@ export const BUILTIN_TEMPLATES: BuiltinTemplate[] = [
         op: "add_node",
         ref: "store",
         label: "Message Store",
-        "shape": "ellipse",
+        // eslint-disable-next-line anti-slop/no-shape-in-symbol-names -- Public diagram wire key; renaming it would break existing clients.
+        shape: "ellipse",
         place: { right_of: "svc" },
         color: "green",
       },

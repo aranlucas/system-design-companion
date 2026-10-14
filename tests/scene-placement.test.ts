@@ -1,3 +1,4 @@
+import { elementAttribute } from "../src/shared/element-attributes.ts";
 // Placement hints, overlap nudging, frame inference and frame moves.
 import { describe, expect, it } from "vitest";
 import { Scene, type Op } from "../src/worker/scene.ts";
@@ -102,7 +103,7 @@ describe("frames", () => {
       { op: "add_node", ref: "b", label: "B", place: { right_of: "a" } },
     ]);
 
-    expect(s.resolve("b").frameId).toBe(s.resolve("f").id);
+    expect(elementAttribute(s.resolve("b"), "frameId")).toBe(s.resolve("f").id);
   });
 
   it("attaches nodes dropped inside a frame", () => {
@@ -118,7 +119,7 @@ describe("frames", () => {
       { op: "add_node", ref: "a", label: "A", place: { at: { x: 100, y: 100 } } },
     ]);
 
-    expect(s.resolve("a").frameId).toBe(s.resolve("f").id);
+    expect(elementAttribute(s.resolve("a"), "frameId")).toBe(s.resolve("f").id);
   });
 
   it("grows a frame to enclose out-of-bounds children", () => {
@@ -177,7 +178,7 @@ describe("frames", () => {
     expect(res[0].ok).toBe(true);
     const f = box(s, "f");
     const a = box(s, "a");
-    expect(s.resolve("a").frameId).toBe(s.resolve("f").id);
+    expect(elementAttribute(s.resolve("a"), "frameId")).toBe(s.resolve("f").id);
     expect(a.x).toBeGreaterThanOrEqual(f.x);
     expect(a.y).toBeGreaterThanOrEqual(f.y);
     expect(a.x + a.w).toBeLessThanOrEqual(f.x + f.w);

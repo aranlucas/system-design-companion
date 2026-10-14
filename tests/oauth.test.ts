@@ -1,3 +1,5 @@
+import { promiseResult } from "../src/shared/promise-result.ts";
+import { requiredTestValue } from "./helpers/required-test-value.ts";
 import type { JsonInput } from "./helpers/response-schemas.ts";
 import { z } from "zod";
 import { jsonObjectSchema, rpcResultSchema, tokensSchema } from "./helpers/response-schemas.ts";
@@ -40,25 +42,47 @@ beforeEach(() => {
   env.env.GITHUB_CLIENT_ID = "github-client";
   env.env.GITHUB_CLIENT_SECRET = "github-secret";
   vi.stubGlobal("Cloudflare", { compatibilityFlags: { global_fetch_strictly_public: true } });
-  github = vi.fn(async (input: string | URL, init?: RequestInit) => {
-    if (String(input) === "https://github.com/login/oauth/access_token") {
-      expect(init?.redirect).toBe("error");
+  github = vi.fn((input: string | URL) => {
+    return promiseResult(() => {
+      if (String(input) === "https://github.com/login/oauth/access_token") {
+        return Response.json({ access_token: "upstream-github-token" });
+      }
 
-      return Response.json({ access_token: "upstream-github-token" });
-    }
+      if (String(input) === "https://api.github.com/user") {
+        return Response.json({ id: 123, login: "tester", name: "Test User" });
+      }
 
-    if (String(input) === "https://api.github.com/user") {
-      expect(new Headers(init?.headers).get("user-agent")).toBe("system-design-companion");
-
-      return Response.json({ id: 123, login: "tester", name: "Test User" });
-    }
-
-    throw new Error(`Unexpected external request: ${String(input)}`);
+      throw new Error(`Unexpected external request: ${String(input)}`);
+    });
   });
   vi.stubGlobal("fetch", github);
 });
 
-afterEach(() => vi.unstubAllGlobals());
+function expectGithubRequestPolicy() {
+  const tokenRequests = github.mock.calls.filter(
+    ([input]) => String(input) === "https://github.com/login/oauth/access_token",
+  );
+
+  for (const [, init] of tokenRequests) {
+    expect(init?.redirect).toBe("error");
+  }
+
+  const userRequests = github.mock.calls.filter(
+    ([input]) => String(input) === "https://api.github.com/user",
+  );
+
+  for (const [, init] of userRequests) {
+    expect(new Headers(init?.headers).get("user-agent")).toBe("system-design-companion");
+  }
+}
+
+afterEach(() => {
+  try {
+    expectGithubRequestPolicy();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
 
 function call(path: string, init?: RequestInit) {
   return worker.fetch(new Request(new URL(path, ORIGIN), init), env.env, testCtx());
@@ -93,7 +117,7 @@ async function consent(scope = "mcp:read mcp:write") {
   const verifier = crypto.randomUUID() + crypto.randomUUID();
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
 
-  const challenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
+  const challenge = btoa(String.fromCodePoint(...new Uint8Array(digest)))
     .replaceAll("+", "-")
     .replaceAll("/", "_")
     .replace(/=+$/, "");
@@ -113,7 +137,7 @@ async function consent(scope = "mcp:read mcp:write") {
   expect(page.status).toBe(200);
   expect(page.headers.get("content-security-policy")).toContain("frame-ancestors");
   const html = await page.text();
-  const handle = /name="handle" value="([^"]+)"/.exec(html)![1];
+  const handle = requiredTestValue(/name="handle" value="([^"]+)"/.exec(html))[1];
 
   return { clientId, verifier, handle, cookie: cookies(page), html };
 }
@@ -122,7 +146,9 @@ async function authorize(scope = "mcp:read mcp:write"): Promise<Authorization> {
   const started = await consent(scope);
   const form = new URLSearchParams({ handle: started.handle, decision: "allow" });
 
-  for (const item of scope.split(" ")) form.append("scope", item);
+  for (const item of scope.split(" ")) {
+    form.append("scope", item);
+  }
 
   const approved = await call("/authorize", {
     method: "POST",
@@ -131,18 +157,18 @@ async function authorize(scope = "mcp:read mcp:write"): Promise<Authorization> {
   });
 
   expect(approved.status).toBe(302);
-  const githubUrl = new URL(approved.headers.get("location")!);
+  const githubUrl = new URL(requiredTestValue(approved.headers.get("location")));
   expect(githubUrl.hostname).toBe("github.com");
   expect(githubUrl.searchParams.get("code_challenge_method")).toBe("S256");
   expect(githubUrl.searchParams.get("scope")).toBe("");
 
   const callback = await call(
-    `/github/callback?${new URLSearchParams({ state: githubUrl.searchParams.get("state")!, code: "github-code" }).toString()}`,
+    `/github/callback?${new URLSearchParams({ state: requiredTestValue(githubUrl.searchParams.get("state")), code: "github-code" }).toString()}`,
     { headers: { cookie: cookies(approved) } },
   );
 
   expect(callback.status).toBe(302);
-  const redirected = new URL(callback.headers.get("location")!);
+  const redirected = new URL(requiredTestValue(callback.headers.get("location")));
   expect(redirected.origin + redirected.pathname).toBe(REDIRECT);
   expect(redirected.searchParams.get("state")).toBe("client-state");
   expect(redirected.searchParams.get("code")).toBeTruthy();
@@ -157,7 +183,11 @@ function exchange(authorization: Authorization, overrides: Record<string, string
       grant_type: "authorization_code",
       client_id: authorization.clientId,
       redirect_uri: REDIRECT,
-      code: new URL(authorization.callback.headers.get("location")!).searchParams.get("code")!,
+      code: requiredTestValue(
+        new URL(requiredTestValue(authorization.callback.headers.get("location"))).searchParams.get(
+          "code",
+        ),
+      ),
       code_verifier: authorization.verifier,
       resource: RESOURCE,
       ...overrides,
@@ -184,7 +214,9 @@ function rpc(token: string, method: string, params: Record<string, JsonInput> = 
 
   const requestName = z.string().safeParse(params.name);
 
-  if (requestName.success) headers.set("mcp-name", requestName.data);
+  if (requestName.success) {
+    headers.set("mcp-name", requestName.data);
+  }
 
   return call("/mcp", {
     method: "POST",
@@ -219,6 +251,7 @@ async function rpcBody(response: Response): Promise<RpcResult> {
 describe("OAuth authorization", () => {
   it("completes consent, GitHub PKCE, token exchange and authenticated event discovery", async () => {
     const { tokens: issued } = await tokens();
+
     expect(issued.access_token).not.toBe("upstream-github-token");
     expect(issued.access_token.startsWith("github%3A123:")).toBe(true);
     const response = await rpc(issued.access_token, "events/list");
@@ -233,23 +266,29 @@ describe("OAuth authorization", () => {
     const { auth, tokens: issued } = await tokens();
     const diagram = await createDiagram(env.env, "Watched");
     const deliveries: string[] = [];
-    const upstream = github.getMockImplementation()!;
-    github.mockImplementation(async (input: string | URL, init?: RequestInit) => {
-      const url = new URL(input);
+    const upstream = requiredTestValue(github.getMockImplementation());
+    github.mockImplementation((input: string | URL, init?: RequestInit) => {
+      return promiseResult(() => {
+        const url = new URL(input);
 
-      if (url.hostname === "cloudflare-dns.com")
-        return Response.json({ Status: 0, TC: false, Answer: [{ type: 1, data: "8.8.8.8" }] });
+        if (url.hostname === "cloudflare-dns.com") {
+          return Response.json({ Status: 0, TC: false, Answer: [{ type: 1, data: "8.8.8.8" }] });
+        }
 
-      if (url.hostname === "receiver.example.com") {
-        const body = jsonObjectSchema.parse(JSON.parse(z.string().parse(init?.body)));
+        if (url.hostname === "receiver.example.com") {
+          const body = jsonObjectSchema.parse(JSON.parse(z.string().parse(init?.body)));
 
-        if (body.type === "verification") return Response.json({ challenge: body.challenge });
-        deliveries.push(z.string().parse(init?.body));
+          if (body.type === "verification") {
+            return Response.json({ challenge: body.challenge });
+          }
 
-        return new Response(null, { status: 204 });
-      }
+          deliveries.push(z.string().parse(init?.body));
 
-      return upstream(input, init);
+          return new Response(null, { status: 204 });
+        }
+
+        return upstream(input, init);
+      });
     });
 
     const subscription = await rpc(issued.access_token, "events/subscribe", {
@@ -381,9 +420,9 @@ describe("OAuth authorization", () => {
     });
 
     expect(response.status).toBe(302);
-    expect(new URL(response.headers.get("location")!).searchParams.get("error")).toBe(
-      "access_denied",
-    );
+    expect(
+      new URL(requiredTestValue(response.headers.get("location"))).searchParams.get("error"),
+    ).toBe("access_denied");
     expect(github).not.toHaveBeenCalled();
   });
 

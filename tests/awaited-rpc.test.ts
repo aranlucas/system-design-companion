@@ -1,3 +1,4 @@
+import { promiseResult } from "../src/shared/promise-result.ts";
 import { describe, expect, it } from "vitest";
 import type { DiagramRoom } from "../src/worker/room.ts";
 import { awaitedRpc } from "./helpers/awaited-rpc.ts";
@@ -6,7 +7,7 @@ const info = { id: "test", name: "Test", elements: 0, tabs: 0, focusedAt: 0 };
 
 describe("awaited-only RPC test adapter", () => {
   it("preserves an awaited result and rejects unsupported pipelining and disposal", async () => {
-    const stub = awaitedRpc<DiagramRoom>({ info: async () => info });
+    const stub = awaitedRpc<DiagramRoom>({ info: () => promiseResult(() => info) });
     const pending = stub.info();
     expect(() => pending.name).toThrow("Unimplemented fake member");
     const result = await pending;
@@ -16,8 +17,10 @@ describe("awaited-only RPC test adapter", () => {
   it("preserves rejected methods and their receiver", async () => {
     class Methods {
       #message = "original failure";
-      async info(): Promise<typeof info> {
-        throw new Error(this.#message);
+      info(): Promise<typeof info> {
+        return promiseResult(() => {
+          throw new Error(this.#message);
+        });
       }
     }
 

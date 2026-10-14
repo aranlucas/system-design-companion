@@ -20,12 +20,15 @@ const chunk = results
   .flatMap((r) => ("output" in r ? r.output : []))
   .find((o) => o.type === "chunk");
 
-if (!chunk || chunk.type !== "chunk") throw new Error("view build produced no JS chunk");
+if (chunk?.type !== "chunk") {
+  throw new Error("view build produced no JS chunk");
+}
 
-const js = chunk.code.replaceAll("</script", "<\\/script");
+const js = chunk.code.replaceAll("</script", String.raw`<\/script`);
 
 const html = readFileSync("src/view/index.html", "utf8").replace("/* VIEW_SCRIPT */", () => js);
 
 writeFileSync("public/mcp-view.html", html);
 
+// eslint-disable-next-line no-console -- This CLI command reports its validation/build results to the terminal.
 console.log(`view: public/mcp-view.html (${(html.length / 1024).toFixed(1)} KiB)`);

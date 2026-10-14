@@ -31,14 +31,21 @@ const apply = (items: LayoutItem[]) =>
 const tooClose = (bs: Box[]) => {
   let n = 0;
 
-  for (let i = 0; i < bs.length; i++)
+  for (let i = 0; i < bs.length; i++) {
     for (let j = i + 1; j < bs.length; j++) {
       const [a, b] = [bs[i], bs[j]];
       const m = GAP - 1;
 
-      if (a.x < b.x + b.w + m && b.x < a.x + a.w + m && a.y < b.y + b.h + m && b.y < a.y + a.h + m)
+      if (
+        a.x < b.x + b.w + m &&
+        b.x < a.x + a.w + m &&
+        a.y < b.y + b.h + m &&
+        b.y < a.y + a.h + m
+      ) {
         n++;
+      }
     }
+  }
 
   return n;
 };
@@ -59,7 +66,10 @@ describe("solveLayout", () => {
   it.each([3, 9])("settles within four rounds with alignment on (seed %i)", (seed) => {
     let items = crowd(40, seed);
 
-    for (let round = 0; round < 4; round++) items = apply(items);
+    for (let round = 0; round < 4; round++) {
+      items = apply(items);
+    }
+
     expect(solveLayout(items, opts).every((m) => !m.dx && !m.dy)).toBe(true);
     expect(tooClose(items.map((item) => item.box))).toBe(0);
   });

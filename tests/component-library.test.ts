@@ -1,3 +1,4 @@
+import { elementAttribute } from "../src/shared/element-attributes.ts";
 import { z } from "zod";
 import { libraryDataSchema } from "./helpers/response-schemas.ts";
 import { describe, expect, it } from "vitest";
@@ -24,11 +25,11 @@ const artwork = (e: El) => ({
   y: e.y,
   width: e.width,
   height: e.height,
-  points: e.points,
-  text: e.text,
-  strokeColor: e.strokeColor,
-  backgroundColor: e.backgroundColor,
-  customData: e.customData,
+  points: elementAttribute(e, "points"),
+  text: elementAttribute(e, "text"),
+  strokeColor: elementAttribute(e, "strokeColor"),
+  backgroundColor: elementAttribute(e, "backgroundColor"),
+  customData: elementAttribute(e, "customData"),
 });
 
 describe("component library import", () => {
@@ -65,12 +66,18 @@ describe("component library import", () => {
       for (const element of item.elements) {
         for (const bound of z
           .array(z.object({ id: z.string() }))
-          .parse(element.boundElements ?? []))
+          .parse(elementAttribute(element, "boundElements") ?? [])) {
           expect(ids.has(bound.id)).toBe(true);
-
-        if (element.type === "text" && element.containerId) {
-          expect(ids.has(z.string().parse(element.containerId))).toBe(true);
         }
+      }
+
+      const containers = item.elements
+        .filter((element) => element.type === "text")
+        .map((element) => elementAttribute(element, "containerId"))
+        .filter(Boolean);
+
+      for (const container of containers) {
+        expect(ids.has(z.string().parse(container))).toBe(true);
       }
     }
   });

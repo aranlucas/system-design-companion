@@ -1,3 +1,4 @@
+import { promiseResult } from "../shared/promise-result.ts";
 import { safeParse, type $ZodType } from "zod/v4/core";
 import {
   storedElementSchema,
@@ -102,39 +103,54 @@ export class DiagramRoom extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    void ctx.blockConcurrencyWhile(async () => {
-      const sql = ctx.storage.sql;
-      sql.exec("CREATE TABLE IF NOT EXISTS elements (id TEXT PRIMARY KEY, json TEXT NOT NULL)");
-      sql.exec("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)");
-      sql.exec(
-        "CREATE TABLE IF NOT EXISTS tombstones (id TEXT PRIMARY KEY, deleted_at INTEGER NOT NULL)",
-      );
+    this.ctx.waitUntil(
+      ctx.blockConcurrencyWhile(() => {
+        return promiseResult(() => {
+          const sql = ctx.storage.sql;
+          sql.exec("CREATE TABLE IF NOT EXISTS elements (id TEXT PRIMARY KEY, json TEXT NOT NULL)");
+          sql.exec("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)");
+          sql.exec(
+            "CREATE TABLE IF NOT EXISTS tombstones (id TEXT PRIMARY KEY, deleted_at INTEGER NOT NULL)",
+          );
 
-      for (const row of sql.exec<ElementRow>("SELECT json FROM elements")) {
-        const el = storedElementSchema.parse(JSON.parse(row.json));
-        this.els.set(el.id, el);
-      }
+          for (const row of sql.exec<ElementRow>("SELECT json FROM elements")) {
+            const el = storedElementSchema.parse(JSON.parse(row.json));
+            this.els.set(el.id, el);
+          }
 
-      for (const row of sql.exec<TombstoneRow>("SELECT id, deleted_at FROM tombstones"))
-        this.deletedAt.set(row.id, row.deleted_at);
+          for (const row of sql.exec<TombstoneRow>("SELECT id, deleted_at FROM tombstones")) {
+            this.deletedAt.set(row.id, row.deleted_at);
+          }
 
-      // Tombstones written before this table existed start their TTL now.
-      const untracked = [...this.els.values()].filter(
-        (e) => e.isDeleted && !this.deletedAt.has(e.id),
-      );
+          // Tombstones written before this table existed start their TTL now.
+          const untracked = [...this.els.values()].filter(
+            (e) => e.isDeleted && !this.deletedAt.has(e.id),
+          );
 
-      if (untracked.length) this.trackTombstones(untracked);
+          if (untracked.length) {
+            this.trackTombstones(untracked);
+          }
 
-      for (const row of sql.exec<MetaRow>("SELECT k, v FROM meta")) {
-        if (row.k === "deleted") this.deleted = row.v === "true";
+          for (const row of sql.exec<MetaRow>("SELECT k, v FROM meta")) {
+            if (row.k === "deleted") {
+              this.deleted = row.v === "true";
+            }
 
-        if (row.k === "id") this.diagramId = row.v;
+            if (row.k === "id") {
+              this.diagramId = row.v;
+            }
 
-        if (row.k === "name") this.name = row.v;
+            if (row.k === "name") {
+              this.name = row.v;
+            }
 
-        if (row.k === "focusAt") this.lastFocusAt = Number(row.v);
-      }
-    });
+            if (row.k === "focusAt") {
+              this.lastFocusAt = Number(row.v);
+            }
+          }
+        });
+      }),
+    );
   }
 
   // ---------- persistence ----------
@@ -158,32 +174,44 @@ export class DiagramRoom extends DurableObject<Env> {
         );
       }
 
-      for (const el of tombstoned)
+      for (const el of tombstoned) {
         sql.exec("INSERT OR REPLACE INTO tombstones (id, deleted_at) VALUES (?, ?)", el.id, now);
+      }
 
-      for (const el of revived) sql.exec("DELETE FROM tombstones WHERE id = ?", el.id);
+      for (const el of revived) {
+        sql.exec("DELETE FROM tombstones WHERE id = ?", el.id);
+      }
     });
     // Publish in memory only after every write succeeds.
     this.edits++;
 
-    for (const el of changed) this.els.set(el.id, el);
+    for (const el of changed) {
+      this.els.set(el.id, el);
+    }
 
-    for (const el of tombstoned) this.deletedAt.set(el.id, now);
+    for (const el of tombstoned) {
+      this.deletedAt.set(el.id, now);
+    }
 
-    for (const el of revived) this.deletedAt.delete(el.id);
+    for (const el of revived) {
+      this.deletedAt.delete(el.id);
+    }
   }
 
   private trackTombstones(els: El[], now = Date.now()) {
     this.ctx.storage.transactionSync(() => {
-      for (const el of els)
+      for (const el of els) {
         this.ctx.storage.sql.exec(
           "INSERT OR REPLACE INTO tombstones (id, deleted_at) VALUES (?, ?)",
           el.id,
           now,
         );
+      }
     });
 
-    for (const el of els) this.deletedAt.set(el.id, now);
+    for (const el of els) {
+      this.deletedAt.set(el.id, now);
+    }
   }
 
   /**
@@ -192,13 +220,18 @@ export class DiagramRoom extends DurableObject<Env> {
    * back at a lower version would then stay hidden in that tab.
    */
   private collectTombstones(now = Date.now()) {
-    if (this.ctx.getWebSockets().length) return 0;
+    if (this.ctx.getWebSockets().length) {
+      return 0;
+    }
 
     const expired = [...this.deletedAt].flatMap(([id, at]) =>
       now - at >= TOMBSTONE_TTL_MS ? [id] : [],
     );
 
-    if (!expired.length) return 0;
+    if (!expired.length) {
+      return 0;
+    }
+
     this.ctx.storage.transactionSync(() => {
       for (const id of expired) {
         this.ctx.storage.sql.exec("DELETE FROM elements WHERE id = ?", id);
@@ -218,7 +251,9 @@ export class DiagramRoom extends DurableObject<Env> {
     const data = JSON.stringify(msg);
 
     for (const ws of this.ctx.getWebSockets()) {
-      if (ws === except) continue;
+      if (ws === except) {
+        continue;
+      }
 
       try {
         ws.send(data);
@@ -229,12 +264,20 @@ export class DiagramRoom extends DurableObject<Env> {
   }
 
   private commit(scene: Scene, origin: "agent" | "system") {
-    if (this.deleted) throw new Error("Diagram deleted.");
+    if (this.deleted) {
+      throw new Error("Diagram deleted.");
+    }
 
-    if (scene.els.size > MAX_SCENE_ELEMENTS) throw new Error("Diagram element limit reached.");
+    if (scene.els.size > MAX_SCENE_ELEMENTS) {
+      throw new Error("Diagram element limit reached.");
+    }
+
     const changed = scene.changedElements();
 
-    if (!changed.length) return 0;
+    if (!changed.length) {
+      return 0;
+    }
+
     this.persist(changed);
     this.broadcast({ type: "update", elements: changed, origin });
     this.emit("diagram.changed", {
@@ -254,6 +297,7 @@ export class DiagramRoom extends DurableObject<Env> {
   private emit(name: string, data: DiagramEventData) {
     this.ctx.waitUntil(
       deliverDiagramEvent(this.env, this.diagramId, name, data).catch((e) =>
+        // eslint-disable-next-line no-console -- Operational failure reporting must remain visible to the host error logs.
         console.error("mcp events:", e),
       ),
     );
@@ -261,27 +305,34 @@ export class DiagramRoom extends DurableObject<Env> {
 
   // ---------- lifecycle ----------
 
-  async init(id: string, name: string) {
-    this.diagramId = id;
-    this.name = name;
-    this.setMeta("id", id);
-    this.setMeta("name", name);
+  init(id: string, name: string) {
+    return promiseResult(() => {
+      this.diagramId = id;
+      this.name = name;
+      this.setMeta("id", id);
+      this.setMeta("name", name);
+    });
   }
 
-  async deactivate() {
-    this.setMeta("deleted", "true");
-    this.deleted = true;
+  deactivate() {
+    return promiseResult(() => {
+      this.setMeta("deleted", "true");
+      this.deleted = true;
 
-    for (const ws of this.ctx.getWebSockets()) {
-      try {
-        ws.close(1008, "Diagram deleted");
-      } catch {
-        /* already closed */
+      for (const ws of this.ctx.getWebSockets()) {
+        try {
+          ws.close(1008, "Diagram deleted");
+        } catch {
+          /* already closed */
+        }
       }
-    }
 
-    for (const pending of this.pending.values()) pending.reject(new Error("Diagram deleted"));
-    this.pending.clear();
+      for (const pending of this.pending.values()) {
+        pending.reject(new Error("Diagram deleted"));
+      }
+
+      this.pending.clear();
+    });
   }
 
   /** Retain only a deletion marker, so late sockets and RPCs cannot revive this room. */
@@ -303,11 +354,13 @@ export class DiagramRoom extends DurableObject<Env> {
     this.diagramId = "";
   }
 
-  async rename(name: string) {
-    this.name = name;
-    this.setMeta("name", name);
-    this.broadcast({ type: "rename", name });
-    this.emit("diagram.renamed", { diagram_id: this.diagramId, name });
+  rename(name: string) {
+    return promiseResult(() => {
+      this.name = name;
+      this.setMeta("name", name);
+      this.broadcast({ type: "rename", name });
+      this.emit("diagram.renamed", { diagram_id: this.diagramId, name });
+    });
   }
 
   /** All elements (incl. tombstones) in z-order; Excalidraw re-indexes anything out of order. */
@@ -319,42 +372,51 @@ export class DiagramRoom extends DurableObject<Env> {
 
   // ---------- WebSocket (tabs) ----------
 
-  async fetch(request: Request): Promise<Response> {
-    if (this.deleted) return new Response("Diagram deleted", { status: 410 });
+  fetch(request: Request): Promise<Response> {
+    return promiseResult(() => {
+      if (this.deleted) {
+        return new Response("Diagram deleted", { status: 410 });
+      }
 
-    if (request.headers.get("Upgrade") !== "websocket")
-      return new Response("expected websocket", { status: 426 });
-    // Before this tab joins, so its init never carries expired tombstones.
-    this.collectTombstones();
-    const pair = new WebSocketPair();
-    const [client, server] = Object.values(pair);
-    this.ctx.acceptWebSocket(server);
-    const others = this.ctx.getWebSockets().filter((ws) => ws !== server);
-    server.serializeAttachment({
-      sid: crypto.randomUUID(),
-      selection: [],
-      focusedAt: 0,
-    } satisfies TabState);
-    server.send(
-      JSON.stringify({
-        type: "init",
-        elements: this.ordered(),
-        name: this.name,
-      } satisfies ServerMessage),
-    );
+      if (request.headers.get("Upgrade") !== "websocket") {
+        return new Response("expected websocket", { status: 426 });
+      }
 
-    for (const ws of others) {
-      const tab = tabState(ws);
-      server.send(JSON.stringify(collaborator(tab)));
-    }
+      // Before this tab joins, so its init never carries expired tombstones.
+      this.collectTombstones();
+      const pair = new WebSocketPair();
+      const [client, server] = Object.values(pair);
+      this.ctx.acceptWebSocket(server);
+      const others = this.ctx.getWebSockets().filter((ws) => ws !== server);
+      server.serializeAttachment({
+        sid: crypto.randomUUID(),
+        selection: [],
+        focusedAt: 0,
+      } satisfies TabState);
+      server.send(
+        JSON.stringify({
+          type: "init",
+          elements: this.ordered(),
+          name: this.name,
+        } satisfies ServerMessage),
+      );
 
-    this.broadcast({ type: "peers", count: this.ctx.getWebSockets().length });
+      for (const ws of others) {
+        const tab = tabState(ws);
+        server.send(JSON.stringify(collaborator(tab)));
+      }
 
-    return new Response(null, { status: 101, webSocket: client });
+      this.broadcast({ type: "peers", count: this.ctx.getWebSockets().length });
+
+      return new Response(null, { status: 101, webSocket: client });
+    });
   }
 
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
-    if (this.deleted) return;
+    if (this.deleted) {
+      return;
+    }
+
     const text = isTextFrame(raw) ? raw : new TextDecoder().decode(raw);
 
     if (new TextEncoder().encode(text).byteLength > MAX_JSON_BYTES) {
@@ -368,10 +430,15 @@ export class DiagramRoom extends DurableObject<Env> {
     try {
       const parsed = socketMessageSchema.parse(JSON.parse(text));
 
-      if (parsed.type !== "rpc_result") msg = parsed;
-      else if (parsed.ok) msg = { ...parsed, ok: true, data: parsed.data };
-      else {
-        if (parsed.error === undefined) throw new Error("Missing RPC error");
+      if (parsed.type !== "rpc_result") {
+        msg = parsed;
+      } else if (parsed.ok) {
+        msg = { ...parsed, ok: true, data: parsed.data };
+      } else {
+        if (parsed.error === undefined) {
+          throw new Error("Missing RPC error");
+        }
+
         msg = { ...parsed, ok: false, error: parsed.error };
       }
     } catch {
@@ -390,7 +457,9 @@ export class DiagramRoom extends DurableObject<Env> {
           return;
         }
 
-        if (this.deleted) return;
+        if (this.deleted) {
+          return;
+        }
 
         const newIds = new Set(
           msg.elements.filter((el) => !this.els.has(el.id)).map((el) => el.id),
@@ -435,7 +504,7 @@ export class DiagramRoom extends DurableObject<Env> {
 
         const next: TabState = {
           sid: prev.sid,
-          username: msg.username?.slice(0, 40) || undefined,
+          username: msg.username === "" ? undefined : msg.username?.slice(0, 40),
           selection: msg.selection,
           viewport: msg.viewport,
           focusedAt,
@@ -464,23 +533,32 @@ export class DiagramRoom extends DurableObject<Env> {
       case "rpc_result": {
         const p = this.pending.get(msg.reqId);
 
-        if (!p) break;
+        if (!p) {
+          break;
+        }
+
         this.pending.delete(msg.reqId);
 
-        if (msg.ok) p.resolve(msg);
-        else p.reject(new Error(msg.error));
+        if (msg.ok) {
+          p.resolve(msg);
+        } else {
+          p.reject(new Error(msg.error));
+        }
+
         break;
       }
     }
   }
 
-  async webSocketClose(ws: WebSocket) {
-    ws.close();
-    const { sid } = tabState(ws);
-    this.broadcast({ type: "collaborator_left", id: sid }, ws);
-    // workerd may or may not still list the closing socket here; exclude it either way.
-    const count = this.ctx.getWebSockets().filter((other) => other !== ws).length;
-    this.broadcast({ type: "peers", count }, ws);
+  webSocketClose(ws: WebSocket) {
+    return promiseResult(() => {
+      ws.close();
+      const { sid } = tabState(ws);
+      this.broadcast({ type: "collaborator_left", id: sid }, ws);
+      // workerd may or may not still list the closing socket here; exclude it either way.
+      const count = this.ctx.getWebSockets().filter((other) => other !== ws).length;
+      this.broadcast({ type: "peers", count }, ws);
+    });
   }
 
   /** Most recently focused open tab — the "human's" tab. */
@@ -490,7 +568,9 @@ export class DiagramRoom extends DurableObject<Env> {
     for (const ws of this.ctx.getWebSockets()) {
       const state = tabState(ws);
 
-      if (!best || state.focusedAt > best.state.focusedAt) best = { ws, state };
+      if (!best || state.focusedAt > best.state.focusedAt) {
+        best = { ws, state };
+      }
     }
 
     return best;
@@ -507,14 +587,18 @@ export class DiagramRoom extends DurableObject<Env> {
     for (let i = 0; !tab && i < 12; i++) {
       // Sequential by design: poll until a tab reconnects.
       // oxlint-disable-next-line no-await-in-loop
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 250);
+      });
       tab = this.primaryTab();
     }
 
-    if (!tab)
+    if (!tab) {
       throw new Error(
         "No canvas tab is open for this diagram. Ask the user to open the share link.",
       );
+    }
+
     const open = tab;
     const reqId = crypto.randomUUID();
 
@@ -529,8 +613,11 @@ export class DiagramRoom extends DurableObject<Env> {
           clearTimeout(timer);
           const result = safeParse(schema, message.data);
 
-          if (result.success) resolve(result.data);
-          else reject(new Error(`Canvas tab returned invalid ${method} data`));
+          if (result.success) {
+            resolve(result.data);
+          } else {
+            reject(new Error(`Canvas tab returned invalid ${method} data`));
+          }
         },
         reject: (e) => (clearTimeout(timer), reject(e)),
       });
@@ -542,50 +629,63 @@ export class DiagramRoom extends DurableObject<Env> {
 
   // ---------- ops layer (RPC) ----------
 
-  async info() {
-    const live = [...this.els.values()].filter((e) => !e.isDeleted).length;
+  info() {
+    return promiseResult(() => {
+      const live = [...this.els.values()].filter((e) => !e.isDeleted).length;
 
-    return {
-      id: this.diagramId,
-      name: this.name,
-      elements: live,
-      tabs: this.ctx.getWebSockets().length,
-      focusedAt: this.lastFocusAt,
-    };
+      return {
+        id: this.diagramId,
+        name: this.name,
+        elements: live,
+        tabs: this.ctx.getWebSockets().length,
+        focusedAt: this.lastFocusAt,
+      };
+    });
   }
 
-  async getGraph() {
-    const tab = this.primaryTab();
-    const scene = new Scene(this.els.values());
+  getGraph() {
+    return promiseResult(() => {
+      const tab = this.primaryTab();
+      const scene = new Scene(this.els.values());
 
-    return { diagram: this.name, ...graphView(scene, new Set(tab?.state.selection ?? [])) };
+      return { diagram: this.name, ...graphView(scene, new Set(tab?.state.selection ?? [])) };
+    });
   }
 
   /** Live elements in z-order. */
-  async getRaw() {
-    return this.ordered().filter((e) => !e.isDeleted);
+  getRaw() {
+    return promiseResult(() => {
+      return this.ordered().filter((e) => !e.isDeleted);
+    });
   }
 
-  async getSelection() {
-    const tab = this.primaryTab();
+  getSelection() {
+    return promiseResult(() => {
+      const tab = this.primaryTab();
 
-    if (!tab) return { tabOpen: false, selection: [] };
-    const sel = new Set(tab.state.selection);
-    const g = graphView(new Scene(this.els.values()), sel);
+      if (!tab) {
+        return { tabOpen: false, selection: [] };
+      }
 
-    return {
-      tabOpen: true,
-      viewport: tab.state.viewport,
-      nodes: (g.nodes ?? []).filter((entry) => sel.has(entry.id)),
-      edges: (g.edges ?? []).filter((entry) => sel.has(entry.id)),
-      notes: (g.notes ?? []).filter((entry) => sel.has(entry.id)),
-      frames: (g.frames ?? []).filter((entry) => sel.has(entry.id)),
-      sketches: (g.sketches ?? []).filter((entry) => sel.has(entry.id)),
-    };
+      const sel = new Set(tab.state.selection);
+      const g = graphView(new Scene(this.els.values()), sel);
+
+      return {
+        tabOpen: true,
+        viewport: tab.state.viewport,
+        nodes: (g.nodes ?? []).filter((entry) => sel.has(entry.id)),
+        edges: (g.edges ?? []).filter((entry) => sel.has(entry.id)),
+        notes: (g.notes ?? []).filter((entry) => sel.has(entry.id)),
+        frames: (g.frames ?? []).filter((entry) => sel.has(entry.id)),
+        sketches: (g.sketches ?? []).filter((entry) => sel.has(entry.id)),
+      };
+    });
   }
 
   async applyPatch(ops: Op[], author: Author = "agent", summary?: string) {
-    if (ops.length > MAX_PATCH_OPS) throw new Error("Too many operations in one patch.");
+    if (ops.length > MAX_PATCH_OPS) {
+      throw new Error("Too many operations in one patch.");
+    }
 
     const snap =
       author === "agent"
@@ -616,8 +716,10 @@ export class DiagramRoom extends DurableObject<Env> {
     const edits = this.edits;
     const first = run();
 
-    if (!first.scene.changedElements().length)
+    if (!first.scene.changedElements().length) {
       return { snapshotId: undefined, changed: 0, ...first.stats };
+    }
+
     const snap = await this.snapshot("before tidy", "auto");
     // Edits can land while the snapshot is written; only then tidy again from the current state.
     const { scene, stats } = this.edits === edits ? first : run();
@@ -650,33 +752,40 @@ export class DiagramRoom extends DurableObject<Env> {
     return { snapshotId: snap.id, added };
   }
 
-  async screenshot(elementIds?: string[]) {
-    return this.callTab<ScreenshotResult>("screenshot", { elementIds }, screenshotResultSchema);
+  screenshot(elementIds?: string[]) {
+    return promiseResult(() =>
+      this.callTab<ScreenshotResult>("screenshot", { elementIds }, screenshotResultSchema),
+    );
   }
 
-  async focusView(
+  focusView(
     targets: string[],
     mode: "focus" | "point" = "focus",
     gesture: "dot" | "heart" = "dot",
   ) {
-    const scene = new Scene(this.els.values());
-    const elementIds = targets.map((target) => scene.resolve(target).id);
+    return promiseResult(() => {
+      const scene = new Scene(this.els.values());
+      const elementIds = targets.map((target) => scene.resolve(target).id);
 
-    return this.callTab<FocusResult>(
-      "focus_view",
-      {
-        elementIds,
-        mode,
-        gesture,
-      },
-      focusResultSchema,
-    );
+      return this.callTab<FocusResult>(
+        "focus_view",
+        {
+          elementIds,
+          mode,
+          gesture,
+        },
+        focusResultSchema,
+      );
+    });
   }
 
   // ---------- snapshots & templates ----------
 
   async snapshot(name: string, kind: "auto" | "named" = "named"): Promise<SnapshotMeta> {
-    if (this.deleted) throw new Error("Diagram deleted.");
+    if (this.deleted) {
+      throw new Error("Diagram deleted.");
+    }
+
     const diagramId = this.diagramId;
     const elements = await this.getRaw();
 
@@ -703,12 +812,13 @@ export class DiagramRoom extends DurableObject<Env> {
 
     // Only checkpoints the user asked for. Every agent edit auto-snapshots, and
     // reporting those would bury the ones a person deliberately took.
-    if (kind === "named")
+    if (kind === "named") {
       this.emit("diagram.checkpointed", {
         diagram_id: this.diagramId,
         snapshot_id: meta.id,
         name,
       });
+    }
 
     return meta;
   }
@@ -726,7 +836,10 @@ export class DiagramRoom extends DurableObject<Env> {
   async restore(snapshotId: string) {
     const obj = await this.env.BUCKET.get(`snapshots/${this.diagramId}/${snapshotId}.json`);
 
-    if (!obj) throw new Error(`snapshot ${snapshotId} not found`);
+    if (!obj) {
+      throw new Error(`snapshot ${snapshotId} not found`);
+    }
+
     const target = storedElementsSchema.parse(await obj.json());
     const safety = await this.snapshot("before restore", "auto");
     const scene = new Scene(this.els.values());
@@ -739,7 +852,7 @@ export class DiagramRoom extends DurableObject<Env> {
   /**
    * Save this diagram as template `templateId`: its elements and the image files they use.
    * Done here rather than in the caller so the elements never cross RPC: the stub's type for
-   * El recurses forever on its `[key: string]: any` (TS2589).
+   * El's opaque versioned extension fields cannot be expressed by the SDK's RPC mapping.
    */
   async saveAsTemplate(templateId: string) {
     const elements = await this.getRaw();
@@ -748,9 +861,11 @@ export class DiagramRoom extends DurableObject<Env> {
   }
 
   /** Seed a brand-new diagram from elements (saved template) — no snapshot needed. */
-  async seed(elements: El[]) {
-    const scene = new Scene(this.els.values());
-    scene.addForeign(elements, "template");
-    this.commit(scene, "system");
+  seed(elements: El[]) {
+    return promiseResult(() => {
+      const scene = new Scene(this.els.values());
+      scene.addForeign(elements, "template");
+      this.commit(scene, "system");
+    });
   }
 }

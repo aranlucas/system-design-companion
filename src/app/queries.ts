@@ -6,13 +6,14 @@ export async function getJson<T>(url: string, signal: AbortSignal, guard: Guard<
   const response = await fetch(url, { cache: "no-store", signal });
   const body: unknown = await response.json();
 
-  if (!response.ok)
+  if (!response.ok) {
     throw new Error(
       apiErrorMessage(
         isApiFailure(body) ? body : {},
         "Could not load data. Retrying automatically.",
       ),
     );
+  }
 
   assertBoundary(body, guard);
 

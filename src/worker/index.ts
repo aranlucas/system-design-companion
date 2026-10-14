@@ -1,3 +1,4 @@
+import { requiredValue } from "../shared/required-value.ts";
 import { zValidator } from "@hono/zod-validator";
 import { Hono, type Handler, type MiddlewareHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -46,7 +47,11 @@ type WorkerEnv = { Bindings: Env; Variables: DiagramVariables };
 const app = new Hono<WorkerEnv>();
 
 app.onError((error, c) => {
-  if (error instanceof HTTPException) return c.json({ error: error.message }, error.status);
+  if (error instanceof HTTPException) {
+    return c.json({ error: error.message }, error.status);
+  }
+
+  // eslint-disable-next-line no-console -- Operational failure reporting must remain visible to the host error logs.
   console.error(JSON.stringify({ event: "worker_error", name: error.name }));
 
   return c.json({ error: "Unexpected server error. Please try again." }, 500);
@@ -79,7 +84,10 @@ app.get("/api/templates", async (c) => {
 });
 
 app.use("/api/*", async (c, next) => {
-  if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method)) requireSameOrigin(c.req.raw);
+  if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method)) {
+    requireSameOrigin(c.req.raw);
+  }
+
   await next();
 });
 
@@ -94,7 +102,7 @@ app.get("/api/diagrams", zValidator("query", paginationQuery), async (c) => {
 app.post("/api/diagrams", zValidator("json", createBody), async (c) => {
   const { name, template } = c.req.valid("json");
   const userId = await requireBrowserUser(c.req.raw, c.env);
-  const d = await createDiagram(c.env, name, template || undefined, userId);
+  const d = await createDiagram(c.env, name, template === "" ? undefined : template, userId);
 
   return c.json({ ...d, link: shareLink(new URL(c.req.url).origin, d.id, d.key) });
 });
@@ -110,13 +118,17 @@ app.delete("/api/diagrams/:id{[A-Za-z0-9_-]+}", async (c) => {
 
 // Both route groups require a capability key, including requests to unknown subpaths.
 const authorizeDiagram: MiddlewareHandler<WorkerEnv> = async (c, next) => {
-  const id = c.req.param("id")!;
+  const id = requiredValue(c.req.param("id"), 'c.req.param("id")');
   const diagram = await verifyKey(c.env, id, c.req.query("k"));
 
-  if (!diagram) return c.json({ error: "invalid link" }, 403);
+  if (!diagram) {
+    return c.json({ error: "invalid link" }, 403);
+  }
 
-  if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method))
+  if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method)) {
     await takeBudget(c.env, `board-write:${id}`, 120);
+  }
+
   c.set("diagram", diagram);
   c.set("room", room(c.env, id));
   await next();
@@ -125,7 +137,10 @@ const authorizeDiagram: MiddlewareHandler<WorkerEnv> = async (c, next) => {
 };
 
 const deleteAuthorizedDiagram: Handler<WorkerEnv> = async (c) => {
-  if (c.var.diagram.is_template) return c.json({ error: "Templates cannot be deleted here" }, 400);
+  if (c.var.diagram.is_template) {
+    return c.json({ error: "Templates cannot be deleted here" }, 400);
+  }
+
   requireSameOrigin(c.req.raw);
   await requireOwner(c.env, c.var.diagram.id, await requireBrowserUser(c.req.raw, c.env));
   await deleteDiagram(c.env, c.var.diagram.id);
@@ -203,8 +218,10 @@ app.route("/ws/:id{[A-Za-z0-9_-]+}", sockets);
 // The provider owns the OAuth protocol endpoints but forwards /authorize and
 // /github/callback here, so they are Hono routes that load the provider lazily.
 const interactive: Handler<WorkerEnv> = async (c) => {
-  if (c.req.path === CALLBACK_PATH && isBrowserCallback(c.req.raw))
+  if (c.req.path === CALLBACK_PATH && isBrowserCallback(c.req.raw)) {
     return browserCallback(c.req.raw, c.env);
+  }
+
   const { oauthRoutes } = await import("./oauth.ts");
 
   return oauthRoutes(c.req.raw, c.env);
@@ -217,7 +234,7 @@ app.all(CALLBACK_PATH, interactive);
 // The OAuth provider fronts /mcp and owns its own discovery, token, registration,
 // authorize and callback endpoints. Canvas traffic never touches it: the path
 // check runs first so the provider is only loaded for requests that need it.
-export default {
+const worker = {
   fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
     if (request.body && !["GET", "HEAD"].includes(request.method)) {
       const maxBytes = new URL(request.url).pathname.includes("/files/")
@@ -225,20 +242,29 @@ export default {
         : MAX_JSON_BYTES;
 
       try {
-        if (Number(request.headers.get("Content-Length") ?? 0) > maxBytes)
+        if (Number(request.headers.get("Content-Length") ?? 0) > maxBytes) {
           return Response.json({ error: "Request body is too large." }, { status: 413 });
+        }
+
         const body = await readBounded(request.body, maxBytes);
         request = new Request(request, { method: request.method, body });
       } catch (error) {
-        if (error instanceof HTTPException)
+        if (error instanceof HTTPException) {
           return Response.json({ error: error.message }, { status: error.status });
+        }
+
         throw error;
       }
     }
 
-    if (!isOAuthPath(new URL(request.url).pathname)) return app.fetch(request, env, ctx);
+    if (!isOAuthPath(new URL(request.url).pathname)) {
+      return app.fetch(request, env, ctx);
+    }
+
     const { oauthProvider } = await import("./oauth.ts");
 
     return oauthProvider(new URL(request.url).origin, app).fetch(request, env, ctx);
   },
 };
+
+export default worker;

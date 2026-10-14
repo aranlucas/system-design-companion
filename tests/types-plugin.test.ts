@@ -1,6 +1,6 @@
 import { RuleTester } from "oxlint/plugins-dev";
 import { describe, it } from "vitest";
-import plugin from "../lint/types-plugin.ts";
+import plugin from "@aranlucas/oxforge/plugin";
 
 RuleTester.describe = describe;
 

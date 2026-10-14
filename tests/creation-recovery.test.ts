@@ -1,3 +1,5 @@
+import { promiseResult } from "../src/shared/promise-result.ts";
+import { requiredTestValue } from "./helpers/required-test-value.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { El } from "../src/shared/protocol.ts";
 import { DiagramRoom } from "../src/worker/room.ts";
@@ -48,7 +50,7 @@ function image(id: string): El {
 async function sourceWithImages() {
   const bindings = await setup();
   const source = await createDiagram(bindings.env, "Source", undefined, owner);
-  await bindings.rooms.get(source.id)!.seed([image("first"), image("second")]);
+  await requiredTestValue(bindings.rooms.get(source.id)).seed([image("first"), image("second")]);
   await bindings.bucket.put(`files/${source.id}/first`, "first image");
   await bindings.bucket.put(`files/${source.id}/second`, "second image");
   const template = await saveAsTemplate(bindings.env, source.id, "Template", "description", owner);
@@ -57,19 +59,21 @@ async function sourceWithImages() {
 }
 
 function gate() {
-  let resolve!: () => void;
+  let release: (() => void) | undefined;
 
-  const promise = new Promise<void>((done) => {
-    resolve = done;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
   });
 
-  return { promise, resolve };
+  return { promise, resolve: requiredTestValue(release) };
 }
 
 afterEach(() => {
   vi.restoreAllMocks();
 
-  for (const db of databases.splice(0)) db.sql.close();
+  for (const db of databases.splice(0)) {
+    db.sql.close();
+  }
 });
 
 describe("creation publication and compensation", () => {
@@ -99,8 +103,11 @@ describe("creation publication and compensation", () => {
     expect(owned).toBe(false);
     expect(await verifyKey(env, created.id, created.key)).toMatchObject({ name: "Ready" });
     expect(await ownsDiagram(env, created.id, owner)).toBe(true);
-    expect(await rooms.get(created.id)!.info()).toMatchObject({ id: created.id, name: "Ready" });
-    expect((await rooms.get(created.id)!.getGraph()).nodes).toHaveLength(9);
+    expect(await requiredTestValue(rooms.get(created.id)).info()).toMatchObject({
+      id: created.id,
+      name: "Ready",
+    });
+    expect((await requiredTestValue(rooms.get(created.id)).getGraph()).nodes).toHaveLength(9);
     expect((await listDiagrams(env, 50, undefined, owner)).items.map((item) => item.id)).toEqual([
       created.id,
     ]);
@@ -141,7 +148,9 @@ describe("creation publication and compensation", () => {
       expect(db.sql.prepare("SELECT id FROM diagrams WHERE name = 'Retry'").all()).toEqual([]);
       expect([...bucket.objects.keys()]).toEqual([]);
 
-      if (!source) expect(await [...rooms.values()][0].getRaw()).toEqual([]);
+      const unpublished = source ? [] : [...rooms.values()].slice(0, 1);
+      expect((await Promise.all(unpublished.map((room) => room.getRaw()))).flat()).toEqual([]);
+
       db.sql.exec("DROP TRIGGER fail_owner");
       const created = await create();
       expect(await ownsDiagram(env, created.id, owner)).toBe(true);
@@ -164,10 +173,14 @@ describe("creation publication and compensation", () => {
 
       if (stage === "get") {
         const get = bucket.get.bind(bucket);
-        vi.spyOn(bucket, "get").mockImplementationOnce(async (key) => {
-          if (key === `templates/${template.id}.json`) throw new Error("get failed");
+        vi.spyOn(bucket, "get").mockImplementationOnce((key) => {
+          return promiseResult(() => {
+            if (key === `templates/${template.id}.json`) {
+              throw new Error("get failed");
+            }
 
-          return get(key);
+            return get(key);
+          });
         });
       } else {
         // oxlint-disable-next-line typescript/unbound-method -- invoked with the real room as this
@@ -189,9 +202,9 @@ describe("creation publication and compensation", () => {
         source.id,
       ]);
       const copy = await createDiagram(env, "Retry", template.id, owner);
-      expect((await rooms.get(copy.id)!.getRaw()).filter((el) => el.type === "image")).toHaveLength(
-        2,
-      );
+      expect(
+        (await requiredTestValue(rooms.get(copy.id)).getRaw()).filter((el) => el.type === "image"),
+      ).toHaveLength(2);
       expect(await bucket.head(`files/${copy.id}/first`)).not.toBeNull();
       expect(await bucket.head(`files/${copy.id}/second`)).not.toBeNull();
     },
@@ -206,7 +219,9 @@ describe("creation publication and compensation", () => {
       const release = gate();
       const put = bucket.put.bind(bucket);
       vi.spyOn(bucket, "put").mockImplementation(async (key, value, options) => {
-        if (key.endsWith("/first")) throw new Error("copy failed");
+        if (key.endsWith("/first")) {
+          throw new Error("copy failed");
+        }
 
         if (key.endsWith("/second")) {
           started.resolve();
@@ -228,11 +243,15 @@ describe("creation publication and compensation", () => {
       });
 
       await started.promise;
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
       const settledBeforeCopyFinished = settled;
       release.resolve();
       expect(await outcome).toMatchObject({ message: "copy failed" });
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
       expect(settledBeforeCopyFinished).toBe(false);
       expect(bucket.objects).toEqual(original);
       expect((await listTemplates(env, owner)).filter((item) => item.name === "Retry")).toEqual([]);
@@ -247,10 +266,14 @@ describe("creation publication and compensation", () => {
     const original = new Map(bucket.objects);
     const put = bucket.put.bind(bucket);
 
-    const fault = vi.spyOn(bucket, "put").mockImplementation(async (key, value, options) => {
-      if (key.startsWith("templates/")) throw new Error("template write failed");
+    const fault = vi.spyOn(bucket, "put").mockImplementation((key, value, options) => {
+      return promiseResult(() => {
+        if (key.startsWith("templates/")) {
+          throw new Error("template write failed");
+        }
 
-      return put(key, value, options);
+        return put(key, value, options);
+      });
     });
 
     await expect(saveAsTemplate(env, source.id, "Retry", undefined, owner)).rejects.toThrow(
@@ -274,10 +297,14 @@ describe("creation publication and compensation", () => {
       vi.spyOn(db, "batch").mockImplementationOnce(async (statements) => {
         await batch(statements);
 
-        if (!template)
-          accessKey = (await listDiagrams(env, 50, undefined, owner)).items.find(
-            (item) => item.name === "Retry",
-          )!.key;
+        if (!template) {
+          accessKey = requiredTestValue(
+            (await listDiagrams(env, 50, undefined, owner)).items.find(
+              (item) => item.name === "Retry",
+            ),
+          ).key;
+        }
+
         throw new Error("lost acknowledgement");
       });
 
@@ -291,12 +318,19 @@ describe("creation publication and compensation", () => {
 
       await expect(creating).rejects.toThrow("cleanup incomplete");
       const row = db.sql.prepare("SELECT id FROM diagrams WHERE name = 'Retry'").get();
-      const id = String(row!.id);
+      const id = String(requiredTestValue(row).id);
       expect((await listTemplates(env, owner)).some((item) => item.id === id)).toBe(false);
       expect(await verifyKey(env, id, accessKey)).toBeNull();
 
-      if (template)
-        await expect(createDiagram(env, "Hidden", id, owner)).rejects.toThrow("Template not found");
+      const hiddenTemplates = template ? [id] : [];
+      await Promise.all(
+        hiddenTemplates.map((templateId) =>
+          expect(createDiagram(env, "Hidden", templateId, owner)).rejects.toThrow(
+            "Template not found",
+          ),
+        ),
+      );
+
       deletion.mockRestore();
       await deleteDiagram(env, id);
       await deleteDiagram(env, id);

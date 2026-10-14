@@ -1,3 +1,4 @@
+import { elementAttribute } from "../shared/element-attributes.ts";
 import { isApiFailure } from "./validation.ts";
 import type { RemoteExcalidrawElement } from "@excalidraw/excalidraw/data/reconcile";
 import { serverMessageSchema } from "../shared/schemas.ts";
@@ -66,7 +67,11 @@ function CanvasRecovery({ message, retry }: CanvasRecoveryProps) {
     <div className="sd-panel canvas-recovery">
       <p>{message}</p>
       <div className="row">
-        {retry && <button onClick={retry}>Retry canvas</button>}
+        {retry && (
+          <button type="button" onClick={retry}>
+            Retry canvas
+          </button>
+        )}
         <a href="/">All diagrams</a>
       </div>
     </div>
@@ -194,10 +199,13 @@ const blobToBase64 = (b: Blob) =>
     r.addEventListener("load", () => {
       const result = z.string().safeParse(r.result);
 
-      if (result.success) resolve(result.data.split(",")[1]);
-      else reject(new Error("Expected a data URL from FileReader"));
+      if (result.success) {
+        resolve(result.data.split(",")[1]);
+      } else {
+        reject(new Error("Expected a data URL from FileReader"));
+      }
     });
-    r.addEventListener("error", () => reject(r.error));
+    r.addEventListener("error", () => reject(r.error ?? new Error("Failed to read image")));
     r.readAsDataURL(b);
   });
 
@@ -209,9 +217,21 @@ export function Canvas({ id, k }: CanvasProps) {
   const [isOffline, setIsOffline] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flash = (message: string) => {
+    if (noticeTimer.current) {
+      clearTimeout(noticeTimer.current);
+    }
+
+    setNotice(message);
+    noticeTimer.current = setTimeout(() => setNotice(null), 2500);
+  };
+
   useEffect(
     () => () => {
-      if (noticeTimer.current) clearTimeout(noticeTimer.current);
+      if (noticeTimer.current) {
+        clearTimeout(noticeTimer.current);
+      }
     },
     [],
   );
@@ -241,7 +261,7 @@ export function Canvas({ id, k }: CanvasProps) {
             message="Could not open this canvas. Check your connection or ask the owner for a fresh share link."
             retry={() => {
               api?.updateScene({ appState: { errorMessage: null, isLoading: true } });
-              void retryAccess();
+              retryAccess().catch((failure) => flash(errorMessage(failure)));
             }}
           />
         ) : null,
@@ -251,25 +271,32 @@ export function Canvas({ id, k }: CanvasProps) {
   useEffect(() => {
     const root = canvasRoot.current;
 
-    if (!api || !root) return undefined;
+    let cleanup: (() => void) | undefined;
 
-    // MainMenu retains its native trigger, but this version exposes no prop for its label.
-    // Keep the integration scoped to the canvas and account for responsive remounts.
-    const labelMenu = () => {
-      const trigger = root.querySelector<HTMLButtonElement>(".main-menu-trigger");
+    if (api && root) {
+      // MainMenu retains its native trigger, but this version exposes no prop for its label.
+      // Keep the integration scoped to the canvas and account for responsive remounts.
+      const labelMenu = () => {
+        const trigger = root.querySelector<HTMLButtonElement>(".main-menu-trigger");
 
-      if (trigger?.getAttribute("aria-label") !== "Canvas menu")
-        trigger?.setAttribute("aria-label", "Canvas menu");
-    };
+        if (trigger?.getAttribute("aria-label") !== "Canvas menu") {
+          trigger?.setAttribute("aria-label", "Canvas menu");
+        }
+      };
 
-    labelMenu();
-    const observer = new MutationObserver(labelMenu);
-    observer.observe(root, { childList: true, subtree: true });
+      labelMenu();
+      const observer = new MutationObserver(labelMenu);
+      observer.observe(root, { childList: true, subtree: true });
 
-    return () => observer.disconnect();
+      cleanup = () => observer.disconnect();
+    }
+
+    return cleanup;
   }, [api]);
   useEffect(() => {
-    if (loaded) document.title = `${name} · System Design`;
+    if (loaded) {
+      document.title = `${name} · System Design`;
+    }
   }, [loaded, name]);
   // The heart has no Excalidraw equivalent; the plain "point" gesture is drawn as the
   // agent's collaborator cursor instead.
@@ -277,7 +304,9 @@ export function Canvas({ id, k }: CanvasProps) {
   const gestureTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
-      if (gestureTimer.current) clearTimeout(gestureTimer.current);
+      if (gestureTimer.current) {
+        clearTimeout(gestureTimer.current);
+      }
     },
     [],
   );
@@ -305,16 +334,13 @@ export function Canvas({ id, k }: CanvasProps) {
     };
   }, [api]);
 
-  const flash = (message: string) => {
-    if (noticeTimer.current) clearTimeout(noticeTimer.current);
-    setNotice(message);
-    noticeTimer.current = setTimeout(() => setNotice(null), 2500);
-  };
-
   const loadLibrary = async () => {
     const currentApi = apiRef.current;
 
-    if (!currentApi || libraryRequested.current) return;
+    if (!currentApi || libraryRequested.current) {
+      return;
+    }
+
     libraryRequested.current = true;
 
     try {
@@ -339,20 +365,29 @@ export function Canvas({ id, k }: CanvasProps) {
   const setCollaborator = useCallback((peer: SocketId, patch: Partial<Collaborator> | null) => {
     const map = collaborators.current;
 
-    if (patch) map.set(peer, { ...map.get(peer), id: peer, socketId: peer, ...patch });
-    else map.delete(peer);
+    if (patch) {
+      map.set(peer, { ...map.get(peer), id: peer, socketId: peer, ...patch });
+    } else {
+      map.delete(peer);
+    }
+
     apiRef.current?.updateScene({ collaborators: new Map(map) });
   }, []);
 
   const send = useCallback((m: ClientMessage) => {
-    if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify(m));
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify(m));
+    }
   }, []);
 
   const sendPresence = useCallback(
     (force = false) => {
       const a = apiRef.current;
 
-      if (!a) return;
+      if (!a) {
+        return;
+      }
+
       const st = a.getAppState();
 
       const selection = Object.keys(st.selectedElementIds).filter(
@@ -371,7 +406,10 @@ export function Canvas({ id, k }: CanvasProps) {
       const username = displayName() || undefined;
       const sig = JSON.stringify([selection, focused, username]);
 
-      if (!force && sig === lastPresence.current) return;
+      if (!force && sig === lastPresence.current) {
+        return;
+      }
+
       lastPresence.current = sig;
       send({ type: "presence", selection, viewport, focused, username });
     },
@@ -386,8 +424,13 @@ export function Canvas({ id, k }: CanvasProps) {
     ) => {
       const a = apiRef.current;
 
-      if (!a || !targets.length) return false;
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      if (!a || !targets.length) {
+        return false;
+      }
+
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
       const groups = new Set(targets.flatMap((e) => e.groupIds));
       const ids = new Set(targets.map((e) => e.id));
 
@@ -398,10 +441,14 @@ export function Canvas({ id, k }: CanvasProps) {
           .filter((e) => !ids.has(e.id) && e.groupIds.some((groupId) => groups.has(groupId))),
       ];
 
-      if (mode === "focus")
+      if (mode === "focus") {
         a.setViewport({ target: elements, fit: "scale-down", animation: false });
+      }
+
       // Wait for the viewport change to be applied before positioning the temporary pointer.
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => resolve());
+      });
       const state = a.getAppState();
       const [left, top, right, bottom] = getCommonBounds(elements);
       const x = (left + right) / 2;
@@ -418,12 +465,16 @@ export function Canvas({ id, k }: CanvasProps) {
         screen.y >= state.offsetTop &&
         screen.y <= state.offsetTop + state.height;
 
-      if (gestureTimer.current) clearTimeout(gestureTimer.current);
+      if (gestureTimer.current) {
+        clearTimeout(gestureTimer.current);
+      }
 
       if (gesture === "heart") {
         setHeart(visible ? { ...screen, startedAt: performance.now() } : null);
 
-        if (visible) gestureTimer.current = setTimeout(() => setHeart(null), 2400);
+        if (visible) {
+          gestureTimer.current = setTimeout(() => setHeart(null), 2400);
+        }
       } else {
         setCollaborator(AGENT, {
           username: "Agent",
@@ -446,7 +497,9 @@ export function Canvas({ id, k }: CanvasProps) {
       const a = apiRef.current;
 
       try {
-        if (!a) throw new Error("canvas not ready");
+        if (!a) {
+          throw new Error("canvas not ready");
+        }
 
         if (msg.method === "screenshot") {
           const { elementIds } = msg.params;
@@ -457,12 +510,14 @@ export function Canvas({ id, k }: CanvasProps) {
             elements = elements.filter(
               (e) =>
                 want.has(e.id) ||
-                (e.frameId && want.has(e.frameId)) ||
-                ("containerId" in e && e.containerId && want.has(e.containerId)),
+                (Boolean(e.frameId) && want.has(e.frameId ?? "")) ||
+                ("containerId" in e && Boolean(e.containerId) && want.has(e.containerId ?? "")),
             );
           }
 
-          if (!elements.length) throw new Error("nothing to render");
+          if (!elements.length) {
+            throw new Error("nothing to render");
+          }
 
           const blob = await exportToBlob({
             elements,
@@ -489,7 +544,10 @@ export function Canvas({ id, k }: CanvasProps) {
           const ids = new Set(elementIds);
           const elements = a.getSceneElements().filter((e) => ids.has(e.id));
 
-          if (!elements.length) throw new Error("Target no longer exists in this tab");
+          if (!elements.length) {
+            throw new Error("Target no longer exists in this tab");
+          }
+
           const visible = await showFocus(elements, mode, gesture);
           send({
             type: "rpc_result",
@@ -504,7 +562,10 @@ export function Canvas({ id, k }: CanvasProps) {
 
           // Diagram types Excalidraw can't draw natively come back as an image; keep its bytes
           // here so this tab uploads them once the room adds the element.
-          if (files) apiRef.current?.addFiles(Object.values(files));
+          if (files) {
+            apiRef.current?.addFiles(Object.values(files));
+          }
+
           const converted = convertToExcalidrawElements(elements, { regenerateIds: true });
           send({ type: "rpc_result", reqId: msg.reqId, ok: true, data: { elements: converted } });
         }
@@ -545,13 +606,19 @@ export function Canvas({ id, k }: CanvasProps) {
         return;
       }
 
-      if (offline.current) return;
+      if (offline.current) {
+        return;
+      }
+
       offline.current = true;
       setIsOffline(true);
     },
     onMessage: (ev) => {
-      if (!api) return;
-      const msg: ServerMessage = serverMessageSchema.parse(JSON.parse(ev.data));
+      if (!api) {
+        return;
+      }
+
+      const msg: ServerMessage = serverMessageSchema.parse(JSON.parse(z.string().parse(ev.data)));
 
       if (msg.type === "init") {
         setName(msg.name);
@@ -561,7 +628,10 @@ export function Canvas({ id, k }: CanvasProps) {
 
         const merged = local.length ? reconcileElements(local, remote, api.getAppState()) : remote;
 
-        for (const e of msg.elements) synced.current.set(e.id, e.version);
+        for (const e of msg.elements) {
+          synced.current.set(e.id, e.version);
+        }
+
         api.updateScene({
           elements: merged,
           appState: { isLoading: false },
@@ -570,13 +640,15 @@ export function Canvas({ id, k }: CanvasProps) {
         fetchFiles();
 
         // Fitting an empty board would zoom to Excalidraw's 3000% maximum.
-        if (!local.length && msg.elements.some((e) => !e.isDeleted))
+        if (!local.length && msg.elements.some((e) => !e.isDeleted)) {
           api.setViewport({
             target: api.getSceneElements(),
             fit: "contain",
             animation: false,
             offsets: { ui: { padding: 48 } },
           });
+        }
+
         setLoaded(true);
         // Push anything drawn while offline.
         scheduleSend();
@@ -591,8 +663,10 @@ export function Canvas({ id, k }: CanvasProps) {
           api.getAppState(),
         );
 
-        for (const e of msg.elements)
+        for (const e of msg.elements) {
           synced.current.set(e.id, Math.max(e.version, synced.current.get(e.id) ?? 0));
+        }
+
         api.updateScene({
           elements: merged,
           appState: { isLoading: false },
@@ -625,8 +699,8 @@ export function Canvas({ id, k }: CanvasProps) {
           const removed = msg.elements.filter(
             (e) =>
               e.isDeleted &&
-              !e.customData?.componentPart &&
-              !e.customData?.componentLabel &&
+              !elementAttribute(e, "customData")?.componentPart &&
+              !elementAttribute(e, "customData")?.componentLabel &&
               e.type !== "text",
           );
 
@@ -635,10 +709,10 @@ export function Canvas({ id, k }: CanvasProps) {
               ? targets
               : restoreWireElements(removed.map((e) => ({ ...e, isDeleted: false }))),
             "focus",
-          );
+          ).catch((failure) => flash(errorMessage(failure)));
         }
       } else if (msg.type === "rpc") {
-        void handleRpc(msg);
+        handleRpc(msg).catch((failure) => flash(errorMessage(failure)));
       } else if (msg.type === "peers") {
         setPeers(msg.count);
       } else if (msg.type === "collaborator") {
@@ -676,13 +750,18 @@ export function Canvas({ id, k }: CanvasProps) {
     pendingSend.current = null;
     const a = apiRef.current;
 
-    if (!a || ws.current?.readyState !== WebSocket.OPEN) return;
+    if (!a || ws.current?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
     uploadFiles();
     const changed: El[] = [];
 
     for (const e of a.getSceneElementsIncludingDeleted()) {
       // A click with a drawing tool leaves a zero-size element; send it once it has a size.
-      if (!e.isDeleted && isInvisiblySmallElement(e)) continue;
+      if (!e.isDeleted && isInvisiblySmallElement(e)) {
+        continue;
+      }
 
       if (e.version > (synced.current.get(e.id) ?? 0)) {
         changed.push(e);
@@ -690,7 +769,9 @@ export function Canvas({ id, k }: CanvasProps) {
       }
     }
 
-    if (changed.length) send({ type: "update", elements: changed });
+    if (changed.length) {
+      send({ type: "update", elements: changed });
+    }
   };
 
   // ---------- image files ----------
@@ -704,13 +785,19 @@ export function Canvas({ id, k }: CanvasProps) {
   const setImageStatus = (fileId: string, status: "saved" | "error") => {
     const a = apiRef.current;
 
-    if (!a) return;
+    if (!a) {
+      return;
+    }
+
     const els = a.getSceneElementsIncludingDeleted();
 
     const stale = (e: ExcalidrawElement): e is ExcalidrawImageElement =>
       e.type === "image" && e.fileId === fileId && e.status !== status;
 
-    if (!els.some(stale)) return;
+    if (!els.some(stale)) {
+      return;
+    }
+
     a.updateScene({
       elements: els.map((e) => (stale(e) ? newElementWith(e, { status }) : e)),
       captureUpdate: CaptureUpdateAction.NEVER,
@@ -720,15 +807,24 @@ export function Canvas({ id, k }: CanvasProps) {
   const uploadFiles = () => {
     const a = apiRef.current;
 
-    if (!a) return;
+    if (!a) {
+      return;
+    }
+
     const have = a.getFiles();
 
     for (const e of a.getSceneElementsIncludingDeleted()) {
-      if (e.type !== "image" || e.isDeleted || !e.fileId) continue;
+      if (e.type !== "image" || e.isDeleted || !e.fileId) {
+        continue;
+      }
+
       const fileId = e.fileId;
       const file = have[fileId];
 
-      if (!file || uploadedFiles.current.has(fileId)) continue;
+      if (!file || uploadedFiles.current.has(fileId)) {
+        continue;
+      }
+
       uploadedFiles.current.add(fileId);
       void (async () => {
         try {
@@ -740,7 +836,9 @@ export function Canvas({ id, k }: CanvasProps) {
             body,
           });
 
-          if (res.ok) return setImageStatus(fileId, "saved");
+          if (res.ok) {
+            return setImageStatus(fileId, "saved");
+          }
 
           // The room refused the file (too large, not an image); retrying won't help.
           if (res.status === 413 || res.status === 415) {
@@ -758,29 +856,46 @@ export function Canvas({ id, k }: CanvasProps) {
         } catch {
           uploadedFiles.current.delete(fileId); // offline: the next flush retries
         }
-      })();
+      })().catch((failure) => flash(errorMessage(failure)));
     }
   };
 
   const fetchFiles = () => {
     const a = apiRef.current;
 
-    if (!a) return;
+    if (!a) {
+      return;
+    }
+
     const have = a.getFiles();
     const missing = new Set<FileId>();
 
-    for (const e of a.getSceneElementsIncludingDeleted())
-      if (e.type === "image" && !e.isDeleted && e.fileId && e.status === "saved" && !have[e.fileId])
+    for (const e of a.getSceneElementsIncludingDeleted()) {
+      if (
+        e.type === "image" &&
+        !e.isDeleted &&
+        e.fileId &&
+        e.status === "saved" &&
+        !have[e.fileId]
+      ) {
         missing.add(e.fileId);
+      }
+    }
 
     for (const fileId of missing) {
-      if (fetchingFiles.current.has(fileId)) continue;
+      if (fetchingFiles.current.has(fileId)) {
+        continue;
+      }
+
       fetchingFiles.current.add(fileId);
       void (async () => {
         try {
           const res = await fetch(fileUrl(fileId));
 
-          if (!res.ok) throw new Error(`file ${fileId}: ${res.status}`);
+          if (!res.ok) {
+            throw new Error(`file ${fileId}: ${res.status}`);
+          }
+
           const blob = await res.blob();
 
           const dataURL = await new Promise<string>((resolve, reject) => {
@@ -788,10 +903,15 @@ export function Canvas({ id, k }: CanvasProps) {
             reader.addEventListener("load", () => {
               const result = z.string().safeParse(reader.result);
 
-              if (result.success) resolve(result.data);
-              else reject(new Error("Expected a data URL from FileReader"));
+              if (result.success) {
+                resolve(result.data);
+              } else {
+                reject(new Error("Expected a data URL from FileReader"));
+              }
             });
-            reader.addEventListener("error", () => reject(reader.error));
+            reader.addEventListener("error", () =>
+              reject(reader.error ?? new Error("Failed to read file")),
+            );
             reader.readAsDataURL(blob);
           });
 
@@ -806,17 +926,18 @@ export function Canvas({ id, k }: CanvasProps) {
             },
           ]);
         } catch (e) {
+          // eslint-disable-next-line no-console -- Operational failure reporting must remain visible to the host error logs.
           console.warn(e);
         } finally {
           // A failed fetch is retried on the next update from the room.
           fetchingFiles.current.delete(fileId);
         }
-      })();
+      })().catch((failure) => flash(errorMessage(failure)));
     }
   };
 
   const scheduleSend = () => {
-    if (pendingSend.current === null) pendingSend.current = window.setTimeout(flush, 60);
+    pendingSend.current ??= window.setTimeout(flush, 60);
   };
 
   useEffect(() => {
@@ -930,7 +1051,10 @@ export function Canvas({ id, k }: CanvasProps) {
         onPointerUpdate={({ pointer, button }) => {
           const now = performance.now();
 
-          if (now - lastPointer.current < 40) return;
+          if (now - lastPointer.current < 40) {
+            return;
+          }
+
           lastPointer.current = now;
           send({
             type: "pointer",
@@ -945,7 +1069,13 @@ export function Canvas({ id, k }: CanvasProps) {
         <MainMenu>
           <MainMenu.Group title={name}>
             <MainMenu.Item onSelect={openRename}>Rename diagram</MainMenu.Item>
-            <MainMenu.Item onSelect={tidy}>Tidy layout</MainMenu.Item>
+            <MainMenu.Item
+              onSelect={() => {
+                tidy().catch((failure) => flash(errorMessage(failure)));
+              }}
+            >
+              Tidy layout
+            </MainMenu.Item>
             <MainMenu.Item onSelect={() => open("versions")}>Versions</MainMenu.Item>
             <MainMenu.Item onSelect={() => open("share")}>Share &amp; connect agent</MainMenu.Item>
             <MainMenu.ItemLink href="/">All diagrams</MainMenu.ItemLink>
@@ -968,7 +1098,9 @@ export function Canvas({ id, k }: CanvasProps) {
               label: "Tidy layout",
               category: "App",
               keywords: ["overlap", "align"],
-              perform: tidy,
+              perform: () => {
+                tidy().catch((failure) => flash(errorMessage(failure)));
+              },
             },
             {
               label: "Versions",
@@ -1028,8 +1160,11 @@ export function Canvas({ id, k }: CanvasProps) {
               {name} ✎
             </Sidebar.Trigger>
             <button
+              type="button"
               className="sidebar-trigger"
-              onClick={tidy}
+              onClick={() => {
+                tidy().catch((failure) => flash(errorMessage(failure)));
+              }}
               title="Fix overlaps, alignment and frames; only the selected frames when something is selected (undo via Versions)"
             >
               Tidy
@@ -1055,7 +1190,9 @@ export function Canvas({ id, k }: CanvasProps) {
         </Sidebar>
         <DefaultSidebar
           onStateChange={(state) => {
-            if (state && (state.tab ?? "library") === "library") void loadLibrary();
+            if (state && (state.tab ?? "library") === "library") {
+              loadLibrary().catch((failure) => flash(errorMessage(failure)));
+            }
           }}
         >
           <DefaultSidebar.TabTriggers>
@@ -1087,7 +1224,9 @@ function SharePanel({ link, copy, onName }: SharePanelProps) {
       <p className="muted">Edit link: anyone with it can edit (give it to your interviewer).</p>
       <div className="row">
         <code className="cmd">{link}</code>
-        <button onClick={() => void copy(link, "Link")}>Copy</button>
+        <button type="button" onClick={() => void copy(link, "Link")}>
+          Copy
+        </button>
       </div>
       <label htmlFor="display-name">Your name (shown on your cursor)</label>
       <input
@@ -1108,7 +1247,10 @@ function SharePanel({ link, copy, onName }: SharePanelProps) {
       <p className="muted">Then tell the agent:</p>
       <div className="row">
         <code className="cmd">join {link}</code>
-        <button onClick={() => void copy(`Join my system design canvas: ${link}`, "Prompt")}>
+        <button
+          type="button"
+          onClick={() => void copy(`Join my system design canvas: ${link}`, "Prompt")}
+        >
           Copy
         </button>
       </div>
@@ -1133,31 +1275,41 @@ function RenamePanel({ name, id, diagramKey, onRenamed }: RenamePanelProps) {
     <form
       className="sd-panel"
       aria-label="Rename diagram"
-      onSubmit={async (event) => {
-        event.preventDefault();
+      onSubmit={(event) => {
+        (async () => {
+          event.preventDefault();
 
-        if (!draft.trim() || busy) return;
-        setBusy(true);
-        setError("");
+          if (!draft.trim() || busy) {
+            return;
+          }
 
-        try {
-          const response = await fetch(`/api/d/${id}/rename?k=${encodeURIComponent(diagramKey)}`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ name: draft.trim() }),
-          });
+          setBusy(true);
+          setError("");
 
-          const body: unknown = await response.json();
-
-          if (!response.ok)
-            throw new Error(
-              apiErrorMessage(isApiFailure(body) ? body : {}, "Could not rename the diagram."),
+          try {
+            const response = await fetch(
+              `/api/d/${id}/rename?k=${encodeURIComponent(diagramKey)}`,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ name: draft.trim() }),
+              },
             );
-          onRenamed(renameResultSchema.parse(body).name);
-        } catch (err) {
-          setError(errorMessage(err));
-          setBusy(false);
-        }
+
+            const body: unknown = await response.json();
+
+            if (!response.ok) {
+              throw new Error(
+                apiErrorMessage(isApiFailure(body) ? body : {}, "Could not rename the diagram."),
+              );
+            }
+
+            onRenamed(renameResultSchema.parse(body).name);
+          } catch (err) {
+            setError(errorMessage(err));
+            setBusy(false);
+          }
+        })().catch((failure) => setError(errorMessage(failure)));
       }}
     >
       <label htmlFor="diagram-name">Diagram name</label>
@@ -1215,7 +1367,7 @@ function tidySummary(d: TidyResult) {
     return count ? [`${count} ${word}`] : [];
   });
 
-  return parts.join(" · ") || `${d.changed} changes`;
+  return parts.join(" · ") || `${String(d.changed)} changes`;
 }
 
 type VersionPayload = { name: string } | { snapshotId: string };
@@ -1245,10 +1397,11 @@ function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
 
       const result: unknown = await response.json();
 
-      if (!response.ok)
+      if (!response.ok) {
         throw new Error(
           apiErrorMessage(isApiFailure(result) ? result : {}, "Could not save this change."),
         );
+      }
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey }),
     onError: (error) => flash(error.message),
@@ -1272,12 +1425,17 @@ function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
       </p>
       <form
         className="row"
-        onSubmit={async (e) => {
-          e.preventDefault();
+        onSubmit={(e) => {
+          (async () => {
+            e.preventDefault();
 
-          if (!(await post("/snapshots", { name: label || "checkpoint" }))) return;
-          setLabel("");
-          flash("Saved version");
+            if (!(await post("/snapshots", { name: label || "checkpoint" }))) {
+              return;
+            }
+
+            setLabel("");
+            flash("Saved version");
+          })().catch((failure) => flash(errorMessage(failure)));
         }}
       >
         <input
@@ -1286,27 +1444,40 @@ function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
           value={label}
           onChange={(e) => setLabel(e.target.value)}
         />
-        <button disabled={mutation.isPending}>Save version</button>
+        <button type="submit" disabled={mutation.isPending}>
+          Save version
+        </button>
       </form>
       <form
         className="row"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          const field = e.currentTarget.elements.namedItem("tpl");
+        onSubmit={(e) => {
+          (async () => {
+            e.preventDefault();
+            const field = e.currentTarget.elements.namedItem("tpl");
 
-          if (!(field instanceof HTMLInputElement))
-            throw new Error("Template name field is missing");
-          const input = field.value.trim();
+            if (!(field instanceof HTMLInputElement)) {
+              throw new Error("Template name field is missing");
+            }
 
-          if (!input) return;
+            const input = field.value.trim();
 
-          if (!(await post("/template", { name: input }))) return;
-          flash("Saved as template");
-          field.value = "";
+            if (!input) {
+              return;
+            }
+
+            if (!(await post("/template", { name: input }))) {
+              return;
+            }
+
+            flash("Saved as template");
+            field.value = "";
+          })().catch((failure) => flash(errorMessage(failure)));
         }}
       >
         <input name="tpl" aria-label="Template name" placeholder="Save as template…" />
-        <button disabled={mutation.isPending}>Save template</button>
+        <button type="submit" disabled={mutation.isPending}>
+          Save template
+        </button>
       </form>
       <ul className="list snaps">
         {snapshots.isLoading && (
@@ -1318,7 +1489,9 @@ function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
           <li>
             <div role="alert">
               <p>{snapshots.error.message}</p>
-              <button onClick={() => void snapshots.refetch()}>Retry versions</button>
+              <button type="button" onClick={() => void snapshots.refetch()}>
+                Retry versions
+              </button>
             </div>
           </li>
         )}
@@ -1335,10 +1508,16 @@ function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
               </span>
             </span>
             <button
+              type="button"
               disabled={mutation.isPending}
-              onClick={async () => {
-                if (!(await post("/restore", { snapshotId: s.id }))) return;
-                flash(`Restored "${s.name}"`);
+              onClick={() => {
+                (async () => {
+                  if (!(await post("/restore", { snapshotId: s.id }))) {
+                    return;
+                  }
+
+                  flash(`Restored "${s.name}"`);
+                })().catch((failure) => flash(errorMessage(failure)));
               }}
             >
               Restore

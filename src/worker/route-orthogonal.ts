@@ -1,3 +1,4 @@
+import { requiredValue } from "../shared/required-value.ts";
 // Orthogonal connector routing: right-angle routes that go around boxes, cross each other as
 // little as possible, and leave room for their labels. Arrows are routed one at a time (shortest
 // first) with A* over a sparse grid built from obstacle edges and the channels between them.
@@ -124,14 +125,17 @@ function crosses(s: Seg, t: Seg) {
   const sh = s.a.y === s.b.y;
   const th = t.a.y === t.b.y;
 
-  if (sh === th) return false;
+  if (sh === th) {
+    return false;
+  }
+
   const [h, v] = sh ? [s, t] : [t, s];
 
-  const hx0 = Math.min(h.a.x, h.b.x),
-    hx1 = Math.max(h.a.x, h.b.x);
+  const hx0 = Math.min(h.a.x, h.b.x);
+  const hx1 = Math.max(h.a.x, h.b.x);
 
-  const vy0 = Math.min(v.a.y, v.b.y),
-    vy1 = Math.max(v.a.y, v.b.y);
+  const vy0 = Math.min(v.a.y, v.b.y);
+  const vy1 = Math.max(v.a.y, v.b.y);
 
   return v.a.x > hx0 && v.a.x < hx1 && h.a.y > vy0 && h.a.y < vy1;
 }
@@ -140,17 +144,25 @@ function crosses(s: Seg, t: Seg) {
 function shared(s: Seg, t: Seg) {
   const sh = s.a.y === s.b.y;
 
-  if (sh !== (t.a.y === t.b.y)) return 0;
+  if (sh !== (t.a.y === t.b.y)) {
+    return 0;
+  }
 
   if (sh) {
-    if (Math.abs(s.a.y - t.a.y) > 4) return 0;
+    if (Math.abs(s.a.y - t.a.y) > 4) {
+      return 0;
+    }
+
     const lo = Math.max(Math.min(s.a.x, s.b.x), Math.min(t.a.x, t.b.x));
     const hi = Math.min(Math.max(s.a.x, s.b.x), Math.max(t.a.x, t.b.x));
 
     return Math.max(0, hi - lo);
   }
 
-  if (Math.abs(s.a.x - t.a.x) > 4) return 0;
+  if (Math.abs(s.a.x - t.a.x) > 4) {
+    return 0;
+  }
+
   const lo = Math.max(Math.min(s.a.y, s.b.y), Math.min(t.a.y, t.b.y));
   const hi = Math.min(Math.max(s.a.y, s.b.y), Math.max(t.a.y, t.b.y));
 
@@ -195,7 +207,9 @@ function sidePorts(b: Box, other: Box, gap: number): SidePort[] {
 
     const lined = Math.round(centre);
 
-    if (Math.abs(lined) <= length / 2 - 8 && !alongs.includes(lined)) alongs.push(lined);
+    if (Math.abs(lined) <= length / 2 - 8 && !alongs.includes(lined)) {
+      alongs.push(lined);
+    }
 
     return alongs.map((along) => ({ side, along, ...port(b, side, gap, along) }));
   });
@@ -215,7 +229,10 @@ class Heap<T> {
     while (i > 0) {
       const p = (i - 1) >> 1;
 
-      if (a[p].f <= a[i].f) break;
+      if (a[p].f <= a[i].f) {
+        break;
+      }
+
       [a[p], a[i]] = [a[i], a[p]];
       i = p;
     }
@@ -223,23 +240,30 @@ class Heap<T> {
   pop(): T {
     const a = this.items;
     const top = a[0];
-    const last = a.pop()!;
+    const last = requiredValue(a.pop(), "a.pop()");
 
     if (a.length) {
       a[0] = last;
       let i = 0;
 
       for (;;) {
-        const l = 2 * i + 1,
-          r = l + 1;
+        const l = 2 * i + 1;
+        const r = l + 1;
 
         let m = i;
 
-        if (l < a.length && a[l].f < a[m].f) m = l;
+        if (l < a.length && a[l].f < a[m].f) {
+          m = l;
+        }
 
-        if (r < a.length && a[r].f < a[m].f) m = r;
+        if (r < a.length && a[r].f < a[m].f) {
+          m = r;
+        }
 
-        if (m === i) break;
+        if (m === i) {
+          break;
+        }
+
         [a[m], a[i]] = [a[i], a[m]];
         i = m;
       }
@@ -251,14 +275,17 @@ class Heap<T> {
 
 /** Index of the first value strictly greater than `v` in an ascending list. */
 function firstAbove(vs: number[], v: number) {
-  let lo = 0,
-    hi = vs.length;
+  let lo = 0;
+  let hi = vs.length;
 
   while (lo < hi) {
     const m = (lo + hi) >> 1;
 
-    if (vs[m] <= v) lo = m + 1;
-    else hi = m;
+    if (vs[m] <= v) {
+      lo = m + 1;
+    } else {
+      hi = m;
+    }
   }
 
   return lo;
@@ -266,14 +293,17 @@ function firstAbove(vs: number[], v: number) {
 
 /** Index of the first value at or above `v` in an ascending list. */
 function firstAtOrAbove(vs: number[], v: number) {
-  let lo = 0,
-    hi = vs.length;
+  let lo = 0;
+  let hi = vs.length;
 
   while (lo < hi) {
     const m = (lo + hi) >> 1;
 
-    if (vs[m] < v) lo = m + 1;
-    else hi = m;
+    if (vs[m] < v) {
+      lo = m + 1;
+    } else {
+      hi = m;
+    }
   }
 
   return lo;
@@ -286,13 +316,21 @@ function simplify(pts: Pt[]): Pt[] {
   const out: Pt[] = [];
 
   for (const p of pts) {
-    if (out.length && out.at(-1)!.x === p.x && out.at(-1)!.y === p.y) continue;
+    if (
+      out.length &&
+      requiredValue(out.at(-1), "out.at(-1)").x === p.x &&
+      requiredValue(out.at(-1), "out.at(-1)").y === p.y
+    ) {
+      continue;
+    }
 
     if (out.length >= 2) {
-      const a = out.at(-2)!,
-        b = out.at(-1)!;
+      const a = requiredValue(out.at(-2), "out.at(-2)");
+      const b = requiredValue(out.at(-1), "out.at(-1)");
 
-      if ((a.x === b.x && b.x === p.x) || (a.y === b.y && b.y === p.y)) out.pop();
+      if ((a.x === b.x && b.x === p.x) || (a.y === b.y && b.y === p.y)) {
+        out.pop();
+      }
     }
 
     out.push(p);
@@ -309,8 +347,8 @@ export function pointAt(pts: Pt[], t: number): Pt {
   let left = length(pts) * t;
 
   for (let i = 1; i < pts.length; i++) {
-    const a = pts[i - 1],
-      b = pts[i];
+    const a = pts[i - 1];
+    const b = pts[i];
 
     const l = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
 
@@ -372,7 +410,10 @@ export function routeOrthogonal(
     for (const r of order) {
       const f = state.get(r.id);
 
-      if (!f || r.id === req.id) continue;
+      if (!f || r.id === req.id) {
+        continue;
+      }
+
       segs.push(...segments(f.points));
 
       for (const k of [
@@ -381,7 +422,9 @@ export function routeOrthogonal(
       ]) {
         sides.set(k, (sides.get(k) ?? 0) + 1);
 
-        if (pair(r) === pair(req)) twins.add(k);
+        if (pair(r) === pair(req)) {
+          twins.add(k);
+        }
       }
     }
 
@@ -425,10 +468,16 @@ export function routeOrthogonal(
     let moved = false;
 
     for (const req of order) {
-      if (seen.get(req.id) === changes) continue;
+      if (seen.get(req.id) === changes) {
+        continue;
+      }
+
       const next = route(req);
 
-      if (JSON.stringify(next.points) !== JSON.stringify(state.get(req.id)!.points)) {
+      if (
+        JSON.stringify(next.points) !==
+        JSON.stringify(requiredValue(state.get(req.id), "state.get(req.id)").points)
+      ) {
         state.set(req.id, next);
         changes++;
         moved = true;
@@ -437,16 +486,22 @@ export function routeOrthogonal(
       seen.set(req.id, changes);
     }
 
-    if (!moved) break;
+    if (!moved) {
+      break;
+    }
   }
 
   // Labels last, once every route is final.
-  const all = [...fixedSegs, ...order.flatMap((r) => segments(state.get(r.id)!.points))];
+  const all = [
+    ...fixedSegs,
+    ...order.flatMap((r) => segments(requiredValue(state.get(r.id), "state.get(r.id)").points)),
+  ];
+
   const labels: Box[] = [];
   const out = new Map<string, Route>();
 
   for (const req of order) {
-    const f = state.get(req.id)!;
+    const f = requiredValue(state.get(req.id), "state.get(req.id)");
 
     const r: Route = {
       points: f.points,
@@ -454,7 +509,9 @@ export function routeOrthogonal(
       endSide: f.end.side,
     };
 
-    if (!f.found) r.fallback = true;
+    if (!f.found) {
+      r.fallback = true;
+    }
 
     if (req.label) {
       const at = placeLabel(f.points, req.label, [...obstacles, ...labels], all, req.from, req.to);
@@ -549,26 +606,29 @@ export function routeOrthogonal(
     // Every obstacle edge is a grid line and so is the middle of every gap, so each obstacle has a
     // line strictly inside it: a step between neighbouring points is clear exactly when both are
     // free. Free points are found by blanking the cells each obstacle covers.
-    const gridKey = `${req.id}:${reach}`;
+    const gridKey = `${req.id}:${String(reach)}`;
     let freeV = grids.get(gridKey);
 
     if (!freeV) {
       freeV = new Uint8Array(W0 * H0);
 
-      for (let j = 0; j < H0; j++)
+      for (let j = 0; j < H0; j++) {
         for (let i = 0; i < W0; i++) {
           const p = { x: gx[i], y: gy[j] };
           freeV[j * W0 + i] = inBounds(p) && within(p) ? 1 : 0;
         }
+      }
 
       for (const o of edges) {
-        const i0 = firstAbove(gx, o.x),
-          i1 = firstAtOrAbove(gx, o.x + o.w);
+        const i0 = firstAbove(gx, o.x);
+        const i1 = firstAtOrAbove(gx, o.x + o.w);
 
-        const j0 = firstAbove(gy, o.y),
-          j1 = firstAtOrAbove(gy, o.y + o.h);
+        const j0 = firstAbove(gy, o.y);
+        const j1 = firstAtOrAbove(gy, o.y + o.h);
 
-        for (let j = j0; j < j1; j++) freeV.fill(0, j * W0 + i0, j * W0 + i1);
+        for (let j = j0; j < j1; j++) {
+          freeV.fill(0, j * W0 + i0, j * W0 + i1);
+        }
       }
 
       grids.set(gridKey, freeV);
@@ -580,12 +640,17 @@ export function routeOrthogonal(
 
     const goal = new Map<number, SidePort>();
     const W = gx.length;
-    const id = (x: number, y: number) => yi.get(y)! * W + xi.get(x)!;
+
+    const id = (x: number, y: number) =>
+      requiredValue(yi.get(y), "yi.get(y)") * W + requiredValue(xi.get(x), "xi.get(x)");
 
     for (const e of ends) {
       const q = leadOut(e.p, e.dir);
 
-      if (!free(q)) continue;
+      if (!free(q)) {
+        continue;
+      }
+
       // Arriving means travelling opposite to the side's outward direction.
       goal.set(id(q.x, q.y) * 4 + ((e.dir + 2) % 4), e);
     }
@@ -610,16 +675,21 @@ export function routeOrthogonal(
         ? [vs, vKeys, Math.min(a.x, b.x), Math.max(a.x, b.x)]
         : [hs, hKeys, Math.min(a.y, b.y), Math.max(a.y, b.y)];
 
-      for (let k = firstAbove(acrossKeys, lo); k < across.length && acrossKeys[k] < hi; k++)
-        if (crosses(s, across[k])) c += CROSS;
+      for (let k = firstAbove(acrossKeys, lo); k < across.length && acrossKeys[k] < hi; k++) {
+        if (crosses(s, across[k])) {
+          c += CROSS;
+        }
+      }
+
       const [along, alongKeys, at] = horizontal ? [hs, hKeys, a.y] : [vs, vKeys, a.x];
 
       for (
         let k = firstAtOrAbove(alongKeys, at - 4);
         k < along.length && alongKeys[k] <= at + 4;
         k++
-      )
+      ) {
         c += shared(s, along[k]) * SHARE;
+      }
 
       return c;
     };
@@ -635,7 +705,10 @@ export function routeOrthogonal(
     for (const s of starts) {
       const q = leadOut(s.p, s.dir);
 
-      if (!free(q) || !stubClear(s.p, q)) continue;
+      if (!free(q) || !stubClear(s.p, q)) {
+        continue;
+      }
+
       const g = segCost(s.p, q) + sideCost(req.from, s);
       const root: SearchNode = { v: -1, dir: s.dir, g: 0, prev: null, p: s.p, start: s };
       const n: SearchNode = { v: id(q.x, q.y), dir: s.dir, g, prev: root, p: q, start: s };
@@ -649,7 +722,10 @@ export function routeOrthogonal(
       const n = heap.pop();
       const k = n.v * 4 + n.dir;
 
-      if (best[k] <= n.g) continue;
+      if (best[k] <= n.g) {
+        continue;
+      }
+
       best[k] = n.g;
       expanded++;
       const done = goal.get(k);
@@ -660,15 +736,24 @@ export function routeOrthogonal(
       }
 
       for (let d = 0; d < 4; d++) {
-        if (d === (n.dir + 2) % 4) continue; // no U-turns
+        if (d === (n.dir + 2) % 4) {
+          continue;
+        } // no U-turns
+
         const i = (n.v % W) + DIRS[d].x;
         const j = Math.floor(n.v / W) + DIRS[d].y;
 
-        if (i < 0 || j < 0 || i >= W || j >= gy.length || !grid[j * W + i]) continue;
+        if (i < 0 || j < 0 || i >= W || j >= gy.length || !grid[j * W + i]) {
+          continue;
+        }
+
         const q = { x: gx[i], y: gy[j] };
         const step = n.v * 4 + d;
 
-        if (stepCost[step] < 0) stepCost[step] = segCost(n.p, q);
+        if (stepCost[step] < 0) {
+          stepCost[step] = segCost(n.p, q);
+        }
+
         const g = n.g + stepCost[step] + (d === n.dir ? 0 : BEND);
 
         const next: SearchNode = {
@@ -680,19 +765,29 @@ export function routeOrthogonal(
           start: n.start,
         };
 
-        if (best[next.v * 4 + d] <= g) continue;
-        const endBonus = goal.get(next.v * 4 + d) ? sideCost(req.to, goal.get(next.v * 4 + d)!) : 0;
+        if (best[next.v * 4 + d] <= g) {
+          continue;
+        }
+
+        const endBonus = goal.get(next.v * 4 + d)
+          ? sideCost(req.to, requiredValue(goal.get(next.v * 4 + d), "goal.get(next.v * 4 + d)"))
+          : 0;
+
         heap.push(g + endBonus + h(q), next);
       }
     }
 
     let points: Pt[];
-    let start: SidePort, end: SidePort;
+    let start: SidePort;
+    let end: SidePort;
 
     if (found) {
       const path: Pt[] = [found.end.p];
 
-      for (let n: SearchNode | null = found.node; n; n = n.prev) path.push(n.p);
+      for (let n: SearchNode | null = found.node; n; n = n.prev) {
+        path.push(n.p);
+      }
+
       points = simplify(path.toReversed());
       start = found.node.start;
       end = found.end;
@@ -748,8 +843,8 @@ function placeLabel(
   let walked = 0;
 
   for (let i = 1; i < pts.length; i++) {
-    const a = pts[i - 1],
-      b = pts[i];
+    const a = pts[i - 1];
+    const b = pts[i];
 
     const l = Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
     const horizontal = a.y === b.y;
@@ -770,14 +865,24 @@ function placeLabel(
       const t = (walked + l * f) / total;
       let score = Math.abs(t - 0.5) * 200;
 
-      if (l < need) score += 400;
+      if (l < need) {
+        score += 400;
+      }
 
-      if (!horizontal) score += 120;
+      if (!horizontal) {
+        score += 120;
+      }
 
-      for (const o of [...avoid, from, to]) if (hits(box, o)) score += 1000;
+      for (const o of [...avoid, from, to]) {
+        if (hits(box, o)) {
+          score += 1000;
+        }
+      }
 
       for (const s of routes) {
-        if (mine(s)) continue;
+        if (mine(s)) {
+          continue;
+        }
 
         const sb = {
           x: Math.min(s.a.x, s.b.x),
@@ -786,10 +891,14 @@ function placeLabel(
           h: Math.abs(s.b.y - s.a.y) || 1,
         };
 
-        if (hits(box, sb)) score += 300;
+        if (hits(box, sb)) {
+          score += 300;
+        }
       }
 
-      if (!best || score < best.score) best = { t, box, score };
+      if (!best || score < best.score) {
+        best = { t, box, score };
+      }
     }
 
     walked += l;

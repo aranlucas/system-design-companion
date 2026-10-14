@@ -1,3 +1,5 @@
+import { elementAttribute, requiredElementAttribute } from "../src/shared/element-attributes.ts";
+import { requiredTestValue } from "./helpers/required-test-value.ts";
 // Tidy behaviours: arrow binding, frame fitting, groups, spacing, push direction, and regressions
 // measured with the same layout report scripts/tidy-check.ts prints.
 import { describe, expect, it } from "vitest";
@@ -66,7 +68,9 @@ const drag = (s: Scene, id: string, to: DragTarget) => {
   const dx = to.x - node.x;
   const dy = (to.y ?? node.y) - node.y;
 
-  for (const e of [node, s.boundText(node)!]) s.mutate(e, { x: e.x + dx, y: e.y + dy });
+  for (const e of [node, requiredTestValue(s.boundText(node))]) {
+    s.mutate(e, { x: e.x + dx, y: e.y + dy });
+  }
 };
 
 function grownFrame() {
@@ -100,9 +104,11 @@ function messy(n: number) {
   const rand = () => (r = (r * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
   const ops: Op[] = [];
 
-  for (let f = 0; f < 4; f++) ops.push({ op: "add_frame", ref: `f${f}`, name: `F${f}` });
+  for (let f = 0; f < 4; f++) {
+    ops.push({ op: "add_frame", ref: `f${f}`, name: `F${f}` });
+  }
 
-  for (let i = 0; i < n; i++)
+  for (let i = 0; i < n; i++) {
     ops.push({
       op: "add_node",
       ref: `n${i}`,
@@ -110,12 +116,15 @@ function messy(n: number) {
       frame: `f${i % 4}`,
       place: { at: { x: (i % 4) * 3000 + (i % 10) * 200, y: Math.floor(i / 10) * 150 } },
     });
+  }
 
   for (let i = 0; i < n * 1.5; i++) {
     const a = Math.floor(rand() * n);
     const b = Math.floor(rand() * n);
 
-    if (a !== b && a % 4 === b % 4) ops.push({ op: "connect", from: `n${a}`, to: `n${b}` });
+    if (a !== b && a % 4 === b % 4) {
+      ops.push({ op: "connect", from: `n${a}`, to: `n${b}` });
+    }
   }
 
   const s = new Scene([]);
@@ -145,14 +154,14 @@ describe("tidy: binding loose arrow ends", () => {
     ]);
 
     expect(s.tidy().bound).toBe(2);
-    expect(s.resolve("x").startBinding.elementId).toBe("C");
-    expect(s.resolve("x").endBinding.elementId).toBe("A");
+    expect(requiredElementAttribute(s.resolve("x"), "startBinding").elementId).toBe("C");
+    expect(requiredElementAttribute(s.resolve("x"), "endBinding").elementId).toBe("A");
   });
 
   it("leaves an arrow alone unless both ends land on nodes, as graph() reads it", () => {
     const s = new Scene([rect("A", 0, 0), arrow("x", [80, 76], [400, 400])]);
     expect(s.tidy().bound).toBe(0);
-    expect(s.resolve("x").startBinding).toBeUndefined();
+    expect(elementAttribute(s.resolve("x"), "startBinding")).toBeUndefined();
     expect(graphView(s).edges ?? []).toHaveLength(0);
   });
 
@@ -164,7 +173,7 @@ describe("tidy: binding loose arrow ends", () => {
     ]);
 
     expect(s.tidy().bound).toBe(1);
-    expect(s.resolve("x").endBinding.elementId).toBe("C");
+    expect(requiredElementAttribute(s.resolve("x"), "endBinding").elementId).toBe("C");
   });
 });
 
@@ -335,8 +344,10 @@ describe("tidy: no regressions", () => {
       "blockOverlaps",
       "frameOverlaps",
       "outsideFrame",
-    ] as const)
-      expect(after[k], k).toBeLessThanOrEqual(before[k]);
+    ] as const) {
+      expect(after[k]).toBeLessThanOrEqual(before[k]);
+    }
+
     expect(idempotent(s)).toBe(0);
   });
 });

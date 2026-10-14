@@ -21,7 +21,10 @@ export const paginationQuery = z.object({
     .transform((value, ctx) => {
       const cursor = parseDiagramCursor(value);
 
-      if (cursor !== null) return cursor;
+      if (cursor !== null) {
+        return cursor;
+      }
+
       ctx.addIssue({ code: "custom", message: "invalid cursor" });
 
       return z.NEVER;
@@ -30,14 +33,14 @@ export const paginationQuery = z.object({
 });
 
 export const createBody = z.object({
-  name: optionalName.transform((value) => value || "Untitled"),
+  name: optionalName.transform((value) => (value === "" ? "Untitled" : (value ?? "Untitled"))),
   template: z.string().optional(),
 });
 
 export const renameBody = z.object({ name });
 
 export const snapshotBody = z.object({
-  name: optionalName.transform((value) => value || "manual"),
+  name: optionalName.transform((value) => (value === "" ? "manual" : (value ?? "manual"))),
 });
 
 export const restoreBody = z.object({ snapshotId: z.string().min(1) });

@@ -1,3 +1,4 @@
+import { promiseResult } from "../../src/shared/promise-result.ts";
 import { strictFake } from "./strict-fake.ts";
 
 interface SqlRows<T> {
@@ -32,11 +33,14 @@ export function d1Adapter<S extends StatementCore>(source: DatabaseSource<S>): D
 
     const statement = strictFake<D1PreparedStatement>({
       bind: (...next) => prepare(query, next),
-      async first<T>(column?: string): Promise<T | null> {
-        if (column !== undefined)
-          throw new Error("Column selection is not implemented by this fake");
+      first<T>(column?: string): Promise<T | null> {
+        return promiseResult(() => {
+          if (column !== undefined) {
+            throw new Error("Column selection is not implemented by this fake");
+          }
 
-        return underlying.first<T>();
+          return underlying.first<T>();
+        });
       },
       async run<T>(): Promise<D1Result<T>> {
         await underlying.run();
@@ -59,7 +63,9 @@ export function d1Adapter<S extends StatementCore>(source: DatabaseSource<S>): D
       const originals = batch.map((statement) => {
         const original = statements.get(statement);
 
-        if (!original) throw new Error("Statement belongs to another fake database");
+        if (!original) {
+          throw new Error("Statement belongs to another fake database");
+        }
 
         return original;
       });

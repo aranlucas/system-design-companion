@@ -4,18 +4,32 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
-import type { Manifest } from "vite";
+import { z } from "zod/mini";
 
 const clientDir = ".cloudflare/output/v0/workers/default/assets";
 
-const manifest: Manifest = JSON.parse(readFileSync(`${clientDir}/.vite/manifest.json`, "utf8"));
+const manifest = z
+  .record(
+    z.string(),
+    z.object({
+      file: z.string(),
+      imports: z.optional(z.array(z.string())),
+      isDynamicEntry: z.optional(z.boolean()),
+    }),
+  )
+  .parse(JSON.parse(readFileSync(`${clientDir}/.vite/manifest.json`, "utf8")));
 
 function staticFiles(entry: string, seen = new Set<string>()): Set<string> {
-  if (seen.has(entry)) return seen;
-  assert(manifest[entry], `Missing manifest entry: ${entry}`);
+  if (seen.has(entry)) {
+    return seen;
+  }
+
+  assert.ok(manifest[entry], `Missing manifest entry: ${entry}`);
   seen.add(entry);
 
-  for (const dependency of manifest[entry].imports ?? []) staticFiles(dependency, seen);
+  for (const dependency of manifest[entry].imports ?? []) {
+    staticFiles(dependency, seen);
+  }
 
   return seen;
 }
@@ -50,6 +64,7 @@ const canvasImports = staticFiles("src/app/canvas.tsx");
 
 const canvas = sizes([...canvasImports].map((entry) => join(clientDir, manifest[entry].file)));
 
+// eslint-disable-next-line no-console -- This CLI command reports its validation/build results to the terminal.
 console.table({
   "Home JavaScript (static imports)": home,
   "Canvas JavaScript (static imports)": canvas,
@@ -62,13 +77,13 @@ console.table({
 // for /mcp and the OAuth endpoints, but the total is what ships.
 const WORKER_BUDGET_BYTES = 700_000;
 
-assert(home.raw < 300_000, `Home JavaScript exceeds 300 kB: ${home.raw} bytes`);
+assert.ok(home.raw < 300_000, `Home JavaScript exceeds 300 kB: ${home.raw} bytes`);
 
-assert(
+assert.ok(
   worker.raw < WORKER_BUDGET_BYTES,
   `Worker JavaScript exceeds ${WORKER_BUDGET_BYTES / 1000} kB: ${worker.raw} bytes`,
 );
 
-assert(manifest["src/app/library.ts"]?.isDynamicEntry, "Component library must be a lazy chunk");
+assert.ok(manifest["src/app/library.ts"]?.isDynamicEntry, "Component library must be a lazy chunk");
 
-assert(!canvasImports.has("src/app/library.ts"), "Canvas must not eagerly import the library");
+assert.ok(!canvasImports.has("src/app/library.ts"), "Canvas must not eagerly import the library");
