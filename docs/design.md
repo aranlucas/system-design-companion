@@ -381,7 +381,7 @@ flowchart TD
 - It is idempotent: a second run changes nothing.
 - It snapshots first, but only when something will change.
 - The full dagre `layout` stays opt-in.
-- `tests/scene-tidy.test.ts` uses the metrics `scripts/tidy-check.ts` prints to check that
+- `test/scene-tidy.test.ts` uses the metrics `scripts/tidy-check.ts` prints to check that
   tidy makes no template or seeded messy diagram worse.
 
 ## MCP surface

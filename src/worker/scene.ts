@@ -491,7 +491,7 @@ export class Scene {
   }
 
   private findElement(id: string | null | undefined): El | undefined {
-    return id == null ? undefined : this.els.get(id);
+    return id === null || id === undefined ? undefined : this.els.get(id);
   }
 
   // ---------- basics ----------

@@ -1,30 +1,30 @@
 # Improvements & research
 
-Companion to [design.md](design.md). Sources: the new `tests/` suite (`pnpm test`,
+Companion to [design.md](design.md). Sources: the new `test/` suite (`pnpm test`,
 232 tests), a review of `src/worker/*.ts`, and a survey of comparable projects (Sep 2026).
 
 ## 1. What the test suite covers
 
-| File                            | Covers                                                                                                                                                                                                                                       |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/scene-ops.test.ts`       | Every `apply_patch` op, ref/label/id resolution, ambiguity errors, partial-batch semantics, agent vs human authorship (`customData.author` / `editedBy`), violet stroke, z-order invariants                                                  |
-| `tests/scene-placement.test.ts` | All placement hints, gaps, overlap nudging, chained placement, frame inference/attach/grow, frame moves carrying children                                                                                                                    |
-| `tests/scene-graph.test.ts`     | `graph()` / `graphView()`, duplicate-label `#id` display, inferred edges, sketches, selection marking, `_edgesRaw` hiding                                                                                                                    |
-| `tests/scene-format.test.ts`    | `wrapText` / `measureText`, `tidy` (separation, adoption, wrapping, idempotence, never changes connections/labels/colours/count), `layout`, `addForeign`, `restoreTo`, JSON round-trip (the R2 snapshot path)                                |
-| `tests/scene-tidy.test.ts`      | `tidy` binding, frame fit/shrink, groups, even spacing, push direction; no-regression metrics on templates and seeded messy diagrams                                                                                                         |
-| `tests/scene-templates.test.ts` | All builtin templates apply cleanly with expected node/edge counts; tidy-stability                                                                                                                                                           |
-| `tests/store-meta.test.ts`      | `parseLink` / `shareLink`, `createDiagram` → `verifyKey` round-trip, builtin + saved templates, component catalog, rubric shape                                                                                                              |
-| `tests/room.test.ts`            | `DiagramRoom` on fake storage: ops layer + auto-snapshots, `tidy` / `layout`, snapshot/restore/undo, `seed`, tombstone hiding, the version/nonce merge rule, tab broadcast, presence/selection, no-tab RPC errors, end-to-end interview flow |
-| `tests/http.test.ts`            | Worker routes with real rooms: create/get/rename, 403s, builtin + saved templates, snapshots/restore/tidy over HTTP, 404s, the `/mcp` token challenge, RFC 9728 metadata, unconfigured-sign-in 503                                           |
-| `tests/mcp-events.test.ts`      | Event catalog, subscriptions, signatures, rotation, retry and revocation checks.                                                                                                                                                             |
-| `tests/helpers/fakes.ts`        | In-memory D1 / R2 / DO-SQL / sockets; `cloudflare:workers` stubbed via `vitest.config.ts` alias                                                                                                                                              |
+| File                           | Covers                                                                                                                                                                                                                                       |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/scene-ops.test.ts`       | Every `apply_patch` op, ref/label/id resolution, ambiguity errors, partial-batch semantics, agent vs human authorship (`customData.author` / `editedBy`), violet stroke, z-order invariants                                                  |
+| `test/scene-placement.test.ts` | All placement hints, gaps, overlap nudging, chained placement, frame inference/attach/grow, frame moves carrying children                                                                                                                    |
+| `test/scene-graph.test.ts`     | `graph()` / `graphView()`, duplicate-label `#id` display, inferred edges, sketches, selection marking, `_edgesRaw` hiding                                                                                                                    |
+| `test/scene-format.test.ts`    | `wrapText` / `measureText`, `tidy` (separation, adoption, wrapping, idempotence, never changes connections/labels/colours/count), `layout`, `addForeign`, `restoreTo`, JSON round-trip (the R2 snapshot path)                                |
+| `test/scene-tidy.test.ts`      | `tidy` binding, frame fit/shrink, groups, even spacing, push direction; no-regression metrics on templates and seeded messy diagrams                                                                                                         |
+| `test/scene-templates.test.ts` | All builtin templates apply cleanly with expected node/edge counts; tidy-stability                                                                                                                                                           |
+| `test/store-meta.test.ts`      | `parseLink` / `shareLink`, `createDiagram` → `verifyKey` round-trip, builtin + saved templates, component catalog, rubric shape                                                                                                              |
+| `test/room.test.ts`            | `DiagramRoom` on fake storage: ops layer + auto-snapshots, `tidy` / `layout`, snapshot/restore/undo, `seed`, tombstone hiding, the version/nonce merge rule, tab broadcast, presence/selection, no-tab RPC errors, end-to-end interview flow |
+| `test/http.test.ts`            | Worker routes with real rooms: create/get/rename, 403s, builtin + saved templates, snapshots/restore/tidy over HTTP, 404s, the `/mcp` token challenge, RFC 9728 metadata, unconfigured-sign-in 503                                           |
+| `test/mcp-events.test.ts`      | Event catalog, subscriptions, signatures, rotation, retry and revocation checks.                                                                                                                                                             |
+| `test/helpers/fakes.ts`        | In-memory D1 / R2 / DO-SQL / sockets; `cloudflare:workers` stubbed via `vitest.config.ts` alias                                                                                                                                              |
 
 Run: `pnpm test`. The suite is typechecked, linted, and formatted by `pnpm check`; CI runs it with `pnpm test`.
 
 ## OAuth and events limitations
 
-OAuth and MCP event coverage is in `tests/oauth.test.ts`, `tests/mcp-events.test.ts`
-and `tests/webhook-destination.test.ts`. See [design.md](design.md#mcp-events) for
+OAuth and MCP event coverage is in `test/oauth.test.ts`, `test/mcp-events.test.ts`
+and `test/webhook-destination.test.ts`. See [design.md](design.md#mcp-events) for
 security decisions and [setup.md](setup.md#mcp-events) for deployment and live testing.
 Events have no durable replay, callback hosts must be trusted because Workers fetch
 cannot pin DNS addresses, and grant revocation follows KV consistency.
