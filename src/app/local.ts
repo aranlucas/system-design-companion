@@ -37,13 +37,6 @@ export function remember(e: Omit<LibraryEntry, "openedAt">) {
   write(LIB, [{ ...e, openedAt: Date.now() }, ...library().filter((x) => x.id !== e.id)]);
 }
 
-export function forget(id: string) {
-  write(
-    LIB,
-    library().filter((x) => x.id !== id),
-  );
-}
-
 export const mcpUrl = () => `${location.origin}/mcp`;
 
 export const setupCommands = () => [
