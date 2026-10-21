@@ -19,7 +19,7 @@ export async function boundedResponse(response: Response): Promise<string> {
       }
 
       if (!(value instanceof Uint8Array)) {
-        throw new Error("verification response must contain byte chunks");
+        throw new TypeError("verification response must contain byte chunks");
       }
 
       size += value.length;

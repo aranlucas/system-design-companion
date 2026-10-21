@@ -1456,7 +1456,7 @@ function VersionsPanel({ id, k, flash }: VersionsPanelProps) {
             const field = e.currentTarget.elements.namedItem("tpl");
 
             if (!(field instanceof HTMLInputElement)) {
-              throw new Error("Template name field is missing");
+              throw new TypeError("Template name field is missing");
             }
 
             const input = field.value.trim();

@@ -31,7 +31,7 @@ function requireSvg(id: string): SVGSVGElement {
   const element = document.querySelector(`#${id}`);
 
   if (!(element instanceof SVGSVGElement)) {
-    throw new Error(`Missing SVG: ${id}`);
+    throw new TypeError(`Missing SVG: ${id}`);
   }
 
   return element;
@@ -41,7 +41,7 @@ function requireButton(id: string): HTMLButtonElement {
   const element = document.querySelector(`#${id}`);
 
   if (!(element instanceof HTMLButtonElement)) {
-    throw new Error(`Missing button: ${id}`);
+    throw new TypeError(`Missing button: ${id}`);
   }
 
   return element;

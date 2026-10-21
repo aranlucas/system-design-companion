@@ -4,7 +4,7 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - "@cloudflare/vite-plugin@1.59.0"
   - miniflare@5.20260921.1-alpha
-  - vite@8.3.1
+  - vite@8.3.1 || 8.3.5
   - wrangler@4.138.0 || 4.143.0
   - "@oxlint-tsgolint/darwin-arm64@7.0.2003"
   - "@oxlint-tsgolint/darwin-x64@7.0.2003"
@@ -17,6 +17,7 @@ minimumReleaseAgeExclude:
   - cf@1.0.0-beta.10
   - "@aranlucas/*"
   - "@oxlint/plugins@1.88.0"
+  - "@excalidraw/mermaid-to-excalidraw@2.3.0"
 overrides:
   "lodash-es@>=4 <4.18.1": 4.18.1
   "nanoid@>=3 <3.3.19": 3.3.19
