@@ -179,8 +179,8 @@ importers:
         specifier: ^3.1.1
         version: 3.1.1
       '@excalidraw/excalidraw':
-        specifier: 0.18.0-1118751
-        version: 0.18.0-1118751(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        specifier: 0.18.0-17d8904
+        version: 0.18.0-17d8904(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@excalidraw/mermaid-to-excalidraw':
         specifier: ^2.3.0
         version: 2.3.0
@@ -577,20 +577,20 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@excalidraw/common@0.18.0-1118751':
-    resolution: {integrity: sha512-LiFM3fa1eMchsolfrprY+KclIgC6Rn79Z44HcnJOhj+uxwxr6pyFctYlYrpuGJZSJc5zmvMXZOTNE1pAfY+haQ==}
+  '@excalidraw/common@0.18.0-17d8904':
+    resolution: {integrity: sha512-H17L8aM7560TuYYuTJcAgZYJIbzjUFWc2Wg9IwwLpGOA8jx6wpWUCIG/c3tRghFnzCwku+laimH5KCZUeYySLQ==}
 
-  '@excalidraw/element@0.18.0-1118751':
-    resolution: {integrity: sha512-nmf8v1056iy1w2PmltY42pVSUKYtIzIA7xUIcPropMIEE8vz2a8Bq8Mg99J5Hzh7RbOvAu0A0FUknMKPUsOO4A==}
+  '@excalidraw/element@0.18.0-17d8904':
+    resolution: {integrity: sha512-PEgO/y2BWmIhh8TxJ9vGnx0jCFLLS1Hj2GVnvVMFx33j1iLczTPyokRgAluhn941wSO1aphtdziF9auXt5ydSg==}
 
-  '@excalidraw/excalidraw@0.18.0-1118751':
-    resolution: {integrity: sha512-Tr7pNaWoWJWLP6dm89lNTjpFbufkzyfbe64gPvceEN0c5Z2RcEILbipa4tJ8Vsu7WFHTfh2lKNoFTBEp/nR5Hw==}
+  '@excalidraw/excalidraw@0.18.0-17d8904':
+    resolution: {integrity: sha512-i1e0xAeMopOb8bgfk0aZAgsKDBbdi/l0JlwCC7NHLPWqnLSDbaCVy07frPgzBTuvpESSPxiK6w2NnepUeaXwCg==}
     peerDependencies:
       react: ^17.0.2 || ^18.2.0 || ^19.0.0
       react-dom: ^17.0.2 || ^18.2.0 || ^19.0.0
 
-  '@excalidraw/fractional-indexing@0.18.0-1118751':
-    resolution: {integrity: sha512-vyqqq20TVshFosjhUSrYn4Hb5h18HWTO+h/02UAioSAbXPTF4gOVYbPgJz3/0TXchrVtpUtoXsD9XNOKUKePBA==}
+  '@excalidraw/fractional-indexing@0.18.0-17d8904':
+    resolution: {integrity: sha512-HPuUW9if7mDPiLo2Aj1ntEFKN9wYtf/iFZQcmVLDs5eVx7CYxd2QMxr8VzjabNpRw3izcyDrZ9BGteCddUi9CA==}
     engines: {node: ^14.13.1 || >=16.0.0}
 
   '@excalidraw/laser-pointer@1.3.1':
@@ -599,8 +599,8 @@ packages:
   '@excalidraw/markdown-to-text@0.1.2':
     resolution: {integrity: sha512-1nDXBNAojfi3oSFwJswKREkFm5wrSjqay81QlyRv2pkITG/XYB5v+oChENVBQLcxQwX4IUATWvXM5BcaNhPiIg==}
 
-  '@excalidraw/math@0.18.0-1118751':
-    resolution: {integrity: sha512-lBvPrY3Ah7oy9Z+Dky9hr3mI8+aDHCXhNX/Dyv8C0zp0h9Q0mIWW/0/ZlZRvCT+0lY9S0hlCPPa0lx5VvO6BsA==}
+  '@excalidraw/math@0.18.0-17d8904':
+    resolution: {integrity: sha512-e2AoX7qpfBYb5eu902t9QSoB8oALciSb0hAiF0hM89uSvnbZsWEtTKMYho1uQgtCyUKibl94gjjpYc6C/jBLTg==}
 
   '@excalidraw/mermaid-to-excalidraw@2.2.2':
     resolution: {integrity: sha512-5VKQq5CdRocC82vOIUpQ5ufJOVV9FpBTdHGA+ULqazeIVV+cr299877omQCibsdS3Bpitz2fsnTwnIXEmLVDSg==}
@@ -3550,27 +3550,27 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@excalidraw/common@0.18.0-1118751':
+  '@excalidraw/common@0.18.0-17d8904':
     dependencies:
       tinycolor2: 1.6.0
 
-  '@excalidraw/element@0.18.0-1118751':
+  '@excalidraw/element@0.18.0-17d8904':
     dependencies:
-      '@excalidraw/common': 0.18.0-1118751
-      '@excalidraw/fractional-indexing': 0.18.0-1118751
-      '@excalidraw/math': 0.18.0-1118751
+      '@excalidraw/common': 0.18.0-17d8904
+      '@excalidraw/fractional-indexing': 0.18.0-17d8904
+      '@excalidraw/math': 0.18.0-17d8904
 
-  '@excalidraw/excalidraw@0.18.0-1118751(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@excalidraw/excalidraw@0.18.0-17d8904(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
       '@braintree/sanitize-url': 6.0.2
       '@codemirror/commands': 6.11.1
       '@codemirror/language': 6.13.1
       '@codemirror/state': 6.7.6
       '@codemirror/view': 6.43.15
-      '@excalidraw/common': 0.18.0-1118751
-      '@excalidraw/element': 0.18.0-1118751
+      '@excalidraw/common': 0.18.0-17d8904
+      '@excalidraw/element': 0.18.0-17d8904
       '@excalidraw/laser-pointer': 1.3.1
-      '@excalidraw/math': 0.18.0-1118751
+      '@excalidraw/math': 0.18.0-17d8904
       '@excalidraw/mermaid-to-excalidraw': 2.2.2
       '@excalidraw/random-username': 1.1.0
       '@lezer/highlight': 1.2.5
@@ -3605,15 +3605,15 @@ snapshots:
       - '@types/react-dom'
       - immer
 
-  '@excalidraw/fractional-indexing@0.18.0-1118751': {}
+  '@excalidraw/fractional-indexing@0.18.0-17d8904': {}
 
   '@excalidraw/laser-pointer@1.3.1': {}
 
   '@excalidraw/markdown-to-text@0.1.2': {}
 
-  '@excalidraw/math@0.18.0-1118751':
+  '@excalidraw/math@0.18.0-17d8904':
     dependencies:
-      '@excalidraw/common': 0.18.0-1118751
+      '@excalidraw/common': 0.18.0-17d8904
 
   '@excalidraw/mermaid-to-excalidraw@2.2.2':
     dependencies:

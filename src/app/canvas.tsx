@@ -12,7 +12,7 @@ import {
   convertToExcalidrawElements,
   DefaultSidebar,
   Excalidraw,
-  exportToBlob,
+  exportScene,
   Footer,
   getCommonBounds,
   isInvisiblySmallElement,
@@ -519,18 +519,19 @@ export function Canvas({ id, k }: CanvasProps) {
             throw new Error("nothing to render");
           }
 
-          const blob = await exportToBlob({
-            elements,
-            appState: {
-              ...a.getAppState(),
-              exportBackground: true,
-              exportWithDarkMode: false,
-              viewBackgroundColor: "#ffffff",
+          const blob = await exportScene({
+            type: "png",
+            data: {
+              elements,
+              appState: { viewBackgroundColor: "#ffffff" },
+              files: a.getFiles(),
             },
-            files: a.getFiles(),
-            mimeType: "image/png",
-            maxWidthOrHeight: 1600,
-            exportPadding: 24,
+            config: {
+              theme: "light",
+              canvasBackgroundColor: "#ffffff",
+              maxWidthOrHeight: 1600,
+              padding: 24,
+            },
           });
 
           send({
