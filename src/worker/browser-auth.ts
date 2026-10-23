@@ -34,7 +34,7 @@ function cookieValue(request: Request, suffix: string) {
     ?.slice(name.length + 1);
 }
 
-export async function browserUser(request: Request, env: Env): Promise<string | null> {
+async function githubBrowserUser(request: Request, env: Env): Promise<string | null> {
   const token = cookieValue(request, "session");
 
   if (!token || !/^[a-f0-9-]{36}$/.test(token)) {
@@ -49,11 +49,23 @@ export async function browserUser(request: Request, env: Env): Promise<string | 
   return session && session.expiresAt > Date.now() ? session.userId : null;
 }
 
+export async function browserUser(request: Request, env: Env): Promise<string | null> {
+  const github = await githubBrowserUser(request, env);
+
+  if (github || !env.LWC_SECRET) {
+    return github;
+  }
+
+  const { chatgptUser } = await import("./chatgpt.ts");
+
+  return chatgptUser(request, env);
+}
+
 export async function requireBrowserUser(request: Request, env: Env) {
   const user = await browserUser(request, env);
 
   if (!user) {
-    throw new HTTPException(401, { message: "Sign in with GitHub to manage your diagrams." });
+    throw new HTTPException(401, { message: "Sign in to manage your diagrams." });
   }
 
   return user;
@@ -68,6 +80,13 @@ export function requireSameOrigin(request: Request) {
 
 export async function browserLogin(request: Request, env: Env): Promise<Response> {
   if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET) {
+    if (env.LWC_SECRET) {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: "/", "Cache-Control": "no-store" },
+      });
+    }
+
     throw new HTTPException(503, { message: "GitHub sign-in is not configured." });
   }
 
@@ -209,8 +228,26 @@ export async function browserLogout(request: Request, env: Env): Promise<Respons
     await env.OAUTH_KV.delete(`browser-session:${await sha256(token)}`);
   }
 
+  const headers = new Headers({
+    "Set-Cookie": cookie(request, "session", "", 0),
+    "Cache-Control": "no-store",
+  });
+
+  if (env.LWC_SECRET) {
+    const { chatgptAuth } = await import("./chatgpt.ts");
+    const url = new URL("/api/chatgpt/logout", request.url);
+
+    const response = await chatgptAuth(env).handler(
+      new Request(url, { method: "POST", headers: request.headers }),
+    );
+
+    for (const value of response.headers.getSetCookie()) {
+      headers.append("Set-Cookie", value);
+    }
+  }
+
   return new Response(null, {
     status: 204,
-    headers: { "Set-Cookie": cookie(request, "session", "", 0), "Cache-Control": "no-store" },
+    headers,
   });
 }

@@ -26,6 +26,7 @@ import {
   TOKEN_ENDPOINT,
   REGISTRATION_ENDPOINT,
 } from "./oauth-paths.ts";
+import { browserUser } from "./browser-auth.ts";
 import { toMcpPrincipal, oauthContextSchema } from "./principal.ts";
 
 /** Everything the authorization server can grant. */
@@ -136,7 +137,7 @@ const mcpApiHandler: McpApiHandler = {
 
 /** Whether this deployment can actually sign a user in. */
 export function oauthConfigured(env: Env): boolean {
-  return Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
+  return Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET) || Boolean(env.LWC_SECRET);
 }
 
 /** The /authorize and /github/callback routes, mounted by index.ts. */
@@ -166,7 +167,7 @@ export async function oauthRoutes(request: Request, env: Env): Promise<Response>
     }
 
     if (request.method === "GET") {
-      return await startAuthorization(request, origin, oauth);
+      return await startAuthorization(request, env, origin, oauth);
     }
 
     return new Response(null, { status: 405, headers: { Allow: "GET, POST" } });
@@ -189,10 +190,21 @@ const app: ExportedHandler<Env> = { fetch: () => new Response(null, { status: 40
 /** GET /authorize: parse the client's request, then ask the user. */
 async function startAuthorization(
   request: Request,
+  env: Env,
   origin: string,
   oauth: OAuthHelpers,
 ): Promise<Response> {
   const authRequest = await oauth.parseAuthRequest(request);
+
+  if (!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET) && !(await browserUser(request, env))) {
+    const url = new URL(request.url);
+
+    return Response.redirect(
+      `${origin}/?${new URLSearchParams({ authorize: url.pathname + url.search }).toString()}`,
+      302,
+    );
+  }
+
   const consent = await oauth.describeConsent(authRequest);
   const { handle, headers } = await oauth.beginConsent(authRequest);
   headers.set("content-type", "text/html; charset=utf-8");
@@ -230,6 +242,12 @@ async function decide(
     .filter((s) => SCOPES_SUPPORTED.includes(s));
 
   const approved = await oauth.approveConsent(request, handle, { scope });
+  const existingUser = await browserUser(request, env);
+
+  if (existingUser) {
+    return completeUserAuthorization(existingUser, approved.request, approved.headers, oauth);
+  }
+
   const verifier = crypto.randomUUID() + crypto.randomUUID();
 
   const { state, headers } = await oauth.beginUpstream(approved.request, {
@@ -307,12 +325,28 @@ async function callback(
     return renderMessage(502, "Could not read your GitHub profile.");
   }
 
+  return completeUserAuthorization(
+    encodeURIComponent(`github:${user.id}`),
+    authRequest,
+    headers,
+    oauth,
+  );
+}
+
+type AuthorizationRequest = Parameters<OAuthHelpers["completeAuthorization"]>[0]["request"];
+
+async function completeUserAuthorization(
+  userId: string,
+  authRequest: AuthorizationRequest,
+  headers: Headers,
+  oauth: OAuthHelpers,
+) {
   const authorizationId = crypto.randomUUID();
 
   const { redirectTo } = await oauth.completeAuthorization({
     request: authRequest,
     // Namespaced so a GitHub id can never collide with another provider's subject.
-    userId: encodeURIComponent(`github:${user.id}`),
+    userId,
     metadata: { authorizationId },
     scope: authRequest.scope,
     props: { authorizationId },
@@ -366,7 +400,7 @@ function notConfigured(origin: string): Response {
   return renderMessage(
     503,
     `Sign-in is not configured on this deployment. The MCP endpoint is ${origin}${MCP_ROUTE}, ` +
-      `and an administrator needs to set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.`,
+      `and an administrator needs to set LWC_SECRET or both GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.`,
   );
 }
 
@@ -408,7 +442,7 @@ function consentPage(consent: ConsentDescription, handle: string, origin: string
 <div class="card">
   <p>${who} wants to connect to your diagrams through your agent.</p>
   <dl>
-    <dt>Signs you in with</dt><dd>GitHub</dd>
+    <dt>Signs you in with</dt><dd>Your System Design Companion account</dd>
     <dt>Sends back to</dt><dd>${escape(consent.redirectUri)}</dd>
   </dl>
   ${consent.redirectIsLoopback ? '<p class="warn">This redirect points at a local app, so any local process could receive it.</p>' : ""}

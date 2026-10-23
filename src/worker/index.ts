@@ -62,7 +62,11 @@ app.notFound((c) => c.json({ error: "not found" }, 404));
 app.get("/api/auth/session", async (c) => {
   c.header("Cache-Control", "no-store");
 
-  return c.json({ signedIn: Boolean(await browserUser(c.req.raw, c.env)) });
+  return c.json({
+    signedIn: Boolean(await browserUser(c.req.raw, c.env)),
+    githubEnabled: Boolean(c.env.GITHUB_CLIENT_ID && c.env.GITHUB_CLIENT_SECRET),
+    chatgptEnabled: Boolean(c.env.LWC_SECRET),
+  });
 });
 
 app.get("/api/auth/login", (c) => browserLogin(c.req.raw, c.env));
