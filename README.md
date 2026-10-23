@@ -29,9 +29,9 @@ changes land.
 > the conversation move together.
 
 The browser link is the capability: anyone who has a diagram's share link can
-edit that board. Sign in with GitHub to create diagrams and manage your private
+edit that board. Sign in with ChatGPT or GitHub to create diagrams and manage your private
 library and templates. Collaborators can draw using a shared link without signing
-in. Agents also sign in with GitHub through OAuth.
+in. Agents authorize access through OAuth using your signed-in account.
 
 ## A session
 
@@ -41,7 +41,7 @@ in. Agents also sign in with GitHub through OAuth.
 2. **Share the link** with your interviewer. Anyone with it can edit, and you see each
    other's cursors and selections.
 3. **Tell your agent "join" and paste the link.** The first connection opens a browser
-   window to sign in with GitHub and approve the agent. From then on, you can talk about
+   window to sign in and approve the agent. From then on, you can talk about
    the diagram in plain words: "add a cache in front of the database", "split the write
    path into a queue".
 4. **Point and ask.** Select something on the canvas and ask "what about this?". The
@@ -66,7 +66,7 @@ in. Agents also sign in with GitHub through OAuth.
   drawing. Connect your ChatGPT account, choose an available model, and start the
   interview. It follows diagram changes, asks one question at a time, and lets you
   answer in the sidebar. Pause it whenever you want; closing the sidebar pauses it.
-- Sign in with GitHub to create and manage boards. Drawing on a shared board keeps
+- Sign in with ChatGPT or GitHub to create and manage boards. Drawing on a shared board keeps
   working through its share link; agents authenticate through OAuth.
 - The agent edits with high-level operations (add a component, connect two, rename,
   restyle, group into a frame) rather than raw drawing commands. Its work shows up in
@@ -100,7 +100,7 @@ in. Agents also sign in with GitHub through OAuth.
 **Find your diagrams**
 
 - **Your diagrams** lists your boards, including ones your agent created with the same
-  GitHub identity. Saved templates are private to their owner.
+  account identity. Saved templates are private to their owner.
 - Owners can permanently delete a board, its uploaded files, and saved versions.
   Existing copies saved as separate templates remain independent.
 - Legacy boards stay accessible through their original links and are omitted from

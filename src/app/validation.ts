@@ -7,6 +7,8 @@ export interface CreatedDiagram {
 
 export interface BrowserSession {
   signedIn: boolean;
+  githubEnabled?: boolean;
+  chatgptEnabled?: boolean;
 }
 
 export interface Diagram extends CreatedDiagram {
@@ -66,7 +68,9 @@ export function isBrowserSession(value: unknown): value is BrowserSession {
     typeof value === "object" &&
     value !== null &&
     "signedIn" in value &&
-    typeof value.signedIn === "boolean"
+    typeof value.signedIn === "boolean" &&
+    (!("githubEnabled" in value) || typeof value.githubEnabled === "boolean") &&
+    (!("chatgptEnabled" in value) || typeof value.chatgptEnabled === "boolean")
   );
 }
 

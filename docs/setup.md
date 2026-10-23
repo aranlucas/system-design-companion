@@ -54,12 +54,13 @@ npx wrangler kv namespace create system-design-companion-preview-oauth  # update
 ## Sign-in for agents
 
 The MCP endpoint requires OAuth, so the first time an agent connects, your browser opens
-a consent page and signs you in with GitHub. The homepage uses the same GitHub
-identity to create boards and manage a private library. Shared canvas links still
+a consent page and signs you in. ChatGPT sign-in works when `LWC_SECRET` is
+configured (see the sidebar interviewer section below); GitHub is another option.
+The homepage uses the same account to create boards and manage a private library. Shared canvas links still
 allow collaborators to draw without signing in. Browser login reuses the existing
 GitHub callback URL.
 
-Sign-in needs an OAuth app on GitHub, once per deployment:
+To enable the optional GitHub provider, create an OAuth app once per deployment:
 
 1. GitHub → **Settings** → **Developer settings** → **OAuth Apps** → **New OAuth App**.
 2. **Homepage URL**: your deployment's origin.
@@ -71,8 +72,8 @@ npx wrangler secret put GITHUB_CLIENT_ID
 npx wrangler secret put GITHUB_CLIENT_SECRET
 ```
 
-Until both are set, `/mcp` still answers with a token challenge but `/authorize` reports
-that sign-in is not configured. The two `OAUTH_KV` namespaces (production and preview) hold
+If neither ChatGPT nor GitHub is configured, `/mcp` still answers with a token
+challenge but `/authorize` reports that sign-in is not configured. The two `OAUTH_KV` namespaces (production and preview) hold
 tokens and codes; nothing else moves into KV.
 
 For local sign-in, create a separate GitHub OAuth app with callback URL
@@ -219,7 +220,7 @@ To test the hosted integration in ChatGPT:
    and confirm subscriptions stop after the revocation becomes visible.
 
 The automated tests cover the real OAuth provider and MCP transport with fake storage
-and receiver APIs. This ChatGPT test needs a deployed server, configured GitHub app and
+and receiver APIs. This ChatGPT test needs a deployed server, configured sign-in and
 trusted callback hostnames.
 
 Under the hood: `events/list`, `events/subscribe` and `events/unsubscribe` are
@@ -243,7 +244,12 @@ ChatGPT sessions. The server refuses to enable ChatGPT login without this secret
 The SDK signs its HttpOnly session cookie and encrypts account tokens before our
 D1 adapter stores them. Sessions and rate counters are shared across Workers,
 expired records are removed on writes, and Disconnect deletes the session.
-GitHub continues to manage board ownership; ChatGPT login powers the interviewer.
+ChatGPT sign-in also opens the homepage’s private diagram library and can authorize
+MCP clients. GitHub is optional when `LWC_SECRET` is configured. Ownership is tied
+to the person and ChatGPT workspace, never a shared workspace ID or email alone.
+GitHub and ChatGPT libraries remain separate; sign out before switching providers.
+Homepage **Sign out** clears both sessions. Sidebar **Disconnect** clears the
+ChatGPT session.
 
 To practice:
 
@@ -276,7 +282,7 @@ refresh, and unsubscribe using the actual AI SDK client and webhook handler.
 
 ## Diagram library API
 
-**Your diagrams** lists the signed-in GitHub user's non-template boards, including
+**Your diagrams** lists the signed-in user's non-template boards, including
 boards created through MCP with the same identity. It refreshes every ten seconds
 while visible and when the window regains focus. Original share links remain valid.
 Saved templates are private to their owner; builtin templates remain available.
@@ -302,3 +308,18 @@ can retry incomplete cleanup. Previously saved template copies remain independen
 For OpenAI domain verification, configure `OPENAI_APPS_CHALLENGE` with the exact
 portal token. `/.well-known/openai-apps-challenge` serves that token as plain text;
 it returns 404 when the secret is not configured.
+
+## Browser regression tests
+
+Run `pnpm test:e2e` to execute the whiteboard journeys with
+[`tester-army/e2e`](https://github.com/tester-army/e2e). On a fresh machine, install
+Chromium with `pnpm exec e2e-web install chromium --with-deps` first. The runner
+starts its own local Vite server on an available port; no model credentials are
+required. Exact browser actions exercise ChatGPT consent/sign-in, board creation,
+drawing-driven questions with a canvas preview, ignoring zoom, typed answers,
+pause/resume, and response retries. HTTP account/model endpoints and the room
+WebSocket are fixtures, so these tests consume no ChatGPT plan capacity.
+
+`pnpm test` separately exercises the actual Worker routes, encrypted D1 sessions,
+board identity isolation, and AI SDK MCP event delivery. E2E traces, screenshots
+and JUnit output are written to ignored `.e2e/`; CI uploads them as artifacts.
