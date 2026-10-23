@@ -82,11 +82,7 @@ app.all("/api/chatgpt/*", async (c) => {
     await takeBudget(c.env, `chatgpt-login:${c.req.header("CF-Connecting-IP") ?? "unknown"}`, 20);
   }
 
-  const { chatgptAuth, chatgptModels } = await import("./chatgpt.ts");
-
-  if (c.req.path === "/api/chatgpt/models" && c.req.method === "GET") {
-    return chatgptModels(c.req.raw, c.env);
-  }
+  const { chatgptAuth } = await import("./chatgpt.ts");
 
   return chatgptAuth(c.env).handler(c.req.raw);
 });

@@ -35,7 +35,6 @@
     "@modelcontextprotocol/ext-apps": "^2.0.3",
     "@modelcontextprotocol/server": "^2.3.1",
     "@opencoredev/loginwithchatgpt-ai": "^0.2.0",
-    "@opencoredev/loginwithchatgpt-core": "^0.2.0",
     "@opencoredev/loginwithchatgpt-react": "^0.2.0",
     "@opencoredev/loginwithchatgpt-server": "^0.2.0",
     "@tanstack/react-query": "^5.104.5",

@@ -111,7 +111,7 @@ test("the interviewer is usable from the mobile canvas menu", async ({ app, scre
   await app.screenshot("mobile-interviewer");
 });
 
-test("model discovery failures explain the problem and can recover on retry", async ({
+test("the fixed model starts an interview without model discovery", async ({
   app,
   screen,
   workspace,
@@ -119,13 +119,11 @@ test("model discovery failures explain the problem and can recover on retry", as
   workspace.failModels = true;
   await app.open("/d/practice?k=edit-key");
   await screen.getByRole("button", "Open interviewer").tap();
-  await expect(
-    screen.getByText("OpenAI is blocking model requests from this server.", { exact: false }),
-  ).toBeVisible();
-  await expect(screen.getByRole("button", "Start interview")).toBeDisabled();
-  workspace.failModels = false;
-  await screen.getByRole("button", "Retry models").tap();
   await expect(screen.getByRole("button", "Start interview")).toBeEnabled();
   await screen.getByRole("button", "Start interview").tap();
   await expect(screen.getByText("Question 1:", { exact: false })).toBeVisible();
+  expect(workspace.modelRequests).toBe(0);
+  expect(workspace.requests).toHaveLength(1);
+  expect(workspace.requests[0]).toContain('"model":"gpt-5.5"');
+  await app.screenshot("fixed-model-interview");
 });

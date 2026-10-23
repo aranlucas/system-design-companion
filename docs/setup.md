@@ -251,19 +251,18 @@ GitHub and ChatGPT libraries remain separate; sign out before switching provider
 Homepage **Sign out** clears both sessions. Sidebar **Disconnect** clears the
 ChatGPT session.
 
-Model discovery must also work from the deployed host. A successful device login
-only confirms identity; it does not prove OpenAI accepts model requests from that
-server network. If the sidebar says OpenAI is blocking model requests, retries or
-reconnecting will not resolve a persistent host restriction. Keep the whiteboard
-on Cloudflare if desired, but host the subscription proxy on a runtime accepted
-by OpenAI. Do not substitute hard-coded model names for failed discovery.
+The sidebar uses the fixed `gpt-5.5` model and sends requests directly through the
+existing Worker responses endpoint. It does not fetch the account's model catalog;
+a rejected catalog request does not determine whether inference works. Actual
+response failures appear in the conversation with **Retry response**. Model access
+still depends on the connected ChatGPT account.
 
 To practice:
 
 1. Open a board and select **Interviewer** (also available in the mobile canvas menu).
 2. Select **Continue with ChatGPT**, review the SDK's consent screen, and complete
    device authorization in the OpenAI window.
-3. Choose a model returned for your account, then select **Start interview**.
+3. Select **Start interview**. The interviewer uses `gpt-5.5`.
 4. Draw and explain your decisions. After 2.5 seconds without an edit, the
    interviewer receives the latest semantic diagram, a change summary, and a
    bounded canvas preview when available. Automatic questions are spaced at least

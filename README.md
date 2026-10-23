@@ -63,8 +63,7 @@ in. Agents authorize access through OAuth using your signed-in account.
 **Work with the agent**
 
 - Open **Interviewer** on the canvas to practice with an AI interviewer beside your
-  drawing. Connect your ChatGPT account, choose an available model, and start the
-  interview. It follows diagram changes, asks one question at a time, and lets you
+  drawing. Connect your ChatGPT account and start the interview with gpt-5.5. It follows diagram changes, asks one question at a time, and lets you
   answer in the sidebar. Pause it whenever you want; closing the sidebar pauses it.
 - Sign in with ChatGPT or GitHub to create and manage boards. Drawing on a shared board keeps
   working through its share link; agents authenticate through OAuth.

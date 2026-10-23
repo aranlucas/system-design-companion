@@ -30,10 +30,6 @@ interface SceneResponse {
   scene: string;
 }
 
-interface ModelsResponse {
-  models: string[];
-}
-
 interface ChatgptAccount {
   accountId: string;
 }
@@ -45,12 +41,12 @@ interface SessionResponse {
 
 const sceneSchema = z.object({ scene: z.string() });
 
-const modelsSchema = z.object({ models: z.array(z.string()) });
-
 const sessionSchema = z.object({
   status: z.string(),
   user: z.optional(z.object({ accountId: z.string() })),
 });
+
+const INTERVIEW_MODEL = "gpt-5.5";
 
 const IDLE_MS = 2500;
 
@@ -58,10 +54,6 @@ const MIN_QUESTION_INTERVAL_MS = 15_000;
 
 function isScene(value: unknown): value is SceneResponse {
   return sceneSchema.safeParse(value).success;
-}
-
-function isModels(value: unknown): value is ModelsResponse {
-  return modelsSchema.safeParse(value).success;
 }
 
 function isSession(value: unknown): value is SessionResponse {
@@ -72,7 +64,6 @@ export function InterviewerPanel({ api, id, diagramKey, loaded, offline }: Inter
   const queryClient = useQueryClient();
   const [running, setRunning] = useState(false);
   const [draft, setDraft] = useState("");
-  const [model, setModel] = useState("");
   const [pendingChange, setPendingChange] = useState(false);
   const baseline = useRef<CanvasObservation>(new Map());
   const lastChanges = useRef("Interview started. Read the current whiteboard.");
@@ -87,17 +78,6 @@ export function InterviewerPanel({ api, id, diagramKey, loaded, offline }: Inter
   });
 
   const connected = session.data?.status === "authenticated";
-
-  const models = useQuery({
-    queryKey: ["chatgpt-models", session.data?.user?.accountId, connected],
-    queryFn: ({ signal }) => getJson<ModelsResponse>("/api/chatgpt/models", signal, isModels),
-    enabled: connected,
-    retry: false,
-  });
-
-  const selectedModel = models.data?.models.includes(model)
-    ? model
-    : (models.data?.models[0] ?? "");
 
   const transport = useMemo(
     () =>
@@ -194,7 +174,7 @@ export function InterviewerPanel({ api, id, diagramKey, loaded, offline }: Inter
             : "Start the system-design interview with me.",
           metadata: { automatic: true },
         },
-        { body: { model: selectedModel, changes } satisfies InterviewRequest },
+        { body: { model: INTERVIEW_MODEL, changes } satisfies InterviewRequest },
       ),
   });
 
@@ -335,35 +315,8 @@ export function InterviewerPanel({ api, id, diagramKey, loaded, offline }: Inter
         {session.error && <p role="alert">{session.error.message}</p>}
         {connected && (
           <>
-            <label htmlFor="interviewer-model">ChatGPT model</label>
-            <select
-              id="interviewer-model"
-              value={selectedModel}
-              disabled={running || busy || models.isLoading}
-              onChange={(event) => setModel(event.target.value)}
-            >
-              {models.data?.models.map((slug) => (
-                <option key={slug} value={slug}>
-                  {slug}
-                </option>
-              ))}
-            </select>
-            {models.error && (
-              <div role="alert">
-                <p>{models.error.message}</p>
-                <button type="button" onClick={() => void models.refetch()}>
-                  Retry models
-                </button>
-              </div>
-            )}
-            {!models.isLoading && !models.error && !selectedModel && (
-              <p>No models are available for this account.</p>
-            )}
-            <button
-              type="button"
-              onClick={running ? pause : start}
-              disabled={!selectedModel || !loaded || offline}
-            >
+            <p className="muted">Model: {INTERVIEW_MODEL}</p>
+            <button type="button" onClick={running ? pause : start} disabled={!loaded || offline}>
               {running
                 ? "Pause interviewer"
                 : messages.length
@@ -410,7 +363,7 @@ export function InterviewerPanel({ api, id, diagramKey, loaded, offline }: Inter
               onClick={() => {
                 regenerate({
                   body: {
-                    model: selectedModel,
+                    model: INTERVIEW_MODEL,
                     changes: lastChanges.current,
                   } satisfies InterviewRequest,
                 }).catch(() => {});
@@ -426,7 +379,7 @@ export function InterviewerPanel({ api, id, diagramKey, loaded, offline }: Inter
             onSubmit={(event) => {
               event.preventDefault();
 
-              if (!draft.trim() || busy || !selectedModel) {
+              if (!draft.trim() || busy) {
                 return;
               }
 
@@ -446,7 +399,7 @@ export function InterviewerPanel({ api, id, diagramKey, loaded, offline }: Inter
                 { text: draft.trim() },
                 {
                   body: {
-                    model: selectedModel,
+                    model: INTERVIEW_MODEL,
                     changes: lastChanges.current,
                   } satisfies InterviewRequest,
                 },
@@ -464,7 +417,7 @@ export function InterviewerPanel({ api, id, diagramKey, loaded, offline }: Inter
               onChange={(event) => setDraft(event.target.value)}
               disabled={busy || offline}
             />
-            <button type="submit" disabled={!draft.trim() || busy || offline || !selectedModel}>
+            <button type="submit" disabled={!draft.trim() || busy || offline}>
               Send answer
             </button>
           </form>
