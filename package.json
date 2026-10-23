@@ -18,7 +18,7 @@
     "format:check": "oxfmt --check .",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check",
     "typecheck": "tsc -b",
-    "cf-typegen": "wrangler types",
+    "cf-typegen": "cf workers types",
     "build:preview": "pnpm build:view && CLOUDFLARE_VITE_PREVIEW_BUILD=true vite build",
     "deploy:preview": "pnpm build:preview && cf previews deploy --prebuilt",
     "lint:fix": "oxlint --fix",
@@ -70,8 +70,7 @@
     "portless": "0.15.8",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
-    "vitest": "^5.0.5",
-    "wrangler": "^4.151.3"
+    "vitest": "^5.0.5"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}": [
