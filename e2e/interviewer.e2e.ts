@@ -110,3 +110,22 @@ test("the interviewer is usable from the mobile canvas menu", async ({ app, scre
   await expect(screen.getByText("Question 2:", { exact: false })).toBeVisible();
   await app.screenshot("mobile-interviewer");
 });
+
+test("model discovery failures explain the problem and can recover on retry", async ({
+  app,
+  screen,
+  workspace,
+}) => {
+  workspace.failModels = true;
+  await app.open("/d/practice?k=edit-key");
+  await screen.getByRole("button", "Open interviewer").tap();
+  await expect(
+    screen.getByText("OpenAI is blocking model requests from this server.", { exact: false }),
+  ).toBeVisible();
+  await expect(screen.getByRole("button", "Start interview")).toBeDisabled();
+  workspace.failModels = false;
+  await screen.getByRole("button", "Retry models").tap();
+  await expect(screen.getByRole("button", "Start interview")).toBeEnabled();
+  await screen.getByRole("button", "Start interview").tap();
+  await expect(screen.getByText("Question 1:", { exact: false })).toBeVisible();
+});
