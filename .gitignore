@@ -9,3 +9,7 @@ public/mcp-view.html
 
 # TypeScript project-reference build cache
 *.tsbuildinfo
+
+# Browser test reports, recordings, and replay cache
+.e2e/
+.playwright-cli/

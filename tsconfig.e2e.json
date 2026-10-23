@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["e2e", "e2e.config.ts", "vite.e2e.config.ts"]
+}

@@ -41,3 +41,17 @@ jobs:
 
           - name: Build and check bundle
             run: pnpm check:bundle
+
+      - name: Install browser for E2E tests
+        run: pnpm exec e2e-web install chromium --with-deps
+
+      - name: Test whiteboard journeys
+        run: pnpm test:e2e
+
+      - name: Upload E2E evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-results
+          path: .e2e/
+          retention-days: 7
