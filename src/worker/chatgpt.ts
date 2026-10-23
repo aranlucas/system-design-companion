@@ -1,4 +1,3 @@
-import { ChatGPTAuthError } from "@opencoredev/loginwithchatgpt-core";
 import {
   createChatGPTHandler,
   type ChatGPTHandler,
@@ -54,36 +53,6 @@ export async function chatgptUser(request: Request, env: Env): Promise<string | 
     );
   } catch {
     return null;
-  }
-}
-
-/** Preserve account sessions while making provider failures actionable to the candidate. */
-export async function chatgptModels(request: Request, env: Env): Promise<Response> {
-  const headers = { "Cache-Control": "no-store" };
-
-  try {
-    const models = await chatgptAuth(env).getModels(request);
-
-    return models
-      ? Response.json({ models }, { headers })
-      : Response.json({ error: "Connect ChatGPT to load your models." }, { status: 401, headers });
-  } catch (error) {
-    if (!(error instanceof ChatGPTAuthError)) {
-      throw error;
-    }
-
-    const blocked = error.status === 403 && error.body?.includes("Unable to load site");
-
-    return Response.json(
-      {
-        models: [],
-        code: blocked ? "models_upstream_blocked" : error.code,
-        error: blocked
-          ? "OpenAI is blocking model requests from this server. Your ChatGPT sign-in succeeded, but the interviewer cannot start. The workspace owner needs to use a supported host for the ChatGPT proxy."
-          : `Could not load your ChatGPT models (${error.status ?? 502}). Check this workspace’s Codex access, then retry.`,
-      },
-      { status: blocked ? 503 : (error.status ?? 502), headers },
-    );
   }
 }
 
@@ -144,6 +113,7 @@ export function chatgptAuth(env: Env): ChatGPTHandler {
     dangerouslyAllowTokenExport: true,
     sessionStore: sessionStore(env, "session"),
     responsesProxy: {
+      allowedModels: ["gpt-5.5"],
       maxRequestBytes: 256 * 1024,
       rateLimit: { limit: 12, windowMs: 60_000, store: sessionStore(env, "rate") },
     },

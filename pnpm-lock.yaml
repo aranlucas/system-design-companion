@@ -202,9 +202,6 @@ importers:
       '@opencoredev/loginwithchatgpt-ai':
         specifier: ^0.2.0
         version: 0.2.0(@ai-sdk/openai@4.0.99(zod@4.6.7))(ai@7.0.148(zod@4.6.7))
-      '@opencoredev/loginwithchatgpt-core':
-        specifier: ^0.2.0
-        version: 0.2.0
       '@opencoredev/loginwithchatgpt-react':
         specifier: ^0.2.0
         version: 0.2.0(react@19.3.1)

@@ -99,7 +99,7 @@ beforeEach(() => {
     }
 
     if (url.pathname.endsWith("/models")) {
-      return Promise.resolve(Response.json({ models: [{ slug: "account-model" }] }));
+      return Promise.resolve(Response.json({ models: [{ slug: "gpt-5.5" }] }));
     }
 
     if (url.pathname.endsWith("/responses")) {
@@ -151,47 +151,24 @@ describe("ChatGPT plan sessions", () => {
         .status,
     ).toBe("authenticated");
     expect(await (await request("/api/chatgpt/models", cookie)).json()).toEqual({
-      models: ["account-model"],
+      models: ["gpt-5.5"],
     });
   });
 
-  it("explains an upstream hosting block without exposing the provider HTML", async () => {
+  it("limits inference to the fixed interviewer model before contacting OpenAI", async () => {
     const cookie = await connect();
-    upstream.mockResolvedValueOnce(
-      new Response(
-        "<html><body>Unable to load site Please try again later. If you are using a VPN, try turning it off. [IP:203.0.113.1 | Ray ID:test-ray]</body></html>",
-        { status: 403, headers: { "Content-Type": "text/html; charset=UTF-8" } },
-      ),
-    );
-    const response = await request("/api/chatgpt/models", cookie);
-    expect(response.status).toBe(503);
-    const result = await response.text();
-    expect(result).toContain("OpenAI is blocking model requests from this server");
-    expect(result).toContain("models_upstream_blocked");
-    expect(result).not.toContain("203.0.113.1");
-    expect(result).not.toContain("<html>");
-    expect(result).not.toContain("test-ray");
-    expect(
-      statusSchema.parse(await (await request("/api/chatgpt/session", cookie)).json()).status,
-    ).toBe("authenticated");
-    expect(await (await request("/api/chatgpt/models", cookie)).json()).toEqual({
-      models: ["account-model"],
-    });
-  });
+    const calls = upstream.mock.calls.length;
 
-  it("keeps account-level model denials distinct from hosting blocks", async () => {
-    const cookie = await connect();
-    upstream.mockResolvedValueOnce(
-      Response.json({ detail: "Codex access disabled" }, { status: 403 }),
+    const response = await request(
+      "/api/chatgpt/responses",
+      cookie,
+      "POST",
+      JSON.stringify({ model: "unconfigured-model", input: [] }),
     );
-    const response = await request("/api/chatgpt/models", cookie);
+
     expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({
-      models: [],
-      code: "models_request_failed",
-      error:
-        "Could not load your ChatGPT models (403). Check this workspace’s Codex access, then retry.",
-    });
+    expect(await response.text()).toContain("model_not_allowed");
+    expect(upstream.mock.calls).toHaveLength(calls);
   });
 
   it("does not accept a workspace alone as a board owner", async () => {
@@ -376,7 +353,7 @@ describe("ChatGPT plan sessions", () => {
       "/api/chatgpt/responses",
       cookie,
       "POST",
-      JSON.stringify({ model: "account-model", input: "What fails first?" }),
+      JSON.stringify({ model: "gpt-5.5", input: "What fails first?" }),
     );
 
     expect(response.status).toBe(200);

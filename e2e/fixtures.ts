@@ -8,6 +8,7 @@ interface MockWorkspace {
   signedIn: boolean;
   failResponse: boolean;
   failModels: boolean;
+  modelRequests: number;
   requests: string[];
   elements: RoomUpdate[];
 }
@@ -31,7 +32,7 @@ function responseStream(text: string, turn: number) {
   return [
     {
       type: "response.created",
-      response: { id: `resp_${turn}`, created_at: 1, model: "account-model" },
+      response: { id: `resp_${turn}`, created_at: 1, model: "gpt-5.5" },
     },
     { type: "response.output_item.added", output_index: 0, item: { type: "message", id } },
     { type: "response.output_text.delta", item_id: id, output_index: 0, delta: text },
@@ -54,6 +55,7 @@ export const test = base.extend<WorkspaceFixtures>({
       signedIn: true,
       failResponse: false,
       failModels: false,
+      modelRequests: 0,
       requests: [],
       elements: [],
     };
@@ -88,19 +90,15 @@ export const test = base.extend<WorkspaceFixtures>({
 
       return route.fulfill({ json: authenticated });
     });
-    await browser.route("**/api/chatgpt/models", (route) =>
-      route.fulfill(
+    await browser.route("**/api/chatgpt/models", (route) => {
+      workspace.modelRequests += 1;
+
+      return route.fulfill(
         workspace.failModels
-          ? {
-              status: 503,
-              json: {
-                error:
-                  "OpenAI is blocking model requests from this server. Your ChatGPT sign-in succeeded, but the interviewer cannot start.",
-              },
-            }
+          ? { status: 403, json: { error: "models_request_failed" } }
           : { json: { models: ["account-model"] } },
-      ),
-    );
+      );
+    });
     await browser.route("**/api/chatgpt/responses", (route) => {
       workspace.requests.push(route.request.postData ?? "");
 
