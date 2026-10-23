@@ -172,6 +172,12 @@ importers:
 
   .:
     dependencies:
+      '@ai-sdk/openai':
+        specifier: ^4.0.99
+        version: 4.0.99(zod@4.6.7)
+      '@ai-sdk/react':
+        specifier: ^4.0.152
+        version: 4.0.152(react@19.3.1)(zod@4.6.7)
       '@cloudflare/workers-oauth-provider':
         specifier: ^1.2.3
         version: 1.2.3
@@ -193,9 +199,21 @@ importers:
       '@modelcontextprotocol/server':
         specifier: ^2.3.1
         version: 2.3.1
+      '@opencoredev/loginwithchatgpt-ai':
+        specifier: ^0.2.0
+        version: 0.2.0(@ai-sdk/openai@4.0.99(zod@4.6.7))(ai@7.0.148(zod@4.6.7))
+      '@opencoredev/loginwithchatgpt-react':
+        specifier: ^0.2.0
+        version: 0.2.0(react@19.3.1)
+      '@opencoredev/loginwithchatgpt-server':
+        specifier: ^0.2.0
+        version: 0.2.0
       '@tanstack/react-query':
         specifier: ^5.104.5
         version: 5.104.5(@types/react@19.3.0)(react@19.3.1)
+      ai:
+        specifier: ^7.0.148
+        version: 7.0.148(zod@4.6.7)
       fractional-indexing:
         specifier: ^4.0.0
         version: 4.0.0
@@ -224,6 +242,9 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
     devDependencies:
+      '@ai-sdk/mcp':
+        specifier: ^2.0.81
+        version: 2.0.81(zod@4.6.7)
       '@aranlucas/oxforge':
         specifier: 0.2.2
         version: 0.2.2(oxfmt@0.74.0)(oxlint-tsgolint@7.0.2004)(oxlint@1.89.0(oxlint-tsgolint@7.0.2004))
@@ -277,6 +298,40 @@ importers:
         version: 4.151.3(@types/node@26.6.5)
 
 packages:
+
+  '@ai-sdk/gateway@4.0.121':
+    resolution: {integrity: sha512-cPNXvQ4B5OkmVAm98Dxe1fHdMthyqqqAG0HJx3D92NUa9FpcvkNxdAqiuZdeAhNAodFb9lBrslzzzEwxuVS53A==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/mcp@2.0.81':
+    resolution: {integrity: sha512-2ZqfHLu1K93uPse+QWbcNjkznCtM6UHMoNWjUDpmM9kCr+y9bWcf5VWfNAWi4ziQoncZPJo2qUWeDIXgrqLsKg==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/openai@4.0.99':
+    resolution: {integrity: sha512-XRHUiXgxhVEe0smSp537lzCqMsOVg6jvGTWDbTZeGMTc+iHeOwgHgZMFBvOiNWXZ8n125Jta72m+64PtU1WNJA==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider-utils@5.0.65':
+    resolution: {integrity: sha512-LCugcsP8oWmdeI3BASf4Fuo1wiC6Qx0YrefFssl7n12s+LV4DNi5RdwWQrtrB4oek3GGNQRN/h/NSwVZM2eHKw==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider@4.0.31':
+    resolution: {integrity: sha512-3wJnwVTFg8SwOyoZCv+ov7Re2GB+7IQnU5a5MYJACrtiWDDUHgqTBeeesq2MB2ddgojzL8hgWleltwpAgtUqfg==}
+    engines: {node: '>=22'}
+
+  '@ai-sdk/react@4.0.152':
+    resolution: {integrity: sha512-2A4bttJJgDmdiCTXO6qM6J28q1C3ucAVAwbWzYuaQ4ZF1PUy7GwelNtMGMf2FoRl8krCeHYAdAhRnJlnfciKpQ==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      react: ^18 || ~19.0.1 || ~19.1.2 || ^19.2.1
 
   '@antfu/install-pkg@2.1.0':
     resolution: {integrity: sha512-sdg9NxU3zR4Mnawfbc/x6GB5Wf17WYud5qOuEuxXjaKpYpMkISSJEjItGebXJ2bQ4DIcly4NYH23mtkGJjvKUw==}
@@ -861,6 +916,27 @@ packages:
   '@modelcontextprotocol/server@2.3.1':
     resolution: {integrity: sha512-e59MfWuSssj6DoQ96JCTqdW1AXT5/XtnTl0WWd6MU1Ka434fFUGGosCLJbGNySDhHGvxQWoRWK137FXYFkYNWw==}
     engines: {node: '>=20'}
+
+  '@opencoredev/loginwithchatgpt-ai@0.2.0':
+    resolution: {integrity: sha512-UlXeMUqQ0AngYOBunGAt+9oU/hrMCcIzV4Pq6V3eIaCV8TBYu9vgARyiipyrmG1d7YX60himqxI8k9LhacU7HA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@ai-sdk/openai': ^4.0.0
+      ai: ^7.0.0
+
+  '@opencoredev/loginwithchatgpt-core@0.2.0':
+    resolution: {integrity: sha512-PRzUWEYJepxkcYVvk/Uc7bc8YfUr50PWqNMjfNs/AZOF6/H73QykzFhjZJIG5cphIKrNdjOmvofuy25cH1F8ow==}
+    engines: {node: '>=18'}
+
+  '@opencoredev/loginwithchatgpt-react@0.2.0':
+    resolution: {integrity: sha512-WZ+CH3+7lM60TMSUa3nGkfyGxRON713ZQFAszNOpLvUQUR1+EXf6hD/Ftn25nOQFix9aJsqkRY5N7LWsYsQ4oA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      react: ^18.0.0 || ^19.0.0
+
+  '@opencoredev/loginwithchatgpt-server@0.2.0':
+    resolution: {integrity: sha512-G9TcnBNAbaI8wVoLJIWi5DryinwnpYtfy/RnWcMv6o94oHn5sIgyHESFFdn7fSCt6Sl2Vo9QRLalNfRgkuBJQQ==}
+    engines: {node: '>=18'}
 
   '@oxc-project/types@0.154.0':
     resolution: {integrity: sha512-KYOUGQFlLWR+s4QMV2Q9ko38TZm7EdO87Qm7rvZLqk/webse/cDjtyxKhg/47l0byCbs/k46LT8qc4PKjAikzA==}
@@ -2205,6 +2281,10 @@ packages:
   '@upsetjs/venn.js@2.0.0':
     resolution: {integrity: sha512-WbBhLrooyePuQ1VZxrJjtLvTc4NVfpOyKx0sKqioq9bX1C1m7Jgykkn8gLrtwumBioXIqam8DLxp88Adbue6Hw==}
 
+  '@vercel/oidc@3.2.0':
+    resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
+    engines: {node: '>= 20'}
+
   '@vitejs/plugin-react@6.1.2':
     resolution: {integrity: sha512-fhJNGUdscQa4HkI0xFxwonWyhnVReCPDbXI7FH7jmzpnVCrFQI7PRrhWecO263610vOrs9tr2Y4xcf8uAdFxbw==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -2234,6 +2314,15 @@ packages:
 
   '@vitest/spy@5.0.5':
     resolution: {integrity: sha512-lwJRExuH417257Q5wv9QYugN9IMJkoxcrKrYxGPQkBzl7wlNpTUxD/5yNX4ESKVUIShKPgkGchYPFMWOOk0wzw==}
+
+  '@workflow/serde@4.1.0':
+    resolution: {integrity: sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ==}
+
+  ai@7.0.148:
+    resolution: {integrity: sha512-FPgfIAhz/FrlzcvqTN7pGGibahR5rD19NXZWX9WQ1tskTic+CN+jxvubpreyq8uN1maIEHPwvZmil/3IYN8FIw==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
 
   anymatch@3.1.3:
     resolution: {integrity: sha512-KMReFUr0B4t+D+OBkjR3KYqvocp2XaSzO55UcB6mgQMd3KbcE+mWTyvVV7D/zsdEbNnV6acZUutkiHQXvTr1Rw==}
@@ -2500,6 +2589,10 @@ packages:
   delaunator@5.1.0:
     resolution: {integrity: sha512-AGrQ4QSgssa1NGmWmLPqN5NY2KajF5MqxetNEO+o0n3ZwZZeTmt7bBnvzHWrmkZFxGgr4HdyFgelzgi06otLuQ==}
 
+  dequal@2.0.3:
+    resolution: {integrity: sha512-0je+qPKHEMohvfRTCEo3CrPG6cAzAYgmzKyxRiYSSDkS6eGJdyVJm7WaYA5ECaAD9wLB2T4EEeymA5aFVcYXCA==}
+    engines: {node: '>=6'}
+
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
@@ -2664,6 +2757,9 @@ packages:
         optional: true
       react:
         optional: true
+
+  json-schema@0.4.0:
+    resolution: {integrity: sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA==}
 
   katex@0.16.47:
     resolution: {integrity: sha512-Eeo8Ys1doU1z+x8AZsPpQu+p/QcZBI5PeOo7QGQdy2x2m0MU/hYagBbGOmXwr5KVbEfVuWv9LpnQWeehogurjg==}
@@ -3065,6 +3161,15 @@ packages:
     resolution: {integrity: sha512-SS+jx45GF1QjgEXQx4NJZV9ImqmO2NPz5FNsIHrsDjh2YsHnawpan7SNQ1o8NuhrbHZy9AZhIoCUiCeaW/C80g==}
     engines: {node: '>=18'}
 
+  swr@2.5.1:
+    resolution: {integrity: sha512-BRw55e8r0B7SpDN20CAzoQAHl7y1yP7/Zt7oqUjMv0vSt2u2Xnkm88Ws+VypbV9BXHQVuSuyVq7zMjO16wSExw==}
+    peerDependencies:
+      react: ^16.11.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
+
+  throttleit@2.1.0:
+    resolution: {integrity: sha512-nt6AMGKW1p/70DF/hGBdJB57B8Tspmbp5gfJ8ilhLnt7kkr2ye7hzD6NVG8GGErk2HWF34igrL2CXmNIkzKqKw==}
+    engines: {node: '>=18'}
+
   tinybench@6.2.2:
     resolution: {integrity: sha512-nIZ2N2dFpjBsg2hgitKu7mA+FvsIJuGJOwysRngmVRRmWgR/UyPjwJj8c/fT/dhm8EkHnF5EOogRf+0Z2qrimA==}
     engines: {node: '>=20.0.0'}
@@ -3325,6 +3430,52 @@ packages:
         optional: true
 
 snapshots:
+
+  '@ai-sdk/gateway@4.0.121(zod@4.6.7)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.31
+      '@ai-sdk/provider-utils': 5.0.65(zod@4.6.7)
+      '@vercel/oidc': 3.2.0
+      zod: 4.6.7
+
+  '@ai-sdk/mcp@2.0.81(zod@4.6.7)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.31
+      '@ai-sdk/provider-utils': 5.0.65(zod@4.6.7)
+      cross-spawn: 7.0.6
+      pkce-challenge: 5.0.1
+      zod: 4.6.7
+
+  '@ai-sdk/openai@4.0.99(zod@4.6.7)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.31
+      '@ai-sdk/provider-utils': 5.0.65(zod@4.6.7)
+      zod: 4.6.7
+
+  '@ai-sdk/provider-utils@5.0.65(zod@4.6.7)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.31
+      '@standard-schema/spec': 1.1.0
+      '@workflow/serde': 4.1.0
+      eventsource-parser: 3.1.1
+      undici: 7.29.1
+      zod: 4.6.7
+
+  '@ai-sdk/provider@4.0.31':
+    dependencies:
+      json-schema: 0.4.0
+
+  '@ai-sdk/react@4.0.152(react@19.3.1)(zod@4.6.7)':
+    dependencies:
+      '@ai-sdk/mcp': 2.0.81(zod@4.6.7)
+      '@ai-sdk/provider': 4.0.31
+      '@ai-sdk/provider-utils': 5.0.65(zod@4.6.7)
+      ai: 7.0.148(zod@4.6.7)
+      react: 19.3.1
+      swr: 2.5.1(react@19.3.1)
+      throttleit: 2.1.0
+    transitivePeerDependencies:
+      - zod
 
   '@antfu/install-pkg@2.1.0':
     dependencies:
@@ -3830,6 +3981,23 @@ snapshots:
     dependencies:
       '@modelcontextprotocol/core': 2.3.1
       zod: 4.6.7
+
+  '@opencoredev/loginwithchatgpt-ai@0.2.0(@ai-sdk/openai@4.0.99(zod@4.6.7))(ai@7.0.148(zod@4.6.7))':
+    dependencies:
+      '@ai-sdk/openai': 4.0.99(zod@4.6.7)
+      '@opencoredev/loginwithchatgpt-core': 0.2.0
+      ai: 7.0.148(zod@4.6.7)
+
+  '@opencoredev/loginwithchatgpt-core@0.2.0': {}
+
+  '@opencoredev/loginwithchatgpt-react@0.2.0(react@19.3.1)':
+    dependencies:
+      '@opencoredev/loginwithchatgpt-core': 0.2.0
+      react: 19.3.1
+
+  '@opencoredev/loginwithchatgpt-server@0.2.0':
+    dependencies:
+      '@opencoredev/loginwithchatgpt-core': 0.2.0
 
   '@oxc-project/types@0.154.0': {}
 
@@ -4996,6 +5164,8 @@ snapshots:
       d3-selection: 3.0.0
       d3-transition: 3.0.1(d3-selection@3.0.0)
 
+  '@vercel/oidc@3.2.0': {}
+
   '@vitejs/plugin-react@6.1.2(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(yaml@2.9.1))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
@@ -5011,6 +5181,15 @@ snapshots:
       vite: 8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(yaml@2.9.1)
 
   '@vitest/spy@5.0.5': {}
+
+  '@workflow/serde@4.1.0': {}
+
+  ai@7.0.148(zod@4.6.7):
+    dependencies:
+      '@ai-sdk/gateway': 4.0.121(zod@4.6.7)
+      '@ai-sdk/provider': 4.0.31
+      '@ai-sdk/provider-utils': 5.0.65(zod@4.6.7)
+      zod: 4.6.7
 
   anymatch@3.1.3:
     dependencies:
@@ -5308,6 +5487,8 @@ snapshots:
     dependencies:
       robust-predicates: 3.0.3
 
+  dequal@2.0.3: {}
+
   detect-libc@2.1.2: {}
 
   detect-node-es@1.1.0: {}
@@ -5445,6 +5626,8 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.3.0
       react: 19.3.1
+
+  json-schema@0.4.0: {}
 
   katex@0.16.47:
     dependencies:
@@ -5918,6 +6101,14 @@ snapshots:
   stylis@4.4.0: {}
 
   supports-color@10.2.2: {}
+
+  swr@2.5.1(react@19.3.1):
+    dependencies:
+      dequal: 2.0.3
+      react: 19.3.1
+      use-sync-external-store: 1.7.0(react@19.3.1)
+
+  throttleit@2.1.0: {}
 
   tinybench@6.2.2: {}
 

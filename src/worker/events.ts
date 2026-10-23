@@ -2,10 +2,10 @@ import { requiredValue } from "../shared/required-value.ts";
 import type { JsonValue } from "../shared/schemas.ts";
 // MCP Events: the catalog, subscription storage, and signed webhook delivery.
 //
-// ChatGPT is the only client that speaks this today, and it only speaks webhook
-// delivery, so `delivery` is ["webhook"] everywhere and poll/stream are not
-// implemented. The SDK has no events support yet, so the three methods are
-// registered by hand; `capabilities.events` is set in mcp.ts.
+// ChatGPT and AI SDK MCP clients can subscribe through signed webhook delivery.
+// `delivery` is ["webhook"] everywhere; poll/stream are not implemented. The
+// server SDK has no events support yet, so the three methods are registered
+// by hand; `capabilities.events` is set in mcp.ts.
 //
 // Delivery is best-effort; retries can deliver duplicates. There is no durable event
 // log, so every response carries `cursor: null` and a missed event is not

@@ -228,6 +228,52 @@ support yet. Subscriptions live in D1. The endpoint is webhook-only, which is al
 ChatGPT speaks today; the poll and stream modes in the draft spec are not
 implemented.
 
+## Sidebar interviewer with your ChatGPT plan
+
+The canvas **Interviewer** action opens a docked Excalidraw sidebar. It uses
+[`login-with-chatgpt`](https://github.com/opencoredev/login-with-chatgpt) for device
+sign-in and subscription-backed inference, with the AI SDK for conversation and
+streaming. No OpenAI API key is needed. This third-party SDK uses ChatGPT's Codex
+transport; it is distinct from OpenAI's registered website identity-only sign-in.
+
+Configure `LWC_SECRET` as a stable, private random value on each deployment. For
+local development, put it in the ignored `.dev.vars` file; for deployment, use
+`pnpm exec wrangler secret put LWC_SECRET`. Changing it disconnects existing
+ChatGPT sessions. The server refuses to enable ChatGPT login without this secret.
+The SDK signs its HttpOnly session cookie and encrypts account tokens before our
+D1 adapter stores them. Sessions and rate counters are shared across Workers,
+expired records are removed on writes, and Disconnect deletes the session.
+GitHub continues to manage board ownership; ChatGPT login powers the interviewer.
+
+To practice:
+
+1. Open a board and select **Interviewer** (also available in the mobile canvas menu).
+2. Select **Continue with ChatGPT**, review the SDK's consent screen, and complete
+   device authorization in the OpenAI window.
+3. Choose a model returned for your account, then select **Start interview**.
+4. Draw and explain your decisions. After 2.5 seconds without an edit, the
+   interviewer receives the latest semantic diagram, a change summary, and a
+   bounded canvas preview when available. Automatic questions are spaced at least
+   15 seconds apart and wait for the previous response to finish.
+5. Answer in the sidebar, pause/resume, or disconnect. Closing the sidebar pauses
+   automatic requests. The conversation stays in the current tab and resets on reload.
+
+Pointer movement, selection, zoom and opening panels do not count as drawing
+changes. Drawing while the interviewer is responding is collected for the next
+turn. Requests consume the connected user's ChatGPT plan and are limited to 12
+per minute per session. A plan limit or expired connection appears as a retryable
+conversation error. The interviewer observes the design; it does not edit it.
+
+The sidebar observes the existing live canvas directly. External MCP clients can
+independently use the same board's `diagram.changed`, `diagram.renamed`, and
+`diagram.checkpointed` events with the [AI SDK MCP Events API](https://ai-sdk.dev/docs/ai-sdk-core/mcp-events).
+Configure `MCP_EVENT_CALLBACK_HOSTS` with the exact hostname of your webhook
+receiver. Its private event store must persist subscriptions and signing secrets;
+mount `experimental_createMCPEventWebhook` before subscribing, deduplicate event
+IDs, and refresh before `refreshBefore`. Events remain best-effort with no replay.
+`test/ai-sdk-mcp-events.test.ts` exercises discovery, signed verification, changes,
+refresh, and unsubscribe using the actual AI SDK client and webhook handler.
+
 ## Diagram library API
 
 **Your diagrams** lists the signed-in GitHub user's non-template boards, including

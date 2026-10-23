@@ -67,6 +67,22 @@ app.get("/api/auth/session", async (c) => {
 
 app.get("/api/auth/login", (c) => browserLogin(c.req.raw, c.env));
 
+app.all("/api/chatgpt/*", async (c) => {
+  c.header("Cache-Control", "no-store");
+
+  if (!["GET", "HEAD", "OPTIONS"].includes(c.req.method)) {
+    requireSameOrigin(c.req.raw);
+  }
+
+  if (c.req.path === "/api/chatgpt/login" && c.req.method === "POST") {
+    await takeBudget(c.env, `chatgpt-login:${c.req.header("CF-Connecting-IP") ?? "unknown"}`, 20);
+  }
+
+  const { chatgptAuth } = await import("./chatgpt.ts");
+
+  return chatgptAuth(c.env).handler(c.req.raw);
+});
+
 app.post("/api/auth/logout", (c) => browserLogout(c.req.raw, c.env));
 
 app.get("/.well-known/openai-apps-challenge", (c) => {
@@ -151,6 +167,12 @@ const deleteAuthorizedDiagram: Handler<WorkerEnv> = async (c) => {
 const diagrams = new Hono<WorkerEnv>();
 
 diagrams.use("*", authorizeDiagram);
+
+diagrams.get("/interview-context", async (c) => {
+  c.header("Cache-Control", "no-store");
+
+  return c.json({ scene: JSON.stringify(await c.get("room").getGraph()) });
+});
 
 diagrams.get("/", (c) => c.json({ id: c.var.diagram.id, name: c.var.diagram.name }));
 
