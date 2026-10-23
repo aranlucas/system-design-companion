@@ -7,6 +7,7 @@ import { live } from "./web-engine.ts";
 interface MockWorkspace {
   signedIn: boolean;
   failResponse: boolean;
+  failModels: boolean;
   requests: string[];
   elements: RoomUpdate[];
 }
@@ -52,6 +53,7 @@ export const test = base.extend<WorkspaceFixtures>({
     const workspace: MockWorkspace = {
       signedIn: true,
       failResponse: false,
+      failModels: false,
       requests: [],
       elements: [],
     };
@@ -87,7 +89,17 @@ export const test = base.extend<WorkspaceFixtures>({
       return route.fulfill({ json: authenticated });
     });
     await browser.route("**/api/chatgpt/models", (route) =>
-      route.fulfill({ json: { models: ["account-model"] } }),
+      route.fulfill(
+        workspace.failModels
+          ? {
+              status: 503,
+              json: {
+                error:
+                  "OpenAI is blocking model requests from this server. Your ChatGPT sign-in succeeded, but the interviewer cannot start.",
+              },
+            }
+          : { json: { models: ["account-model"] } },
+      ),
     );
     await browser.route("**/api/chatgpt/responses", (route) => {
       workspace.requests.push(route.request.postData ?? "");

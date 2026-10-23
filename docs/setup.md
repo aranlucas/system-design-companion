@@ -251,6 +251,13 @@ GitHub and ChatGPT libraries remain separate; sign out before switching provider
 Homepage **Sign out** clears both sessions. Sidebar **Disconnect** clears the
 ChatGPT session.
 
+Model discovery must also work from the deployed host. A successful device login
+only confirms identity; it does not prove OpenAI accepts model requests from that
+server network. If the sidebar says OpenAI is blocking model requests, retries or
+reconnecting will not resolve a persistent host restriction. Keep the whiteboard
+on Cloudflare if desired, but host the subscription proxy on a runtime accepted
+by OpenAI. Do not substitute hard-coded model names for failed discovery.
+
 To practice:
 
 1. Open a board and select **Interviewer** (also available in the mobile canvas menu).
