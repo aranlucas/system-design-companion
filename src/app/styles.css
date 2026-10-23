@@ -813,3 +813,61 @@ body,
   width: max-content;
   max-width: calc(100% - 32px);
 }
+
+/* The native sidebar supplies docking, mobile layout and theme inheritance. */
+.excalidraw .interviewer-panel {
+  overflow-y: auto;
+  gap: 12px;
+}
+.excalidraw .interviewer-panel > * {
+  flex-shrink: 0;
+}
+.excalidraw .interviewer-intro h3 {
+  font-size: 1.25rem;
+  margin: 12px 0 8px;
+}
+.excalidraw .interviewer-conversation {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 80px;
+}
+.excalidraw .interviewer-message {
+  padding: 12px;
+  background: var(--color-surface-low);
+  border-radius: 8px;
+}
+.excalidraw .interviewer-message-user {
+  border-inline-start: 3px solid var(--color-primary);
+}
+.excalidraw .interviewer-message p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 6px 0 0;
+  line-height: 1.5;
+}
+.excalidraw .interviewer-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.excalidraw .interviewer-answer textarea {
+  font: inherit;
+  color: var(--text-primary-color);
+  background: var(--island-bg-color);
+  border: 1px solid var(--default-border-color);
+  border-radius: 6px;
+  padding: 10px;
+  resize: vertical;
+}
+.excalidraw .interviewer-note {
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.excalidraw .interviewer-panel :is(select, textarea, button) {
+  max-width: 100%;
+}
+.excalidraw .interviewer-panel button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}

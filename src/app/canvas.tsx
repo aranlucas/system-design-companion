@@ -38,7 +38,7 @@ import type {
   SocketId,
 } from "@excalidraw/excalidraw/types";
 import useWebSocket from "partysocket/use-ws";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   AGENT_STROKE,
   type ClientMessage,
@@ -48,6 +48,10 @@ import {
 import { apiErrorMessage } from "./api-error.ts";
 import { CopyRow } from "./copy-row.tsx";
 import { displayName, linkFor, remember, setDisplayName, setupCommands } from "./local.ts";
+
+const LazyInterviewerPanel = lazy(() =>
+  import("./interviewer-panel.tsx").then((module) => ({ default: module.InterviewerPanel })),
+);
 
 declare global {
   interface Window {
@@ -210,6 +214,7 @@ const blobToBase64 = (b: Blob) =>
   });
 
 export function Canvas({ id, k }: CanvasProps) {
+  const [interviewerOpened, setInterviewerOpened] = useState(false);
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [name, setName] = useState("…");
   const [peers, setPeers] = useState(1);
@@ -1064,11 +1069,32 @@ export function Canvas({ id, k }: CanvasProps) {
           });
         }}
         renderTopRightUI={() => (
-          <LiveCollaborationTrigger isCollaborating={peers > 1} onSelect={() => open("share")} />
+          <div className="row">
+            <Sidebar.Trigger
+              name="interviewer"
+              onToggle={(isOpen) => {
+                if (isOpen) {
+                  setInterviewerOpened(true);
+                }
+              }}
+              title="Open interviewer"
+            >
+              Interviewer
+            </Sidebar.Trigger>
+            <LiveCollaborationTrigger isCollaborating={peers > 1} onSelect={() => open("share")} />
+          </div>
         )}
       >
         <MainMenu>
           <MainMenu.Group title={name}>
+            <MainMenu.Item
+              onSelect={() => {
+                setInterviewerOpened(true);
+                api?.toggleSidebar({ name: "interviewer", force: true });
+              }}
+            >
+              Interviewer
+            </MainMenu.Item>
             <MainMenu.Item onSelect={openRename}>Rename diagram</MainMenu.Item>
             <MainMenu.Item
               onSelect={() => {
@@ -1170,11 +1196,33 @@ export function Canvas({ id, k }: CanvasProps) {
             >
               Tidy
             </button>
+            <Sidebar.Trigger
+              name="interviewer"
+              onToggle={(isOpen) => {
+                if (isOpen) {
+                  setInterviewerOpened(true);
+                }
+              }}
+              title="Interviewer"
+            >
+              Interviewer
+            </Sidebar.Trigger>
             <Sidebar.Trigger name="default" tab="versions" title="Versions">
               Versions
             </Sidebar.Trigger>
           </div>
         </Footer>
+        {interviewerOpened && (
+          <Suspense fallback={null}>
+            <LazyInterviewerPanel
+              api={api}
+              id={id}
+              diagramKey={k}
+              loaded={loaded}
+              offline={isOffline}
+            />
+          </Suspense>
+        )}
         <Sidebar name="rename">
           <Sidebar.Header>Rename diagram</Sidebar.Header>
           <RenamePanel

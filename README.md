@@ -62,6 +62,10 @@ in. Agents also sign in with GitHub through OAuth.
 
 **Work with the agent**
 
+- Open **Interviewer** on the canvas to practice with an AI interviewer beside your
+  drawing. Connect your ChatGPT account, choose an available model, and start the
+  interview. It follows diagram changes, asks one question at a time, and lets you
+  answer in the sidebar. Pause it whenever you want; closing the sidebar pauses it.
 - Sign in with GitHub to create and manage boards. Drawing on a shared board keeps
   working through its share link; agents authenticate through OAuth.
 - The agent edits with high-level operations (add a component, connect two, rename,

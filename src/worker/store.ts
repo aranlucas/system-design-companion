@@ -18,6 +18,10 @@ export function ensureSchema(env: Env) {
 
   const ready = env.DB.batch([
     env.DB.prepare(
+      "CREATE TABLE IF NOT EXISTS chatgpt_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, expires_at INTEGER NOT NULL)",
+    ),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS chatgpt_state_expiry ON chatgpt_state (expires_at)"),
+    env.DB.prepare(
       `CREATE TABLE IF NOT EXISTS diagrams (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT NOT NULL,
         is_template INTEGER NOT NULL DEFAULT 0, description TEXT,
