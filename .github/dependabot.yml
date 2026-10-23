@@ -1,7 +1,11 @@
-# Package updates remain manual: Dependabot documents pnpm support only through v10; this repository uses pnpm 12.
 version: 2
 updates:
   - package-ecosystem: github-actions
+    directory: /
+    patterns:
+      - "*"
+    multi-ecosystem-group: weekly-dependencies
+  - package-ecosystem: npm
     directory: /
     patterns:
       - "*"
