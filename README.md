@@ -29,7 +29,7 @@ changes land.
 > the conversation move together.
 
 The browser link is the capability: anyone who has a diagram's share link can
-edit that board. Sign in with ChatGPT or GitHub to create diagrams and manage your private
+edit that board. Sign in through [Auth](https://auth.aranlucas.workers.dev/) to create diagrams and manage your private
 library and templates. Collaborators can draw using a shared link without signing
 in. Agents authorize access through OAuth using your signed-in account.
 
@@ -65,7 +65,7 @@ in. Agents authorize access through OAuth using your signed-in account.
 - Open **Interviewer** on the canvas to practice with an AI interviewer beside your
   drawing. Connect your ChatGPT account and start the interview with gpt-5.5. It follows diagram changes, asks one question at a time, and lets you
   answer in the sidebar. Pause it whenever you want; closing the sidebar pauses it.
-- Sign in with ChatGPT or GitHub to create and manage boards. Drawing on a shared board keeps
+- Sign in through [Auth](https://auth.aranlucas.workers.dev/) to create and manage boards. Drawing on a shared board keeps
   working through its share link; agents authenticate through OAuth.
 - The agent edits with high-level operations (add a component, connect two, rename,
   restyle, group into a frame) rather than raw drawing commands. Its work shows up in
@@ -147,7 +147,8 @@ nobody asked it to look at.
 - `src/worker/room.ts` — live room state, collaboration, snapshots, and RPC.
 - `src/worker/scene.ts` — pure semantic scene operations and layout helpers.
 - `src/worker/mcp.ts` — MCP tools and prompts, including the MCP Apps view.
-- `src/worker/oauth.ts` — OAuth provider, GitHub sign-in, and the consent page.
+- `src/worker/oidc.ts` — shared Auth OIDC client and verified account identity.
+- `src/worker/oauth.ts` — MCP OAuth provider and the consent page.
 - `src/worker/events.ts` — MCP event catalog, subscriptions, and webhook delivery.
 - `src/shared/` — wire protocol and reusable component definitions.
 - `src/view/` plus `scripts/build-view.ts` — the inline MCP Apps canvas view.

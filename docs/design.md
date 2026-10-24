@@ -234,16 +234,17 @@ flowchart TD
     P -->|"valid"| M["MCP handler"]
     P -->|"no/invalid token"| Ch["401 + WWW-Authenticate<br/>resource_metadata"]
     C -.->|"follows challenge"| PRM["/.well-known/<br/>oauth-protected-resource/mcp"]
-    C -->|"GET /authorize"| A["Consent page"] --> G["GitHub"]
-    G -->|"/github/callback"| T["Issue token"]
+    C -->|"GET /authorize"| G["Auth OIDC sign-in"]
+    G -->|"/api/auth/callback"| A["Consent page"]
+    A --> T["Issue token"]
     B["Browser tab"] -->|"share link only"| WS["Diagram room"]
 ```
 
 `@cloudflare/workers-oauth-provider` fronts `/mcp`: it answers unauthenticated
 requests with a challenge, publishes RFC 9728 protected resource metadata, and
 runs the authorize, token, revocation and registration endpoints. `src/worker/oauth.ts`
-implements the part the library leaves to the app: the consent page and the GitHub
-sign-in. `OAUTH_KV` holds tokens and codes; props are encrypted.
+implements the part the library leaves to the app: the consent page. `src/worker/oidc.ts` implements shared Auth sign-in through
+`openid-client`, verifying OIDC state, nonce, PKCE, claims and ID-token signatures. `OAUTH_KV` holds tokens and codes; props are encrypted.
 
 The verified token reaches the MCP handler as `McpPrincipal`
 (`src/worker/principal.ts`), which `mcp.ts` passes to the SDK as `authInfo` and
@@ -251,7 +252,7 @@ The verified token reaches the MCP handler as `McpPrincipal`
 itself — it is strictly the caller's claim. The provider verifies the token audience
 and identity; the API handler enforces `mcp:read`, while write tool configurations
 use the SDK's `requireScopes("mcp:read", "mcp:write")` challenge before execution.
-GitHub subjects are encoded because the OAuth provider reserves `:` for token parts.
+Auth subjects are encoded because the OAuth provider reserves `:` for token parts.
 
 Browsers keep using capability links. Nobody signs in to draw.
 
@@ -330,8 +331,8 @@ flowchart TD
 ```
 
 - A shared diagram link authorizes drawing and collaboration. Browser users sign
-  in with GitHub to create diagrams and manage their private library; agents sign
-  in through OAuth. Both use the same encoded GitHub user ID for ownership.
+  in through Auth to create diagrams and manage their private library; agents sign
+  in through OAuth. Both use the same encoded Auth subject for ownership.
 - **Your diagrams** and saved templates are owner-scoped. Builtin templates remain
   available. Legacy boards are hidden from libraries until an operator explicitly
   assigns ownership, while their original links remain valid.
@@ -426,7 +427,6 @@ previews share the one preview database and bucket.
 
 - In-room agent with a chat panel and push reactions.
 - Anchored comment threads.
-- GitHub OAuth.
 - Proposal/ghost layer.
 - Server-side lint.
 

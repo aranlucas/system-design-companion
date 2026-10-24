@@ -2,25 +2,22 @@ import { expect } from "e2e";
 import { test } from "./fixtures.ts";
 import { live } from "./web-engine.ts";
 
-test("ChatGPT sign-in creates a board when GitHub is not configured", async ({
+test("Auth sign-in opens the private workspace and creates a board", async ({
   app,
   screen,
   workspace,
 }) => {
   workspace.signedIn = false;
   await app.open();
-  await expect(screen.getByRole("button", "Continue with ChatGPT")).toBeVisible();
-  await expect(screen.getByRole("link", "Sign in with GitHub")).toHaveCount(0);
-  await app.screenshot("chatgpt-home-sign-in");
-  const popupPromise = live.context().waitForEvent("page");
-  await screen.getByRole("button", "Continue with ChatGPT").tap();
-  const popup = await popupPromise;
-  await popup.getByRole("button", { name: "I trust this app, continue" }).click();
+  await expect(screen.getByRole("link", "Sign in", { exact: true })).toBeVisible();
+  await expect(screen.getByRole("button", "Continue with ChatGPT")).toHaveCount(0);
+  await app.screenshot("auth-home-sign-in");
+  await screen.getByRole("link", "Sign in", { exact: true }).tap();
   await expect(screen.getByRole("heading", "New diagram")).toBeVisible();
   await screen.getByLabel("Diagram name").fill("Practice board");
   await screen.getByRole("button", "Create diagram").tap();
   await expect(screen.getByRole("button", "Open interviewer")).toBeVisible();
-  await app.screenshot("chatgpt-board-created");
+  await app.screenshot("auth-board-created");
 });
 
 test("drawing changes reach the interviewer, view changes do not, and answers stream", async ({

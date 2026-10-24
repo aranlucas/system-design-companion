@@ -62,9 +62,14 @@ export const test = base.extend<WorkspaceFixtures>({
 
     await browser.route("**/api/auth/session", (route) =>
       route.fulfill({
-        json: { signedIn: workspace.signedIn, githubEnabled: false, chatgptEnabled: true },
+        json: { signedIn: workspace.signedIn, authEnabled: true },
       }),
     );
+    await browser.route("**/api/auth/login", (route) => {
+      workspace.signedIn = true;
+
+      return route.fulfill({ status: 302, headers: { Location: app.baseUrl ?? "/" } });
+    });
     await browser.route("**/api/auth/logout", (route) => {
       workspace.signedIn = false;
 

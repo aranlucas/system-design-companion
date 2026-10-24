@@ -25,7 +25,7 @@ work.
 `pnpm dev` runs Vite through [Portless](https://github.com/vercel-labs/portless) (a dev
 dependency); its first run may ask for `sudo` to bind port 443 and trust a local
 certificate. Linked Git worktrees get a branch prefix, such as
-`https://fix-ui.system-design-companion.localhost`; register that origin's `/github/callback` in the
+`https://fix-ui.system-design-companion.localhost`; register that origin's `/api/auth/callback` in the
 development OAuth app. Node MCP clients started outside Portless may need
 `NODE_EXTRA_CA_CERTS=~/.portless/ca.pem`.
 
@@ -53,42 +53,55 @@ npx wrangler kv namespace create system-design-companion-preview-oauth  # update
 
 ## Sign-in for agents
 
-The MCP endpoint requires OAuth, so the first time an agent connects, your browser opens
-a consent page and signs you in. ChatGPT sign-in works when `LWC_SECRET` is
-configured (see the sidebar interviewer section below); GitHub is another option.
-The homepage uses the same account to create boards and manage a private library. Shared canvas links still
-allow collaborators to draw without signing in. Browser login reuses the existing
-GitHub callback URL.
+Browser and MCP sign-in use [Auth](https://auth.aranlucas.workers.dev/) through OIDC.
+The issuer is `https://auth.aranlucas.workers.dev/api/auth`; discovery is available at
+`https://auth.aranlucas.workers.dev/api/auth/.well-known/openid-configuration`.
+Auth owns account sign-in; this app owns its HttpOnly session and MCP consent grants.
+Shared canvas links still allow collaborators to draw without signing in.
 
-To enable the optional GitHub provider, create an OAuth app once per deployment:
+An Auth operator must provision a confidential client through the service's
+`/api/auth/oauth2/create-client` endpoint, with these settings:
 
-1. GitHub → **Settings** → **Developer settings** → **OAuth Apps** → **New OAuth App**.
-2. **Homepage URL**: your deployment's origin.
-   **Authorization callback URL**: `<origin>/github/callback`.
-3. Copy the client id and secret, then set them as Worker secrets:
+```json
+{
+  "client_name": "System Design Companion",
+  "redirect_uris": ["https://<your-worker>.workers.dev/api/auth/callback"],
+  "scope": "openid",
+  "grant_types": ["authorization_code"],
+  "token_endpoint_auth_method": "client_secret_basic"
+}
+```
+
+Register each deployment's exact callback, including previews and local development.
+For Portless, use `https://system-design-companion.localhost/api/auth/callback`
+(or the branch origin printed by `pnpm dev`). Store the returned credentials as Worker secrets:
 
 ```sh
-npx wrangler secret put GITHUB_CLIENT_ID
-npx wrangler secret put GITHUB_CLIENT_SECRET
+npx wrangler secret put AUTH_CLIENT_ID
+npx wrangler secret put AUTH_CLIENT_SECRET
 ```
 
-If neither ChatGPT nor GitHub is configured, `/mcp` still answers with a token
-challenge but `/authorize` reports that sign-in is not configured. The two `OAUTH_KV` namespaces (production and preview) hold
-tokens and codes; nothing else moves into KV.
+For local development, set `AUTH_CLIENT_ID` and `AUTH_CLIENT_SECRET` in the ignored
+`.dev.vars`. These are app client credentials, never Auth's `BETTER_AUTH_SECRET`.
+Top-level redirects and backend token exchanges need no shared-domain cookies or
+cross-origin browser API calls. Without both credentials, sign-in returns 503.
+`OAUTH_KV` stores browser sessions, short-lived login state, and MCP tokens and grants.
 
-For local sign-in, create a separate GitHub OAuth app with callback URL
-`https://system-design-companion.localhost/github/callback`, and put its credentials in an ignored `.dev.vars`:
+`openid-client` handles discovery, PKCE S256, state, nonce, issuer/audience/expiry
+checks, and RS256 signature verification with Auth's JWKS. Only the verified subject
+is saved as `auth:<sub>` (URL-encoded); upstream bearer tokens are discarded.
+MCP authorization resumes at its original consent request after Auth sign-in.
 
-```dotenv
-GITHUB_CLIENT_ID=<local-app-client-id>
-GITHUB_CLIENT_SECRET=<local-app-client-secret>
-```
+Existing GitHub/ChatGPT-owned libraries are separate from the new Auth identity.
+No owners are merged by email. Existing GitHub browser sessions and MCP grants expire
+or can be revoked normally; operators must explicitly migrate ownership records if needed.
+Logout clears this app's session and interviewer connection. It does not sign out the
+central Auth account or other apps.
 
 Every MCP call requires `mcp:read`. Tools that create diagrams, save versions, edit
 content or control a browser view also require `mcp:write`; read-only tokens receive
 an OAuth scope challenge before a write tool runs. A diagram share link is still
-required for access to an existing board. GitHub sign-in uses public profile identity
-without requesting email access, and GitHub's token is never handed to the MCP client.
+required for access to an existing board. Auth sign-in requests only the stable OIDC subject; Auth's token is never handed to the MCP client.
 
 Clients that connect without a browser — CI, a scripted agent — cannot complete an
 interactive flow. Those still need a diagram share link for the board itself, since the
@@ -244,12 +257,10 @@ ChatGPT sessions. The server refuses to enable ChatGPT login without this secret
 The SDK signs its HttpOnly session cookie and encrypts account tokens before our
 D1 adapter stores them. Sessions and rate counters are shared across Workers,
 expired records are removed on writes, and Disconnect deletes the session.
-ChatGPT sign-in also opens the homepage’s private diagram library and can authorize
-MCP clients. GitHub is optional when `LWC_SECRET` is configured. Ownership is tied
-to the person and ChatGPT workspace, never a shared workspace ID or email alone.
-GitHub and ChatGPT libraries remain separate; sign out before switching providers.
-Homepage **Sign out** clears both sessions. Sidebar **Disconnect** clears the
-ChatGPT session.
+ChatGPT connects the interviewer to the user's plan. It does not authenticate the
+homepage library or MCP clients; those use Auth. Homepage **Sign out** clears the
+app session and ChatGPT connection. Sidebar **Disconnect** clears only the
+ChatGPT connection.
 
 The sidebar uses the fixed `gpt-5.5` model and sends requests directly through the
 existing Worker responses endpoint. It does not fetch the account's model catalog;
@@ -321,7 +332,7 @@ Run `pnpm test:e2e` to execute the whiteboard journeys with
 [`tester-army/e2e`](https://github.com/tester-army/e2e). On a fresh machine, install
 Chromium with `pnpm exec e2e-web install chromium --with-deps` first. The runner
 starts its own local Vite server on an available port; no model credentials are
-required. Exact browser actions exercise ChatGPT consent/sign-in, board creation,
+required. Exact browser actions exercise workspace sign-in, board creation, ChatGPT interviewer consent/sign-in,
 drawing-driven questions with a canvas preview, ignoring zoom, typed answers,
 pause/resume, and response retries. HTTP account/model endpoints and the room
 WebSocket are fixtures, so these tests consume no ChatGPT plan capacity.

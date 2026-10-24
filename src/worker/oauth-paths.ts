@@ -9,7 +9,7 @@ export const MCP_ROUTE = "/mcp";
 
 export const AUTHORIZE_ENDPOINT = "/authorize";
 
-export const CALLBACK_PATH = "/github/callback";
+export const AUTH_CALLBACK_PATH = "/api/auth/callback";
 
 export const TOKEN_ENDPOINT = "/oauth/token";
 
@@ -20,10 +20,6 @@ const PROTECTED_RESOURCE_METADATA = "/.well-known/oauth-protected-resource";
 /** Whether the OAuth provider handles this path, or Hono does. */
 export function isOAuthPath(pathname: string): boolean {
   if (pathname === MCP_ROUTE || pathname === AUTHORIZE_ENDPOINT) {
-    return true;
-  }
-
-  if (pathname === CALLBACK_PATH) {
     return true;
   }
 
@@ -48,7 +44,6 @@ export const RUN_WORKER_FIRST = [
   "/ws/*",
   MCP_ROUTE,
   AUTHORIZE_ENDPOINT,
-  "/github/*",
   "/oauth/*",
   "/.well-known/oauth-*",
   "/.well-known/openai-apps-challenge",
