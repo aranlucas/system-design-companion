@@ -1,7 +1,6 @@
-import { z } from "zod";
 import { HTTPException } from "hono/http-exception";
 import { sha256 } from "./store.ts";
-import { readBounded, takeBudget } from "./request-limits.ts";
+import { takeBudget } from "./request-limits.ts";
 
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
 
@@ -9,11 +8,13 @@ const LOGIN_SECONDS = 600;
 
 type BrowserSession = { userId: string; expiresAt: number };
 
-type LoginState = { state: string; verifier: string; expiresAt: number };
-
-const githubIdentitySchema = z.object({ id: z.number().refine(Number.isSafeInteger).positive() });
-
-const githubTokenSchema = z.object({ access_token: z.string().optional() });
+export type LoginState = {
+  state: string;
+  verifier: string;
+  nonce: string;
+  expiresAt: number;
+  returnTo: string;
+};
 
 function cookieName(request: Request, suffix: string) {
   return `${new URL(request.url).protocol === "https:" ? "__Host-" : ""}sdc-${suffix}`;
@@ -34,7 +35,7 @@ function cookieValue(request: Request, suffix: string) {
     ?.slice(name.length + 1);
 }
 
-async function githubBrowserUser(request: Request, env: Env): Promise<string | null> {
+export async function browserUser(request: Request, env: Env): Promise<string | null> {
   const token = cookieValue(request, "session");
 
   if (!token || !/^[a-f0-9-]{36}$/.test(token)) {
@@ -47,18 +48,6 @@ async function githubBrowserUser(request: Request, env: Env): Promise<string | n
   );
 
   return session && session.expiresAt > Date.now() ? session.userId : null;
-}
-
-export async function browserUser(request: Request, env: Env): Promise<string | null> {
-  const github = await githubBrowserUser(request, env);
-
-  if (github || !env.LWC_SECRET) {
-    return github;
-  }
-
-  const { chatgptUser } = await import("./chatgpt.ts");
-
-  return chatgptUser(request, env);
 }
 
 export async function requireBrowserUser(request: Request, env: Env) {
@@ -78,16 +67,13 @@ export function requireSameOrigin(request: Request) {
   }
 }
 
-export async function browserLogin(request: Request, env: Env): Promise<Response> {
-  if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET) {
-    if (env.LWC_SECRET) {
-      return new Response(null, {
-        status: 302,
-        headers: { Location: "/", "Cache-Control": "no-store" },
-      });
-    }
+export function browserAuthConfigured(env: Env): boolean {
+  return Boolean(env.AUTH_CLIENT_ID && env.AUTH_CLIENT_SECRET);
+}
 
-    throw new HTTPException(503, { message: "GitHub sign-in is not configured." });
+export async function browserLogin(request: Request, env: Env, returnTo = "/"): Promise<Response> {
+  if (!browserAuthConfigured(env)) {
+    throw new HTTPException(503, { message: "Auth sign-in is not configured." });
   }
 
   await takeBudget(
@@ -95,28 +81,12 @@ export async function browserLogin(request: Request, env: Env): Promise<Response
     `browser-login:${request.headers.get("CF-Connecting-IP") ?? "unknown"}`,
     20,
   );
-  const state = `browser-${crypto.randomUUID()}`;
-  const verifier = crypto.randomUUID() + crypto.randomUUID();
+  const { startLogin } = await import("./oidc.ts");
+  const { url, login } = await startLogin(request, env, returnTo);
   const binding = crypto.randomUUID();
-  const login: LoginState = { state, verifier, expiresAt: Date.now() + LOGIN_SECONDS * 1000 };
   await env.OAUTH_KV.put(`browser-login:${await sha256(binding)}`, JSON.stringify(login), {
     expirationTtl: LOGIN_SECONDS,
   });
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
-
-  const challenge = btoa(String.fromCodePoint(...new Uint8Array(digest)))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replaceAll("=", "");
-
-  const url = new URL("https://github.com/login/oauth/authorize");
-  url.search = new URLSearchParams({
-    client_id: env.GITHUB_CLIENT_ID,
-    redirect_uri: `${new URL(request.url).origin}/github/callback`,
-    state,
-    code_challenge: challenge,
-    code_challenge_method: "S256",
-  }).toString();
 
   return new Response(null, {
     status: 302,
@@ -126,10 +96,6 @@ export async function browserLogin(request: Request, env: Env): Promise<Response
       "Cache-Control": "no-store",
     },
   });
-}
-
-export function isBrowserCallback(request: Request) {
-  return new URL(request.url).searchParams.get("state")?.startsWith("browser-") ?? false;
 }
 
 export async function browserCallback(request: Request, env: Env): Promise<Response> {
@@ -158,56 +124,13 @@ export async function browserCallback(request: Request, env: Env): Promise<Respo
     return new Response(null, { status: 302, headers });
   }
 
-  const code = url.searchParams.get("code");
-
-  if (!code) {
-    throw new HTTPException(400, { message: "GitHub did not return an authorization code." });
-  }
-
-  const exchanged = await fetch("https://github.com/login/oauth/access_token", {
-    method: "POST",
-    redirect: "error",
-    signal: AbortSignal.timeout(10_000),
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({
-      client_id: env.GITHUB_CLIENT_ID,
-      client_secret: env.GITHUB_CLIENT_SECRET,
-      code,
-      redirect_uri: `${url.origin}/github/callback`,
-      code_verifier: login.verifier,
-    }),
-  });
-
-  const token = githubTokenSchema.parse(
-    JSON.parse(new TextDecoder().decode(await readBounded(exchanged.body, 16 * 1024))),
-  );
-
-  if (!exchanged.ok || !token.access_token) {
-    throw new HTTPException(502, { message: "GitHub sign-in failed." });
-  }
-
-  const identityResponse = await fetch("https://api.github.com/user", {
-    redirect: "error",
-    signal: AbortSignal.timeout(10_000),
-    headers: {
-      Authorization: `Bearer ${token.access_token}`,
-      Accept: "application/vnd.github+json",
-      "User-Agent": "system-design-companion",
-    },
-  });
-
-  const identity = githubIdentitySchema.safeParse(
-    JSON.parse(new TextDecoder().decode(await readBounded(identityResponse.body, 16 * 1024))),
-  );
-
-  if (!identityResponse.ok || !identity.success) {
-    throw new HTTPException(502, { message: "Could not read your GitHub identity." });
-  }
+  const { finishLogin } = await import("./oidc.ts");
+  const userId = await finishLogin(request, env, login);
 
   const sessionToken = crypto.randomUUID();
 
   const session: BrowserSession = {
-    userId: encodeURIComponent(`github:${identity.data.id}`),
+    userId,
     expiresAt: Date.now() + SESSION_SECONDS * 1000,
   };
 
@@ -215,7 +138,7 @@ export async function browserCallback(request: Request, env: Env): Promise<Respo
     expirationTtl: SESSION_SECONDS,
   });
   headers.append("Set-Cookie", cookie(request, "session", sessionToken, SESSION_SECONDS));
-  headers.set("Location", "/");
+  headers.set("Location", login.returnTo);
 
   return new Response(null, { status: 302, headers });
 }

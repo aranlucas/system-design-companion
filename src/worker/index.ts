@@ -9,10 +9,10 @@ import {
   browserLogin,
   browserCallback,
   browserLogout,
-  isBrowserCallback,
+  browserAuthConfigured,
 } from "./browser-auth.ts";
 import { readBounded, MAX_JSON_BYTES, takeBudget } from "./request-limits.ts";
-import { AUTHORIZE_ENDPOINT, CALLBACK_PATH, isOAuthPath } from "./oauth-paths.ts";
+import { AUTHORIZE_ENDPOINT, AUTH_CALLBACK_PATH, isOAuthPath } from "./oauth-paths.ts";
 import {
   createBody,
   paginationQuery,
@@ -64,8 +64,7 @@ app.get("/api/auth/session", async (c) => {
 
   return c.json({
     signedIn: Boolean(await browserUser(c.req.raw, c.env)),
-    githubEnabled: Boolean(c.env.GITHUB_CLIENT_ID && c.env.GITHUB_CLIENT_SECRET),
-    chatgptEnabled: Boolean(c.env.LWC_SECRET),
+    authEnabled: browserAuthConfigured(c.env),
   });
 });
 
@@ -241,21 +240,13 @@ sockets.all("*", (c) => c.var.room.fetch(c.req.raw));
 
 app.route("/ws/:id{[A-Za-z0-9_-]+}", sockets);
 
-// The provider owns the OAuth protocol endpoints but forwards /authorize and
-// /github/callback here, so they are Hono routes that load the provider lazily.
-const interactive: Handler<WorkerEnv> = async (c) => {
-  if (c.req.path === CALLBACK_PATH && isBrowserCallback(c.req.raw)) {
-    return browserCallback(c.req.raw, c.env);
-  }
+app.all(AUTH_CALLBACK_PATH, (c) => browserCallback(c.req.raw, c.env));
 
+app.all(AUTHORIZE_ENDPOINT, async (c) => {
   const { oauthRoutes } = await import("./oauth.ts");
 
   return oauthRoutes(c.req.raw, c.env);
-};
-
-app.all(AUTHORIZE_ENDPOINT, interactive);
-
-app.all(CALLBACK_PATH, interactive);
+});
 
 // The OAuth provider fronts /mcp and owns its own discovery, token, registration,
 // authorize and callback endpoints. Canvas traffic never touches it: the path

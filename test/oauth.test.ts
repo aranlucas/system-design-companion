@@ -3,11 +3,11 @@ import { requiredTestValue } from "@test/helpers/required-test-value.ts";
 import type { JsonInput } from "@test/helpers/response-schemas.ts";
 import { z } from "zod";
 import { jsonObjectSchema, rpcResultSchema, tokensSchema } from "@test/helpers/response-schemas.ts";
-// Exercise the real OAuth provider; only KV and GitHub's HTTP APIs are faked.
+// Exercise the real OAuth provider with private browser sessions and fake storage.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "@/worker/index.ts";
 import { deliverDiagramEvent } from "@/worker/events.ts";
-import { createDiagram, shareLink } from "@/worker/store.ts";
+import { createDiagram, shareLink, sha256 } from "@/worker/store.ts";
 import { makeEnv, testCtx, type TestEnv } from "@test/helpers/fakes.ts";
 
 const ORIGIN = "https://design.example";
@@ -33,56 +33,22 @@ type RpcResult = {
 
 let env: TestEnv;
 
-type GithubFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
+type UpstreamFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
-let github: ReturnType<typeof vi.fn<GithubFetch>>;
+let upstream: ReturnType<typeof vi.fn<UpstreamFetch>>;
 
 beforeEach(() => {
   env = makeEnv();
-  env.env.GITHUB_CLIENT_ID = "github-client";
-  env.env.GITHUB_CLIENT_SECRET = "github-secret";
+  env.env.AUTH_CLIENT_ID = "upstream-client";
+  env.env.AUTH_CLIENT_SECRET = "upstream-secret";
   vi.stubGlobal("Cloudflare", { compatibilityFlags: { global_fetch_strictly_public: true } });
-  github = vi.fn((input: string | URL) => {
-    return promiseResult(() => {
-      if (String(input) === "https://github.com/login/oauth/access_token") {
-        return Response.json({ access_token: "upstream-github-token" });
-      }
-
-      if (String(input) === "https://api.github.com/user") {
-        return Response.json({ id: 123, login: "tester", name: "Test User" });
-      }
-
-      throw new Error(`Unexpected external request: ${String(input)}`);
-    });
-  });
-  vi.stubGlobal("fetch", github);
+  upstream = vi.fn((input: string | URL) =>
+    Promise.reject(new Error(`Unexpected external request: ${String(input)}`)),
+  );
+  vi.stubGlobal("fetch", upstream);
 });
 
-function expectGithubRequestPolicy() {
-  const tokenRequests = github.mock.calls.filter(
-    ([input]) => String(input) === "https://github.com/login/oauth/access_token",
-  );
-
-  for (const [, init] of tokenRequests) {
-    expect(init?.redirect).toBe("error");
-  }
-
-  const userRequests = github.mock.calls.filter(
-    ([input]) => String(input) === "https://api.github.com/user",
-  );
-
-  for (const [, init] of userRequests) {
-    expect(new Headers(init?.headers).get("user-agent")).toBe("system-design-companion");
-  }
-}
-
-afterEach(() => {
-  try {
-    expectGithubRequestPolicy();
-  } finally {
-    vi.unstubAllGlobals();
-  }
-});
+afterEach(() => vi.unstubAllGlobals());
 
 function call(path: string, init?: RequestInit) {
   return worker.fetch(new Request(new URL(path, ORIGIN), init), env.env, testCtx());
@@ -133,13 +99,19 @@ async function consent(scope = "mcp:read mcp:write") {
     state: "client-state",
   });
 
-  const page = await call(`/authorize?${query.toString()}`);
+  const sessionToken = crypto.randomUUID();
+  await env.kv.put(
+    `browser-session:${await sha256(sessionToken)}`,
+    JSON.stringify({ userId: "auth%3A123", expiresAt: Date.now() + 3600_000 }),
+  );
+  const sessionCookie = `__Host-sdc-session=${sessionToken}`;
+  const page = await call(`/authorize?${query.toString()}`, { headers: { cookie: sessionCookie } });
   expect(page.status).toBe(200);
   expect(page.headers.get("content-security-policy")).toContain("frame-ancestors");
   const html = await page.text();
   const handle = requiredTestValue(/name="handle" value="([^"]+)"/.exec(html))[1];
 
-  return { clientId, verifier, handle, cookie: cookies(page), html };
+  return { clientId, verifier, handle, cookie: `${sessionCookie}; ${cookies(page)}`, html };
 }
 
 async function authorize(scope = "mcp:read mcp:write"): Promise<Authorization> {
@@ -157,15 +129,7 @@ async function authorize(scope = "mcp:read mcp:write"): Promise<Authorization> {
   });
 
   expect(approved.status).toBe(302);
-  const githubUrl = new URL(requiredTestValue(approved.headers.get("location")));
-  expect(githubUrl.hostname).toBe("github.com");
-  expect(githubUrl.searchParams.get("code_challenge_method")).toBe("S256");
-  expect(githubUrl.searchParams.get("scope")).toBe("");
-
-  const callback = await call(
-    `/github/callback?${new URLSearchParams({ state: requiredTestValue(githubUrl.searchParams.get("state")), code: "github-code" }).toString()}`,
-    { headers: { cookie: cookies(approved) } },
-  );
+  const callback = approved;
 
   expect(callback.status).toBe(302);
   const redirected = new URL(requiredTestValue(callback.headers.get("location")));
@@ -249,15 +213,15 @@ async function rpcBody(response: Response): Promise<RpcResult> {
 }
 
 describe("OAuth authorization", () => {
-  it("completes consent, GitHub PKCE, token exchange and authenticated event discovery", async () => {
+  it("completes consent, Auth session, token exchange and authenticated event discovery", async () => {
     const { tokens: issued } = await tokens();
 
-    expect(issued.access_token).not.toBe("upstream-github-token");
-    expect(issued.access_token.startsWith("github%3A123:")).toBe(true);
+    expect(issued.access_token).not.toBe("upstream-upstream-token");
+    expect(issued.access_token.startsWith("auth%3A123:")).toBe(true);
     const response = await rpc(issued.access_token, "events/list");
     expect(response.status).toBe(200);
     expect((await rpcBody(response)).result?.events).toHaveLength(3);
-    expect(JSON.stringify([...env.kv.values.values()])).not.toContain("upstream-github-token");
+    expect(JSON.stringify([...env.kv.values.values()])).not.toContain("upstream-upstream-token");
     const discovery = await rpc(issued.access_token, "server/discover");
     expect((await rpcBody(discovery)).result?.capabilities?.events).toEqual({});
   });
@@ -266,8 +230,8 @@ describe("OAuth authorization", () => {
     const { auth, tokens: issued } = await tokens();
     const diagram = await createDiagram(env.env, "Watched");
     const deliveries: string[] = [];
-    const upstream = requiredTestValue(github.getMockImplementation());
-    github.mockImplementation((input: string | URL, init?: RequestInit) => {
+    const originalFetch = requiredTestValue(upstream.getMockImplementation());
+    upstream.mockImplementation((input: string | URL, init?: RequestInit) => {
       return promiseResult(() => {
         const url = new URL(input);
 
@@ -287,7 +251,7 @@ describe("OAuth authorization", () => {
           return new Response(null, { status: 204 });
         }
 
-        return upstream(input, init);
+        return originalFetch(input, init);
       });
     });
 
@@ -407,10 +371,10 @@ describe("OAuth authorization", () => {
     });
 
     expect(response.status).toBe(400);
-    expect(github).not.toHaveBeenCalled();
+    expect(upstream).not.toHaveBeenCalled();
   });
 
-  it("denies consent without contacting GitHub", async () => {
+  it("denies consent without contacting Auth", async () => {
     const started = await consent();
 
     const response = await call("/authorize", {
@@ -423,13 +387,15 @@ describe("OAuth authorization", () => {
     expect(
       new URL(requiredTestValue(response.headers.get("location"))).searchParams.get("error"),
     ).toBe("access_denied");
-    expect(github).not.toHaveBeenCalled();
+    expect(upstream).not.toHaveBeenCalled();
   });
 
   it("rejects forged upstream state and unsupported route methods", async () => {
-    expect((await call("/github/callback?state=forged&code=attacker")).status).toBe(400);
-    expect((await call("/github/callback", { method: "POST" })).status).toBe(405);
+    expect((await call("/api/auth/callback?state=forged&code=attacker")).status).toBe(400);
+    expect(
+      (await call("/api/auth/callback", { method: "POST", headers: { Origin: ORIGIN } })).status,
+    ).toBe(405);
     expect((await call("/authorize", { method: "PUT" })).status).toBe(405);
-    expect(github).not.toHaveBeenCalled();
+    expect(upstream).not.toHaveBeenCalled();
   });
 });

@@ -599,10 +599,10 @@ describe("routing", () => {
     expect(doc.authorization_servers).toEqual(["http://localhost"]);
   });
 
-  it("reports that sign-in is unavailable until GitHub secrets are set", async () => {
+  it("reports that sign-in is unavailable until Auth client credentials are set", async () => {
     const env = makeEnv();
     const response = await call(env, req("/authorize?response_type=code&client_id=x"));
     expect(response.status).toBe(503);
-    expect(await response.text()).toContain("GITHUB_CLIENT_ID");
+    expect(await response.text()).toContain("AUTH_CLIENT_ID");
   });
 });

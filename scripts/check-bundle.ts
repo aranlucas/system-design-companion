@@ -75,7 +75,8 @@ console.table({
 // The Worker budget covers every chunk, including the lazily loaded OAuth
 // provider (~250 kB of @cloudflare/workers-oauth-provider). It is loaded only
 // for /mcp and the OAuth endpoints, but the total is what ships.
-const WORKER_BUDGET_BYTES = 700_000;
+// The shared Auth integration adds ~34 kB for openid-client and signed OIDC verification.
+const WORKER_BUDGET_BYTES = 750_000;
 
 assert.ok(home.raw < 300_000, `Home JavaScript exceeds 300 kB: ${home.raw} bytes`);
 

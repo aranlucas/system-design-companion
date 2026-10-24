@@ -18,7 +18,6 @@
       "/ws/*",
       "/mcp",
       "/authorize",
-      "/github/*",
       "/oauth/*",
       "/.well-known/oauth-*",
       "/.well-known/openai-apps-challenge",

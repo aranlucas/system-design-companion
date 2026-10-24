@@ -4,9 +4,7 @@ import {
   type KeyValueStore,
 } from "@opencoredev/loginwithchatgpt-server";
 import { HTTPException } from "hono/http-exception";
-import { decodeJwt } from "jose";
-import { z } from "zod";
-import { ensureSchema, sha256 } from "./store.ts";
+import { ensureSchema } from "./store.ts";
 
 interface StoredValue {
   value: string;
@@ -20,41 +18,6 @@ interface CachedHandler {
 type SetOptions<T> = Parameters<KeyValueStore<T>["set"]>[2];
 
 const handlers = new WeakMap<D1Database, CachedHandler>();
-
-const identitySchema = z.object({
-  iss: z.literal("https://auth.openai.com"),
-  sub: z.string().min(1),
-});
-
-/** Resolve a person within their workspace, never just a shared workspace or an email. */
-export async function chatgptUser(request: Request, env: Env): Promise<string | null> {
-  if (!env.LWC_SECRET) {
-    return null;
-  }
-
-  const tokens = await chatgptAuth(env).dangerouslyGetTokens(request);
-
-  if (!tokens?.idToken || !tokens.accountId) {
-    return null;
-  }
-
-  // Only SDK tokens obtained from OpenAI over TLS and kept in our encrypted store
-  // reach this decoder. No caller can submit an identity token to this endpoint.
-  try {
-    const claims = decodeJwt(tokens.idToken);
-    const parsed = identitySchema.safeParse(claims);
-
-    if (!parsed.success) {
-      return null;
-    }
-
-    return encodeURIComponent(
-      `chatgpt:${await sha256(JSON.stringify([parsed.data.iss, parsed.data.sub, tokens.accountId]))}`,
-    );
-  } catch {
-    return null;
-  }
-}
 
 /** The SDK encrypts tokens before storage. D1 keeps sessions shared across Workers. */
 function sessionStore<T>(env: Env, namespace: string): KeyValueStore<T> {
@@ -108,9 +71,6 @@ export function chatgptAuth(env: Env): ChatGPTHandler {
 
   const auth = createChatGPTHandler({
     secret: env.LWC_SECRET,
-    // Server-only identity resolution needs the stable ID-token subject. No HTTP
-    // route exposes this helper or returns bearer credentials to the browser.
-    dangerouslyAllowTokenExport: true,
     sessionStore: sessionStore(env, "session"),
     responsesProxy: {
       allowedModels: ["gpt-5.5"],

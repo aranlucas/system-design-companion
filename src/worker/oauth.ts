@@ -6,11 +6,8 @@ import { z } from "zod";
 // ChatGPT requires an authenticated principal before it will accept an event
 // subscription, and the same token tells us who an agent is acting as.
 //
-// Sign-in is GitHub. /authorize shows a consent page, then hands the user to
-// GitHub and finishes at /github/callback, issuing a token scoped to this Worker.
-// Set with: wrangler secret put GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET
+// Identity comes from the shared Auth service through a first-party browser session.
 import {
-  authorizationErrorRedirect,
   AuthorizationError,
   insufficientScope,
   getOAuthApi,
@@ -21,12 +18,11 @@ import {
 } from "@cloudflare/workers-oauth-provider";
 import {
   AUTHORIZE_ENDPOINT,
-  CALLBACK_PATH,
   MCP_ROUTE,
   TOKEN_ENDPOINT,
   REGISTRATION_ENDPOINT,
 } from "./oauth-paths.ts";
-import { browserUser } from "./browser-auth.ts";
+import { browserUser, browserLogin, browserAuthConfigured } from "./browser-auth.ts";
 import { toMcpPrincipal, oauthContextSchema } from "./principal.ts";
 
 /** Everything the authorization server can grant. */
@@ -42,26 +38,6 @@ const SCOPE_BLURB = {
 };
 
 const scopeDescriptions = new Map(Object.entries(SCOPE_BLURB));
-
-const GITHUB_AUTHORIZE = "https://github.com/login/oauth/authorize";
-
-const GITHUB_TOKEN = "https://github.com/login/oauth/access_token";
-
-const GITHUB_USER = "https://api.github.com/user";
-
-/** The subset of the GitHub user API this deployment reads. */
-type GithubUser = { id: number };
-
-/** What the GitHub token exchange returns. */
-const githubTokenSchema = z.object({
-  access_token: z.string().optional(),
-  error: z.string().optional(),
-});
-
-const githubUserSchema = z.object({ id: z.number().refine(Number.isSafeInteger).positive() });
-
-/** State carried through the GitHub round trip; the verifier is never sent to GitHub. */
-type UpstreamState = { verifier: string };
 
 /** The resource server's half: token in, MCP handler out. */
 type McpApiHandler = ExportedHandler<Env> & { fetch: NonNullable<ExportedHandler<Env>["fetch"]> };
@@ -137,10 +113,10 @@ const mcpApiHandler: McpApiHandler = {
 
 /** Whether this deployment can actually sign a user in. */
 export function oauthConfigured(env: Env): boolean {
-  return Boolean(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET) || Boolean(env.LWC_SECRET);
+  return browserAuthConfigured(env);
 }
 
-/** The /authorize and /github/callback routes, mounted by index.ts. */
+/** The /authorize route, mounted by index.ts. */
 export async function oauthRoutes(request: Request, env: Env): Promise<Response> {
   const origin = new URL(request.url).origin;
 
@@ -151,19 +127,10 @@ export async function oauthRoutes(request: Request, env: Env): Promise<Response>
   // The provider object is only a vehicle for the helpers, so a throwaway one
   // is enough: nothing here dispatches through it.
   const oauth = getOAuthApi(providerOptions(origin, app), env);
-  const { pathname } = new URL(request.url);
 
   try {
-    if (pathname === CALLBACK_PATH) {
-      if (request.method !== "GET") {
-        return new Response(null, { status: 405, headers: { Allow: "GET" } });
-      }
-
-      return await callback(request, env, origin, oauth);
-    }
-
     if (request.method === "POST") {
-      return await decide(request, env, origin, oauth);
+      return await decide(request, env, oauth);
     }
 
     if (request.method === "GET") {
@@ -196,13 +163,10 @@ async function startAuthorization(
 ): Promise<Response> {
   const authRequest = await oauth.parseAuthRequest(request);
 
-  if (!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET) && !(await browserUser(request, env))) {
+  if (!(await browserUser(request, env))) {
     const url = new URL(request.url);
 
-    return Response.redirect(
-      `${origin}/?${new URLSearchParams({ authorize: url.pathname + url.search }).toString()}`,
-      302,
-    );
+    return browserLogin(request, env, url.pathname + url.search);
   }
 
   const consent = await oauth.describeConsent(authRequest);
@@ -213,12 +177,7 @@ async function startAuthorization(
 }
 
 /** POST /authorize: the user pressed Allow or Deny. */
-async function decide(
-  request: Request,
-  env: Env,
-  origin: string,
-  oauth: OAuthHelpers,
-): Promise<Response> {
+async function decide(request: Request, env: Env, oauth: OAuthHelpers): Promise<Response> {
   const form = await request.formData();
   const parsedHandle = z.string().min(1).safeParse(form.get("handle"));
 
@@ -248,89 +207,7 @@ async function decide(
     return completeUserAuthorization(existingUser, approved.request, approved.headers, oauth);
   }
 
-  const verifier = crypto.randomUUID() + crypto.randomUUID();
-
-  const { state, headers } = await oauth.beginUpstream(approved.request, {
-    data: { verifier } satisfies UpstreamState,
-    headers: approved.headers,
-  });
-
-  const { clientId } = githubConfig(env);
-  const url = new URL(GITHUB_AUTHORIZE);
-  url.searchParams.set("client_id", clientId);
-  url.searchParams.set("redirect_uri", `${origin}${CALLBACK_PATH}`);
-  // Public profile identity is enough; no email or private-profile access is needed.
-  url.searchParams.set("scope", "");
-  url.searchParams.set("state", state);
-  url.searchParams.set("code_challenge", await s256(verifier));
-  url.searchParams.set("code_challenge_method", "S256");
-  headers.set("Location", url.href);
-
-  return new Response(null, { status: 302, headers });
-}
-
-/** GET /github/callback: exchange GitHub's code and issue our own token. */
-async function callback(
-  request: Request,
-  env: Env,
-  origin: string,
-  oauth: OAuthHelpers,
-): Promise<Response> {
-  const {
-    request: authRequest,
-    data,
-    headers,
-  } = await oauth.finishUpstream<UpstreamState>(request);
-
-  if (new URL(request.url).searchParams.get("error")) {
-    headers.set("Location", authorizationErrorRedirect(authRequest, "access_denied"));
-
-    return new Response(null, { status: 302, headers });
-  }
-
-  const code = new URL(request.url).searchParams.get("code");
-
-  if (!code) {
-    return renderMessage(400, "GitHub did not return an authorization code.");
-  }
-
-  const { clientId, clientSecret } = githubConfig(env);
-
-  const res = await fetch(GITHUB_TOKEN, {
-    redirect: "error",
-    signal: AbortSignal.timeout(10_000),
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({
-      client_id: clientId,
-      client_secret: clientSecret,
-      code,
-      redirect_uri: `${origin}${CALLBACK_PATH}`,
-      code_verifier: data.verifier,
-    }),
-  });
-
-  const exchanged = githubTokenSchema.parse(await res.json());
-
-  if (!res.ok || !exchanged.access_token) {
-    return renderMessage(
-      502,
-      `GitHub rejected the code exchange (${exchanged.error ?? res.status}).`,
-    );
-  }
-
-  const user = await fetchGithubUser(exchanged.access_token);
-
-  if (!user) {
-    return renderMessage(502, "Could not read your GitHub profile.");
-  }
-
-  return completeUserAuthorization(
-    encodeURIComponent(`github:${user.id}`),
-    authRequest,
-    headers,
-    oauth,
-  );
+  return renderMessage(401, "Your sign-in expired. Restart authorization to continue.");
 }
 
 type AuthorizationRequest = Parameters<OAuthHelpers["completeAuthorization"]>[0]["request"];
@@ -345,7 +222,7 @@ async function completeUserAuthorization(
 
   const { redirectTo } = await oauth.completeAuthorization({
     request: authRequest,
-    // Namespaced so a GitHub id can never collide with another provider's subject.
+    // Namespaced so an Auth subject can never collide with another provider's subject.
     userId,
     metadata: { authorizationId },
     scope: authRequest.scope,
@@ -357,50 +234,11 @@ async function completeUserAuthorization(
   return new Response(null, { status: 302, headers });
 }
 
-function githubConfig(env: Env) {
-  const { GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET } = env;
-
-  if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET) {
-    throw new Error("GitHub sign-in is not configured");
-  }
-
-  return { clientId: GITHUB_CLIENT_ID, clientSecret: GITHUB_CLIENT_SECRET };
-}
-
-async function fetchGithubUser(accessToken: string): Promise<GithubUser | null> {
-  const res = await fetch(GITHUB_USER, {
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      accept: "application/vnd.github+json",
-      "user-agent": "system-design-companion",
-    },
-    redirect: "error",
-    signal: AbortSignal.timeout(10_000),
-  });
-
-  if (!res.ok) {
-    return null;
-  }
-
-  const user = githubUserSchema.safeParse(await res.json());
-
-  return user.success ? user.data : null;
-}
-
-async function s256(verifier: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
-
-  return btoa(String.fromCodePoint(...new Uint8Array(digest)))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/, "");
-}
-
 function notConfigured(origin: string): Response {
   return renderMessage(
     503,
     `Sign-in is not configured on this deployment. The MCP endpoint is ${origin}${MCP_ROUTE}, ` +
-      `and an administrator needs to set LWC_SECRET or both GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET.`,
+      `and an administrator needs to set AUTH_CLIENT_ID and AUTH_CLIENT_SECRET.`,
   );
 }
 
@@ -414,7 +252,7 @@ function renderMessage(status: number, message: string): Response {
   return new Response(body, { status, headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
-// Every string below can come from the client or from GitHub, so it is escaped
+// Every string below can come from the client or from Auth, so it is escaped
 // before it reaches the page. The anti-framing headers come from beginConsent().
 function consentPage(consent: ConsentDescription, handle: string, origin: string): string {
   const who = consent.clientDomain
@@ -462,7 +300,7 @@ function consentPage(consent: ConsentDescription, handle: string, origin: string
     <button class="allow" type="submit" name="decision" value="allow">Allow</button>
   </div>
 </form>
-<p class="muted" style="font-size:.85rem">Tokens are stored by this deployment, not by GitHub. You can revoke access from your agent's connector settings at any time.</p>
+<p class="muted" style="font-size:.85rem">Your agent’s tokens are stored by this deployment. You can revoke access from your agent's connector settings at any time.</p>
 </body></html>`;
 }
 

@@ -210,8 +210,7 @@ export function makeEnv(): TestEnv {
     DB: d1Adapter(db),
     BUCKET: strictFake<R2Bucket>(bucket),
     OAUTH_KV: strictFake<KVNamespace>(kv),
-    GITHUB_CLIENT_ID: "",
-    GITHUB_CLIENT_SECRET: "",
+
     MCP_EVENT_CALLBACK_HOSTS: "receiver.example.com",
   };
 

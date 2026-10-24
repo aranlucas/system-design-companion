@@ -1,18 +1,11 @@
 import { promiseResult } from "@/shared/promise-result.ts";
 import { requiredTestValue } from "@test/helpers/required-test-value.ts";
-import { z } from "zod";
-import {
-  createdSchema,
-  librarySchema,
-  stringRecordSchema,
-} from "@test/helpers/response-schemas.ts";
+import { createdSchema, librarySchema } from "@test/helpers/response-schemas.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "@/worker/index.ts";
 import { createDiagram, listTemplates, saveAsTemplate, sha256, verifyKey } from "@/worker/store.ts";
 import { readBounded, takeBudget } from "@/worker/request-limits.ts";
 import { makeEnv, testCtx, type TestEnv } from "@test/helpers/fakes.ts";
-
-type UpstreamFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 type Created = { id: string; key: string };
 
@@ -186,61 +179,6 @@ describe("public service access boundaries", () => {
     const response = await request(env, "/.well-known/openai-apps-challenge");
     expect(response.headers.get("Content-Type")).toContain("text/plain");
     expect(await response.text()).toBe("review-token");
-  });
-});
-
-describe("browser GitHub sign-in", () => {
-  it("binds login to its browser, uses PKCE, issues a private session, and logs out", async () => {
-    const env = makeEnv();
-    env.env.GITHUB_CLIENT_ID = "test-client";
-    env.env.GITHUB_CLIENT_SECRET = "test-secret";
-
-    const upstream = vi.fn<UpstreamFetch>((input) =>
-      Promise.resolve(
-        String(input).includes("access_token")
-          ? Response.json({ access_token: "upstream-token" })
-          : Response.json({ id: 42 }),
-      ),
-    );
-
-    vi.stubGlobal("fetch", upstream);
-    const login = await request(env, "/api/auth/login");
-    const destination = new URL(requiredTestValue(login.headers.get("Location")));
-    expect(destination.searchParams.get("code_challenge_method")).toBe("S256");
-    const loginCookie = requiredTestValue(login.headers.get("Set-Cookie")).split(";")[0];
-    const callback = `/github/callback?state=${requiredTestValue(destination.searchParams.get("state"))}&code=test-code`;
-    expect((await request(env, callback)).status).toBe(400);
-
-    const signedIn = await worker.fetch(
-      new Request(`https://design.example${callback}`, { headers: { Cookie: loginCookie } }),
-      env.env,
-      testCtx(),
-    );
-
-    const tokenCall = requiredTestValue(
-      upstream.mock.calls.find(([input]) => String(input).includes("access_token")),
-    );
-
-    const params = stringRecordSchema.parse(JSON.parse(z.string().parse(tokenCall[1]?.body)));
-    expect(params.code_verifier).toBeTruthy();
-    expect(params.redirect_uri).toBe("https://design.example/github/callback");
-    expect(signedIn.status).toBe(302);
-    const cookies = requiredTestValue(signedIn.headers.get("Set-Cookie"));
-    expect(cookies).toContain("HttpOnly");
-    expect(cookies).toContain("Secure");
-    const token = requiredTestValue(cookies.match(/__Host-sdc-session=([a-f0-9-]+)/))[1];
-    expect((await request(env, "/api/diagrams", token)).status).toBe(200);
-    expect(JSON.stringify([...env.kv.values])).not.toContain("upstream-token");
-
-    const replay = await worker.fetch(
-      new Request(`https://design.example${callback}`, { headers: { Cookie: loginCookie } }),
-      env.env,
-      testCtx(),
-    );
-
-    expect(replay.status).toBe(400);
-    expect((await request(env, "/api/auth/logout", token, { method: "POST" })).status).toBe(204);
-    expect((await request(env, "/api/diagrams", token)).status).toBe(401);
   });
 });
 

@@ -7,7 +7,7 @@ verification, reviewer sign-in, or hosted model-driven review cases were perform
 
 ## Decision
 
-The local implementation now has GitHub browser sessions, owner-scoped libraries
+The local implementation now has Auth OIDC browser sessions, owner-scoped libraries
 and saved templates, owner-only permanent board deletion, explicit annotations
 for all 16 tools, bounded request bodies and WebSocket messages, scene/operation
 limits, rate budgets, and exact verification-token routing. These changes are
@@ -108,7 +108,7 @@ does not expose existing interview material.
 ## OAuth and host integration
 
 The authorization foundation is present. Tests cover consent/browser binding,
-GitHub PKCE, token exchange, incorrect verifier, code replay, resource mismatch,
+Auth OIDC PKCE, token exchange, incorrect verifier, code replay, resource mismatch,
 read/write enforcement, refresh, revocation, denial, and forged upstream state.
 These tests use fake infrastructure; repeat the real flow in the intended hosts.
 
@@ -123,7 +123,7 @@ These tests use fake infrastructure; repeat the real flow in the intended hosts.
   `openid` and `email` scopes, and a UserInfo endpoint returning verified email.
   These are absent. This is an Enterprise compatibility gap, not evidence that
   ordinary OAuth linking must fail. Adding it would require obtaining an actual
-  verified email; never synthesize `email_verified: true` from GitHub user ID.
+  verified email; never synthesize `email_verified: true` from an Auth subject.
 - Use a dedicated reviewer account and sample data. Verify reviewers can sign
   in without the publisher's phone, mailbox, MFA approval, or private network.
   Put credentials only in secure portal fields, never in the package.
@@ -210,7 +210,7 @@ and include them in the archive. Avoid new branding work unless needed.
 Screenshots are optional and should come from the actual hosted experience.
 
 Privacy policy drafting needs confirmed facts about diagram and image content,
-GitHub identity, Cloudflare storage and operational logs, callback recipients,
+Auth identity, Cloudflare storage and operational logs, callback recipients,
 retention, deletion, public sharing, and template copying. Do not claim zero
 collection, immediate erasure, or guaranteed privacy until implementation matches.
 

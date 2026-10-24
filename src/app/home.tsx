@@ -10,7 +10,7 @@ import {
   type DiagramPage,
   type Diagram,
 } from "./validation.ts";
-import { lazy, Suspense, useState } from "react";
+import { useState } from "react";
 import {
   useInfiniteQuery,
   useMutation,
@@ -22,10 +22,6 @@ import { getJson } from "./queries.ts";
 import { apiErrorMessage } from "./api-error.ts";
 import { CopyRow } from "./copy-row.tsx";
 import { linkFor, remember, setupCommands } from "./local.ts";
-
-const LazyChatgptLogin = lazy(() =>
-  import("./chatgpt-login.tsx").then((module) => ({ default: module.ChatgptLogin })),
-);
 
 function initialCursor(): string | null {
   return null;
@@ -45,26 +41,6 @@ export function Home() {
   });
 
   const signedIn = session.data?.signedIn;
-
-  const connected = useMutation({
-    mutationFn: async () => {
-      const result = await session.refetch();
-
-      if (result.error) {
-        throw result.error;
-      }
-
-      const returnTo = new URLSearchParams(location.search).get("authorize");
-
-      if (returnTo && result.data?.signedIn) {
-        const destination = new URL(returnTo, location.origin);
-
-        if (destination.origin === location.origin && destination.pathname === "/authorize") {
-          location.assign(destination.href);
-        }
-      }
-    },
-  });
 
   const templatesQuery = useQuery({
     queryKey: ["templates", signedIn],
@@ -232,18 +208,12 @@ export function Home() {
                 Sketch the architecture, work through the tradeoffs, and bring your interviewer or
                 agent onto the same canvas.
               </p>
-              {session.data?.chatgptEnabled && (
-                <Suspense fallback={<output>Loading ChatGPT sign-in…</output>}>
-                  <LazyChatgptLogin onConnected={() => connected.mutate()} />
-                </Suspense>
-              )}
-              {session.data?.githubEnabled !== false && (
+              {session.data?.authEnabled && (
                 <a className="primary action" href="/api/auth/login">
-                  Sign in with GitHub <span aria-hidden="true">→</span>
+                  Sign in <span aria-hidden="true">→</span>
                 </a>
               )}
-              {connected.error && <p role="alert">{connected.error.message}</p>}
-              {session.data?.githubEnabled === false && !session.data.chatgptEnabled && (
+              {session.data?.authEnabled === false && (
                 <p>
                   Sign-in is not configured on this workspace. Ask the workspace owner to enable it.
                 </p>
