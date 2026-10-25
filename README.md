@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/aranlucas/system-design-companion/actions/workflows/check.yml"><img src="https://github.com/aranlucas/system-design-companion/actions/workflows/check.yml/badge.svg" alt="Checks" /></a>
+  <a href="https://github.com/aranlucas/system-design-companion/actions/workflows/ci.yml"><img src="https://github.com/aranlucas/system-design-companion/actions/workflows/ci.yml/badge.svg" alt="Checks" /></a>
 </p>
 
 <p align="center">
