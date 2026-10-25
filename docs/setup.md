@@ -35,7 +35,7 @@ development OAuth app. Node MCP clients started outside Portless may need
 npx wrangler d1 create system-design-companion   # paste the ID into cloudflare.config.ts and the compatibility wrangler.jsonc if not auto-provisioned
 npx wrangler r2 bucket create system-design-companion
 npx wrangler kv namespace create system-design-companion-oauth  # update OAUTH_KV in both files
-pnpm deploy
+pnpm run deploy
 ```
 
 Then `claude mcp add --transport http system-design https://<your-worker>.workers.dev/mcp`
@@ -59,8 +59,8 @@ The issuer is `https://auth.aranlucas.workers.dev/api/auth`; discovery is availa
 Auth owns account sign-in; this app owns its HttpOnly session and MCP consent grants.
 Shared canvas links still allow collaborators to draw without signing in.
 
-An Auth operator must provision a confidential client through the service's
-`/api/auth/oauth2/create-client` endpoint, with these settings:
+Provision a confidential client through the service's
+`/api/auth/oauth2/register` endpoint (dynamic registration is enabled), with these settings:
 
 ```json
 {
@@ -68,17 +68,26 @@ An Auth operator must provision a confidential client through the service's
   "redirect_uris": ["https://<your-worker>.workers.dev/api/auth/callback"],
   "scope": "openid",
   "grant_types": ["authorization_code"],
-  "token_endpoint_auth_method": "client_secret_basic"
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "client_secret_basic",
+  "require_pkce": true
 }
 ```
 
+For production, register
+`https://system-design-companion.aranlucas.workers.dev/api/auth/callback` and install
+the credentials as Worker secrets. Registration responses contain a private
+`client_secret`; keep them out of logs and Git. The authenticated
+`/api/auth/oauth2/create-client` API is also available for operator-managed clients.
+
 Register each deployment's exact callback, including previews and local development.
 For Portless, use `https://system-design-companion.localhost/api/auth/callback`
-(or the branch origin printed by `pnpm dev`). Store the returned credentials as Worker secrets:
+(or the branch origin printed by `pnpm dev`). Save the returned credentials in a private
+JSON file with keys `AUTH_CLIENT_ID` and `AUTH_CLIENT_SECRET`, then deploy them as Worker secrets:
 
 ```sh
-npx wrangler secret put AUTH_CLIENT_ID
-npx wrangler secret put AUTH_CLIENT_SECRET
+pnpm build
+pnpm exec cf deploy --prebuilt --secrets-file /secure/path/app-auth-secrets.json
 ```
 
 For local development, set `AUTH_CLIENT_ID` and `AUTH_CLIENT_SECRET` in the ignored
