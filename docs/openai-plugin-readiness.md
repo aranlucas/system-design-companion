@@ -49,6 +49,18 @@ validation; never synthesize a verified email from an Auth subject.
 References: [authentication](https://developers.openai.com/plugins/build/auth),
 [tool annotations](https://developers.openai.com/plugins/plugin-guidelines#correct-annotation).
 
+## Draft listing copy
+
+- Display name: **System Design Companion**.
+- Subtitle: **Draw and review architecture**.
+- Description: **Create and edit system-design diagrams with your agent on a
+  shared canvas. Add standard architecture components and connections, tidy
+  layouts, save versions, and discuss design tradeoffs. Open the board in your
+  browser for live collaboration, screenshots, and Mermaid import.**
+- Starter prompts: **Create a URL-shortener architecture diagram.**;
+  **Review my shared diagram for scaling bottlenecks.**;
+  **Add a cache to my diagram and explain where it belongs.**
+
 ## Draft review cases
 
 All cases below are **not run in the intended OpenAI host**. Automated repository
