@@ -1,6 +1,6 @@
 import { elementAttribute, requiredElementAttribute } from "#app/shared/element-attributes.ts";
 import { requiredPoint } from "#app/shared/schemas.ts";
-// Layout problems in a scene, as counts. Shared by the tidy regression tests and scripts/tidy-check.ts.
+// Layout problem counts asserted by the tidy regression tests.
 import type { El } from "#app/shared/protocol.ts";
 import type { Scene } from "#app/worker/scene.ts";
 

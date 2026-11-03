@@ -10,8 +10,8 @@
     "test": "vitest run",
     "dev": "pnpm build:view && portless run vite dev",
     "build": "pnpm build:view && vite build",
-    "build:view": "node scripts/build-view.ts",
-    "check:bundle": "pnpm build && node scripts/check-bundle.ts",
+    "build:view": "vite build --config vite.views.config.ts",
+    "check:bundle": "pnpm build && vitest run --config vitest.build.config.ts",
     "deploy": "pnpm build && cf deploy --prebuilt",
     "lint": "oxlint --max-warnings 0",
     "format": "oxfmt .",
@@ -70,6 +70,7 @@
     "portless": "0.15.8",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
+    "vite-plugin-singlefile": "^2.3.4",
     "vitest": "^5.0.5"
   },
   "lint-staged": {
