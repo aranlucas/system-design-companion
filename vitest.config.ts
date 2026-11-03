@@ -11,7 +11,6 @@ export default defineConfig({
   },
   test: {
     include: ["test/**/*.test.ts"],
-    exclude: ["test/build/**"],
     environment: "node",
     server: {
       deps: {

@@ -28,7 +28,7 @@ read-only production observations still describe the unchanged deployment.
 
 - `pnpm check`: passed (TypeScript, lint, formatting).
 - `pnpm test`: passed, 286 tests across 16 files.
-- `pnpm check:bundle`: passed. Home JavaScript 82,203 bytes gzip; canvas static
+- `pnpm build`: passed. Home JavaScript 82,203 bytes gzip; canvas static
   JavaScript 756,503 bytes gzip; all Worker JavaScript 182,272 bytes gzip;
   self-contained MCP view 72,503 bytes gzip. Vite reports large canvas chunks
   and an ineffective dynamic import warning.
