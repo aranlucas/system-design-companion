@@ -1,7 +1,7 @@
 import { elementAttribute, requiredElementAttribute } from "@/shared/element-attributes.ts";
 import { requiredTestValue } from "@test/helpers/required-test-value.ts";
 // Tidy behaviours: arrow binding, frame fitting, groups, spacing, push direction, and regressions
-// measured with the same layout report scripts/tidy-check.ts prints.
+// verified with the layout metrics in test/helpers/layout-report.ts.
 import { describe, expect, it } from "vitest";
 import type { El, Point } from "@/shared/protocol.ts";
 import { Scene, graphView, type Op } from "@/worker/scene.ts";

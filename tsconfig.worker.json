@@ -21,7 +21,6 @@
     "test",
     "vitest.config.ts",
     "vite.views.config.ts",
-    "vitest.build.config.ts",
-    "scripts"
+    "vitest.build.config.ts"
   ]
 }

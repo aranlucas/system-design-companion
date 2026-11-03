@@ -124,7 +124,7 @@ pnpm test                               # vitest: scene engine, tidy, rooms, HTT
 pnpm check:bundle                       # production build + home-page and total Worker size budgets
 pnpm format                             # apply Oxfmt
 pnpm test test/scene-smoke.test.ts      # scene engine smoke regression
-node scripts/tidy-check.ts <raw.json>   # layout problems before/after tidy on a real export
+pnpm exec vitest run test/scene-tidy.test.ts  # layout quality and second-pass idempotence
 ```
 
 The component library and its scene builder load only when the library sidebar opens.
