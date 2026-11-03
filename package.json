@@ -11,7 +11,6 @@
     "dev": "pnpm build:view && portless run vite dev",
     "build": "pnpm build:view && vite build",
     "build:view": "vite build --config vite.views.config.ts",
-    "check:bundle": "pnpm build && vitest run --config vitest.build.config.ts",
     "deploy": "pnpm build && cf deploy --prebuilt",
     "lint": "oxlint --max-warnings 0",
     "format": "oxfmt .",

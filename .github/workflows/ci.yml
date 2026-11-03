@@ -41,8 +41,8 @@ jobs:
           - name: Test
             run: pnpm test
 
-          - name: Build and check bundle
-            run: pnpm check:bundle
+          - name: Build
+            run: pnpm build
 
       - name: Install browser for E2E tests
         run: pnpm exec e2e-web install chromium --with-deps

@@ -121,7 +121,7 @@ link is what authorizes access to a diagram.
 ```sh
 pnpm check                              # typecheck, Oxlint, Oxfmt
 pnpm test                               # vitest: scene engine, tidy, rooms, HTTP routes
-pnpm check:bundle                       # production build + home-page and total Worker size budgets
+pnpm build                       # native production build
 pnpm format                             # apply Oxfmt
 pnpm test test/scene-smoke.test.ts      # scene engine smoke regression
 pnpm exec vitest run test/scene-tidy.test.ts  # layout quality and second-pass idempotence
@@ -136,7 +136,7 @@ For a source-map breakdown, run `pnpm build:view`, then
 [bundle-analyzer](https://github.com/lhorie/bundle-analyzer) can inspect
 `.cloudflare/output/v0/workers/default/assets/assets` and
 `.cloudflare/output/v0/workers/default/bundle` separately (it does not recurse into directories).
-Its estimates are uncompressed; `check:bundle` measures actual output bytes and gzip sizes.
+Vite reports output bytes and compressed sizes during the production build.
 Run a normal `pnpm build` afterward to return to a build without source maps.
 
 See [improvements.md](improvements.md) for test coverage, findings, and related-project
