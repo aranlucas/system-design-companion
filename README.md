@@ -151,7 +151,7 @@ nobody asked it to look at.
 - `src/worker/oauth.ts` — MCP OAuth provider and the consent page.
 - `src/worker/events.ts` — MCP event catalog, subscriptions, and webhook delivery.
 - `src/shared/` — wire protocol and reusable component definitions.
-- `src/view/` plus `scripts/build-view.ts` — the inline MCP Apps canvas view.
+- `src/view/` plus `vite.views.config.ts` — the inline MCP Apps canvas view.
 - `docs/setup.md` — local/deployment setup and MCP client commands.
 - `docs/design.md` — detailed data flow, storage, auth, and operation contracts.
 

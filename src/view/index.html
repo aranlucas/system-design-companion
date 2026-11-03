@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- MCP App view template: scripts/build-view.ts inlines the bundle and writes public/mcp-view.html. -->
+<!-- MCP App view template: vite.views.config.ts inlines the bundle and writes public/mcp-view.html. -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -97,8 +97,6 @@
       <button id="full" type="button" hidden>Full screen</button>
     </header>
     <svg id="scene" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Diagram"></svg>
-    <script>
-      /* VIEW_SCRIPT */
-    </script>
+    <script type="module" src="./main.ts"></script>
   </body>
 </html>

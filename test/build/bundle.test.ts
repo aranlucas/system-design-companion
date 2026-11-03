@@ -1,6 +1,6 @@
-// Run after `pnpm build`. Count the full static import graph, not just the entry chunk:
+// Production artifact contracts, run with `pnpm check:bundle`. Count every static import:
 // moving eager code into a vendor chunk must not make the home-page budget pass.
-import assert from "node:assert/strict";
+import { expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -24,7 +24,7 @@ function staticFiles(entry: string, seen = new Set<string>()): Set<string> {
     return seen;
   }
 
-  assert.ok(manifest[entry], `Missing manifest entry: ${entry}`);
+  expect(manifest[entry], `Missing manifest entry: ${entry}`).toBeDefined();
   seen.add(entry);
 
   for (const dependency of manifest[entry].imports ?? []) {
@@ -52,11 +52,11 @@ const home = sizes(
 // Include every Worker chunk so splitting the Worker cannot hide its total size.
 const workerDir = ".cloudflare/output/v0/workers/default/bundle";
 
-const worker = sizes(
-  readdirSync(workerDir, { recursive: true, encoding: "utf8" })
-    .filter((file) => file.endsWith(".js") || file.endsWith(".mjs"))
-    .map((file) => join(workerDir, file)),
-);
+const workerFiles = readdirSync(workerDir, { recursive: true, encoding: "utf8" })
+  .filter((file) => file.endsWith(".js") || file.endsWith(".mjs"))
+  .map((file) => join(workerDir, file));
+
+const worker = sizes(workerFiles);
 
 const view = sizes([`${clientDir}/mcp-view.html`]);
 
@@ -78,13 +78,25 @@ console.table({
 // The shared Auth integration adds ~34 kB for openid-client and signed OIDC verification.
 const WORKER_BUDGET_BYTES = 750_000;
 
-assert.ok(home.raw < 300_000, `Home JavaScript exceeds 300 kB: ${home.raw} bytes`);
+it("keeps the complete home static import graph below 300 kB", () => {
+  expect(home.raw).toBeLessThan(300_000);
+});
 
-assert.ok(
-  worker.raw < WORKER_BUDGET_BYTES,
-  `Worker JavaScript exceeds ${WORKER_BUDGET_BYTES / 1000} kB: ${worker.raw} bytes`,
-);
+it("keeps all Worker chunks within the deployment budget", () => {
+  expect(workerFiles.length, "The build must contain Worker JavaScript").toBeGreaterThan(0);
+  expect(worker.raw).toBeLessThan(WORKER_BUDGET_BYTES);
+});
 
-assert.ok(manifest["src/app/library.ts"]?.isDynamicEntry, "Component library must be a lazy chunk");
+it("ships the component library as a dynamic entry outside the canvas static graph", () => {
+  expect(manifest["src/app/library.ts"]?.isDynamicEntry).toBe(true);
+  expect(canvasImports.has("src/app/library.ts")).toBe(false);
+});
 
-assert.ok(!canvasImports.has("src/app/library.ts"), "Canvas must not eagerly import the library");
+it.each(["mcp-view.html"])("ships %s with executable inline code and no external script chunks", (asset) => {
+  const html = readFileSync(`${clientDir}/${asset}`, "utf8");
+  expect(html).not.toContain("/* VIEW_SCRIPT */");
+  expect(html).not.toMatch(/<script\b[^>]*\bsrc=/i);
+  expect(html).toMatch(/<script[^>]*>[\s\S]+<\/script>/i);
+  expect(html).toContain("ui/initialize");
+  expect(html).toContain("__ORIGIN__");
+});

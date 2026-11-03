@@ -1,6 +1,9 @@
+// Native tooling cannot report this product's Scene.tidy layout metrics or rewrite get_scene exports.
+// Retained diagnostic uses the same Scene and layoutReport contracts exercised by test/scene-tidy.test.ts.
 // Usage: node scripts/tidy-check.ts <raw-elements.json> [out.json]
 // Reports layout problems before/after Scene.tidy() on a real diagram export (get_scene format=raw).
 import { readFileSync, writeFileSync } from "node:fs";
+import process from "node:process";
 import { storedElementsSchema } from "../src/shared/schemas.ts";
 import { Scene } from "../src/worker/scene.ts";
 import { layoutReport } from "../test/helpers/layout-report.ts";

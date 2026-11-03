@@ -15,5 +15,13 @@
       "@test/*": ["./test/*"]
     }
   },
-  "include": ["src/worker", "src/shared", "test", "vitest.config.ts"]
+  "include": [
+    "src/worker",
+    "src/shared",
+    "test",
+    "vitest.config.ts",
+    "vite.views.config.ts",
+    "vitest.build.config.ts",
+    "scripts"
+  ]
 }
