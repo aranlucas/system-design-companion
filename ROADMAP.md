@@ -6,12 +6,6 @@ Updated 2026-10-26. Proposed release order, not delivery dates or evidence of cu
 
 An interview candidate who wants structured practice and evidence of improvement, or an interviewer who wants a reviewable session.
 
-## Current baseline
-
-The product already has collaborative boards, an AI interviewer, high-level agent edits, checkpoints/versions, templates and MCP Apps. Adding another generic chat or diagram tool would duplicate the existing baseline.
-
-Planning evidence: [README](README.md) and [MCP surface](src/worker/mcp.ts) at `a22f4805b704`. This focused product pass does not claim a complete new code audit or live-provider validation.
-
 ## Prioritized releases
 
 | Order | Feature                             | User value and scope                                                                                                           | Release acceptance                                                                                                                                        |
@@ -35,4 +29,4 @@ Add the session recap and next-exercise handoff around the existing interviewer,
 
 No hiring-quality or validated skill-score claims. Keep user corrections and uncertainty visible. Coordinate shared canvas work with system-design-chatgpt rather than build competing copies of the same interview feature.
 
-Engineering work belongs in the milestone only when it enables that acceptance criterion. Prefer existing native libraries and test runners. Update this roadmap when a user-visible increment ships, recording the outcome and remaining limits rather than checking off implementation activity alone.
+Update this roadmap when a user-visible increment ships, recording the outcome and remaining limits.
