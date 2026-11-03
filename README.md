@@ -14,7 +14,6 @@
 
 <p align="center">
   <a href="#a-session">A session</a> ·
-  <a href="#what-you-can-do">Features</a> ·
   <a href="docs/setup.md">Set up</a> ·
   <a href="docs/design.md">Design</a>
 </p>
@@ -35,136 +34,37 @@ in. Agents authorize access through OAuth using your signed-in account.
 
 ## A session
 
-1. **Start a diagram**, blank or from a template: an interview framework (requirements,
-   estimates, API, high-level design, deep dives), a web-service baseline, a read-heavy
-   URL shortener or a realtime chat/feed fan-out.
-2. **Share the link** with your interviewer. Anyone with it can edit, and you see each
-   other's cursors and selections.
-3. **Tell your agent "join" and paste the link.** The first connection opens a browser
-   window to sign in and approve the agent. From then on, you can talk about
-   the diagram in plain words: "add a cache in front of the database", "split the write
-   path into a queue".
-4. **Point and ask.** Select something on the canvas and ask "what about this?". The
-   agent knows what you selected.
-5. **Go deeper.** Ask the agent to review the design against a system design rubric,
-   suggest the next step, or do back-of-envelope capacity estimates and write them onto
-   the canvas.
+1. Create a diagram, blank or from a template, and share its link with your interviewer.
+2. Tell your MCP agent “join” and paste the link. Approve its browser sign-in and consent
+   request on first connection.
+3. Draw together. Select a component to give “this” a precise meaning, then ask the agent
+   to add a cache, explain a trade-off, or review the design.
+4. Use **Versions** to restore an agent edit or save a named checkpoint. Save reusable
+   layouts as private templates.
 
-## What you can do
+The canvas includes a component library, frames, **Tidy** for local cleanup, and
+opt-in graph layout. Agents can import Mermaid, point at components, and take
+screenshots; those three actions require an open canvas tab. Supporting MCP Apps
+hosts can show an inline diagram preview.
 
-**Draw together**
+For solo practice, open **Interviewer**, connect your ChatGPT account, and select
+**Start interview**. It observes drawing changes and asks questions in the sidebar.
+Closing the sidebar pauses automatic requests; the conversation resets on reload.
+See [interviewer setup and limits](docs/setup.md#sidebar-interviewer).
 
-- Live multiplayer canvas with cursors, selections and presence, for any number of tabs.
-- A component library of editable icons: people, devices, phones, databases, servers,
-  caches, queues, load balancers, clouds, object storage, search, auth, DNS,
-  notifications and schedulers. Each icon connects, moves and resizes as a single piece.
-- Frames to organise a design into sections, like the interview framework's stages.
+## Set up and contribute
 
-**Work with the agent**
+[Setup](docs/setup.md) covers local development, Cloudflare resources, sign-in,
+MCP clients, and checks. [Architecture and contracts](docs/design.md) explains
+collaboration, persistence, security, and recovery. [Product priorities](ROADMAP.md)
+records the proposed practice-session releases and acceptance criteria.
 
-- Open **Interviewer** on the canvas to practice with an AI interviewer beside your
-  drawing. Connect your ChatGPT account and start the interview with gpt-5.5. It follows diagram changes, asks one question at a time, and lets you
-  answer in the sidebar. Pause it whenever you want; closing the sidebar pauses it.
-- Sign in through [Auth](https://auth.aranlucas.workers.dev/) to create and manage boards. Drawing on a shared board keeps
-  working through its share link; agents authenticate through OAuth.
-- The agent edits with high-level operations (add a component, connect two, rename,
-  restyle, group into a frame) rather than raw drawing commands. Its work shows up in
-  violet, and a toast tells you when it changed something.
-- It can **focus** everyone's view on a component, or **point** at it with a temporary
-  laser marker, without touching the diagram.
-- Each edit brings the changed components into view in every open tab.
-- It can import Mermaid diagrams, lay out a section as a layered graph when you ask,
-  and take a screenshot of the canvas to check its own work.
-- In chat apps that support [MCP Apps](https://modelcontextprotocol.io/extensions/apps)
-  (Claude Desktop and web, ChatGPT, VS Code), the conversation shows a live hand-drawn
-  picture of the canvas.
-- In ChatGPT, you can subscribe to a board and have the model react on its own: _"watch
-  this diagram and tell me what you'd add when I change it."_ It hears renames, the
-  checkpoints you save, and edits people make — not the agent's own edits, so it never
-  chases its own work.
+Treat share links as editing credentials. Owners can permanently delete a board,
+including its uploaded files and versions; independently saved template copies
+remain separate. Legacy boards stay reachable through their original links but
+need explicit ownership assignment to appear in private libraries.
 
-**Keep it readable**
-
-- **Tidy** cleans up without redesigning: it fixes overlaps, near-miss alignments and
-  uneven spacing, keeps connections inside their frame, and moves grouped artwork as one
-  piece. Select something first to tidy only that part.
-- Agent edits are tidied as they land, and long notes wrap automatically.
-
-**Never lose work**
-
-- Every agent edit is saved as a version first, named after the change, so one click in
-  **Versions** undoes it.
-- Save your own checkpoints, and save a good layout as a template to start from next time.
-
-**Find your diagrams**
-
-- **Your diagrams** lists your boards, including ones your agent created with the same
-  account identity. Saved templates are private to their owner.
-- Owners can permanently delete a board, its uploaded files, and saved versions.
-  Existing copies saved as separate templates remain independent.
-- Legacy boards stay accessible through their original links and are omitted from
-  private libraries until an operator explicitly assigns ownership.
-
-## Get started
-
-Run it locally or deploy it to Cloudflare, then connect your agent. It takes one command
-each: see [docs/setup.md](docs/setup.md).
-
-How it's built (a Cloudflare Worker with one Durable Object per diagram) is in
-[docs/design.md](docs/design.md).
-
-## Architecture at a glance
-
-```mermaid
-flowchart LR
-  Tabs[Candidate + interviewer tabs] -- WebSocket --> Worker[Cloudflare Worker]
-  Agent[MCP client] -- Streamable HTTP + OAuth --> Worker
-  Worker --> Room[One DiagramRoom Durable Object per board]
-  Room --> Scene[Pure scene engine]
-  Room --> DOSQL[(Durable Object SQLite)]
-  Worker --> D1[(D1 index + metadata)]
-  Room --> R2[(R2 snapshots + templates)]
-  Room -.->|signed webhooks| Chat[ChatGPT subscriptions]
-```
-
-`DiagramRoom` owns the live scene, presence, semantic operations, snapshots,
-and tab RPCs. The pure scene engine applies patches, tidy, and layout without
-I/O, which is why most behavior is covered by unit tests. The MCP endpoint and
-HTTP routes are thin adapters over the same room operations, so a human edit
-and an agent edit converge on the same state and persistence rules.
-
-The MCP endpoint sits behind OAuth so an agent has an identity; the canvas does
-not, because a share link is already the permission. Events flow back out of the
-room as signed webhooks, which is how a subscribed model hears about a change
-nobody asked it to look at.
-
-## Source map
-
-- `src/app/` — Vite/React shell, Excalidraw canvas, home page, and WebSocket
-  client.
-- `src/worker/index.ts` — Worker routes, static assets, and Durable Object
-  bindings.
-- `src/worker/room.ts` — live room state, collaboration, snapshots, and RPC.
-- `src/worker/scene.ts` — pure semantic scene operations and layout helpers.
-- `src/worker/mcp.ts` — MCP tools and prompts, including the MCP Apps view.
-- `src/worker/oidc.ts` — shared Auth OIDC client and verified account identity.
-- `src/worker/oauth.ts` — MCP OAuth provider and the consent page.
-- `src/worker/events.ts` — MCP event catalog, subscriptions, and webhook delivery.
-- `src/shared/` — wire protocol and reusable component definitions.
-- `src/view/` plus `vite.views.config.ts` — the inline MCP Apps canvas view.
-- `docs/setup.md` — local/deployment setup and MCP client commands.
-- `docs/design.md` — detailed data flow, storage, auth, and operation contracts.
-
-## Status and limits
-
-The project is deployable to Cloudflare Workers with D1, R2, KV, and Durable
-Objects. It is intentionally a capability-link collaboration tool: links are
-permissions, libraries are private, and owners can permanently erase boards.
-Treat a share link as an editing credential when sharing interview material.
-Agent operations snapshot before changing the board, but that is a recovery
-mechanism rather than an access-control system.
-
-MCP events are best-effort. There is no event log, so a subscription cannot
-replay what it missed, and a deployment restart can drop a delivery without
-telling anyone. Sign-in needs an interactive browser, so a non-interactive
-client (CI, a cron job) cannot authorize itself.
+Agents can subscribe to board changes through signed webhooks. Delivery is
+best-effort with no replay; see [event setup](docs/setup.md#mcp-events) before
+using this for monitoring. Interactive browser sign-in is required to authorize
+MCP clients.

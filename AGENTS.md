@@ -1,13 +1,5 @@
 # Agent notes
 
-## TypeScript: named types
-
-Declare object and tuple types as named module-level `type`s or `interface`s, not inline in signatures, casts, generics or function bodies. `pnpm lint` enforces this with `oxforge/no-inline-types` from the shared Oxforge preset.
-
-## File names
-
-Use kebab-case for source file names, including React components (for example, `copy-row.tsx`). `pnpm lint` enforces this with `unicorn/filename-case`. Component exports stay PascalCase. Unused lint suppression comments are errors.
-
 ## Scripts: native first
 
 Before adding a script file (`scripts/`, `bin/`, `tools/`, root `*.sh|*.py|*.mjs`) or a package script that runs one, take the first rung that works:
@@ -21,7 +13,7 @@ Before adding a script file (`scripts/`, `bin/`, `tools/`, root `*.sh|*.py|*.mjs
 
 ## Code: libraries first
 
-Before hand-writing general-purpose code, use a well-maintained library: actively released, widely adopted, typed, and a fit for this stack. Reach for one already in the dependencies first. Write custom code for domain logic and for the glue no library covers. A PR that adds a dependency says why it was picked; a PR that hand-writes something a library covers names the library and why it didn't fit.
+Use existing libraries for general-purpose behavior; custom code belongs to domain logic and integration glue. A PR adding a dependency explains its fit; a PR reimplementing library behavior explains why the library did not fit.
 
 - Canvas UI and scene operations → `@excalidraw/excalidraw`, including its existing menus, panels and export APIs.
 - Server state → TanStack Query (`useQuery`/`useMutation`).
@@ -31,8 +23,6 @@ Before hand-writing general-purpose code, use a well-maintained library: activel
 ### Canvas UI
 
 For canvas UI (button, panel, toast, overlay, cursor, dialog, menu item), read the exports in `node_modules/@excalidraw/excalidraw/dist/types/excalidraw/index.d.ts` and the props in `.../types.d.ts` (`ExcalidrawProps`, `ExcalidrawImperativeAPI`, `AppState`).
-
-Things we've learned from this:
 
 - **Styling.** Use Excalidraw's CSS tokens (`--island-bg-color`, `--color-surface-low`, `--text-primary-color`, `--color-primary`, …) and existing classes (`sidebar-trigger`) so the UI follows its light/dark theme. Those tokens only work inside `.excalidraw`, so render our UI inside it: pass it as `<Excalidraw>` children or slots, not as siblings.
 - **`<Footer>` is desktop-only.** Excalidraw doesn't render it on mobile, so every footer action also needs a `MainMenu` item.
