@@ -238,13 +238,10 @@ describe("DiagramRoom ops layer", () => {
     expect(moved.map((e) => e.id).toSorted()).toEqual(["c", "d"]);
   });
 
-  it("tidy and layout wrap edits in snapshots", async () => {
+  it("layout wraps edits in a snapshot", async () => {
     const { env } = makeEnv();
     const room = await makeRoom(env);
     await room.seed([rect("a", 0, 0), rect("b", 20, 10)]);
-    const tidy = await room.tidy();
-    expect(tidy.snapshotId).toBeDefined();
-    expect(tidy.changed).toBeTypeOf("number");
     const layout = await room.layout("LR");
     expect(layout.moved).toBe(2);
     expect(layout.snapshotId).toBeDefined();

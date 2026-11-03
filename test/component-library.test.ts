@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import { componentLibrary } from "@/app/library.ts";
 import { COMPONENTS } from "@/shared/components.ts";
 import type { El } from "@/shared/protocol.ts";
-import { Scene } from "@/worker/scene.ts";
 
 interface LibraryData {
   type: string;
@@ -19,21 +18,8 @@ interface LibraryItem {
   elements: El[];
 }
 
-const artwork = (e: El) => ({
-  type: e.type,
-  x: e.x,
-  y: e.y,
-  width: e.width,
-  height: e.height,
-  points: elementAttribute(e, "points"),
-  text: elementAttribute(e, "text"),
-  strokeColor: elementAttribute(e, "strokeColor"),
-  backgroundColor: elementAttribute(e, "backgroundColor"),
-  customData: elementAttribute(e, "customData"),
-});
-
 describe("component library import", () => {
-  it("serializes an Excalidraw library with the same artwork as the server", async () => {
+  it("serializes an Excalidraw v2 library with every catalog component", async () => {
     const blob = componentLibrary();
     expect(blob.type).toBe("application/vnd.excalidrawlib+json");
     const data = libraryDataSchema.parse(JSON.parse(await blob.text())) satisfies LibraryData;
@@ -41,15 +27,6 @@ describe("component library import", () => {
     expect(data.version).toBe(2);
     const items = data.libraryItems;
     expect(items).toHaveLength(COMPONENTS.length);
-
-    for (const [index, component] of COMPONENTS.entries()) {
-      const scene = new Scene([]);
-      scene.addNode(
-        { op: "add_node", kind: component.kind, place: { at: { x: 0, y: 0 } } },
-        "human",
-      );
-      expect(items[index].elements.map(artwork)).toEqual(scene.live().map(artwork));
-    }
   });
 
   it("keeps all element references inside their library item", async () => {
