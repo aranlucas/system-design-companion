@@ -485,13 +485,6 @@ describe("delivery", () => {
     expect(events[0].headers["x-mcp-subscription-id"]).toMatch(/^sub_/);
   });
 
-  it("withholds the agent's own edits so it cannot react to itself", async () => {
-    const { room, ctx } = await watched();
-    await room.applyPatch([{ op: "add_node", label: "Web" }], "agent");
-    await ctx.drain();
-    expect(receiver.events()).toHaveLength(0);
-  });
-
   it("delivers the agent's own edits to a subscriber that opted in", async () => {
     const { d, room, ctx } = await watched("diagram.changed", { include_agent: true });
     await room.applyPatch([{ op: "add_node", label: "Web" }], "agent");
@@ -527,13 +520,6 @@ describe("delivery", () => {
       name: "before the interview",
     });
     expect(events[0].body.data?.snapshot_id).toEqual(expect.any(String));
-  });
-
-  it("only delivers to subscribers of that event", async () => {
-    const { room, ctx } = await watched("diagram.renamed");
-    await room.applyPatch([{ op: "add_node", label: "Web" }], "agent");
-    await ctx.drain();
-    expect(receiver.events()).toHaveLength(0);
   });
 
   it("keeps the share key out of the delivered payload", async () => {

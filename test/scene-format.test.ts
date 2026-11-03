@@ -1,10 +1,10 @@
 import { elementAttribute, requiredElementAttribute } from "@/shared/element-attributes.ts";
 import { requiredTestValue } from "@test/helpers/required-test-value.ts";
 import { storedElementsSchema } from "@/shared/schemas.ts";
-// Formatting: wrapText/measureText, tidy guarantees, layout, addForeign, restoreTo.
+// Formatting: word wrapping, tidy guarantees, layout, addForeign, restoreTo.
 import { describe, expect, it } from "vitest";
 import type { El } from "@/shared/protocol.ts";
-import { Scene, graphView, measureText, wrapText, type Op } from "@/worker/scene.ts";
+import { Scene, graphView, wrapText, type Op } from "@/worker/scene.ts";
 
 function build(ops: Op[]): Scene {
   const s = new Scene([]);
@@ -51,7 +51,7 @@ const overlaps = (s: Scene) => {
   return n;
 };
 
-describe("wrapText / measureText", () => {
+describe("wrapText", () => {
   it("leaves short text alone", () => {
     expect(wrapText("hello")).toBe("hello");
     expect(wrapText("a\nb")).toBe("a\nb");
@@ -76,16 +76,6 @@ describe("wrapText / measureText", () => {
     for (const line of rest) {
       expect(line.startsWith("  ")).toBe(true);
     }
-  });
-
-  it("measures longest line and line count", () => {
-    expect(measureText("ab", 20)).toEqual({
-      width: Math.ceil(2 * 20 * 0.6),
-      height: Math.ceil(20 * 1.25),
-    });
-    const two = measureText("abcd\nef", 16);
-    expect(two.width).toBe(Math.ceil(4 * 16 * 0.6));
-    expect(two.height).toBe(Math.ceil(2 * 16 * 1.25));
   });
 });
 

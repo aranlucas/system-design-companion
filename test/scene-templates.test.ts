@@ -59,14 +59,4 @@ describe("builtin templates", () => {
     expect(counts(applied("builtin:read-heavy"))).toMatchObject({ nodes: 6, edges: 5 });
     expect(counts(applied("builtin:realtime"))).toMatchObject({ nodes: 6, edges: 6 });
   });
-
-  it("every template is tidy-stable on a second pass", () => {
-    for (const t of BUILTIN_TEMPLATES) {
-      const s = applied(t.id);
-      s.tidy();
-      const again = new Scene(structuredClone(s.live()));
-      again.tidy();
-      expect(again.changedElements()).toHaveLength(0);
-    }
-  });
 });

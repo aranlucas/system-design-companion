@@ -37,3 +37,12 @@ Things we've learned from this:
 - **Styling.** Use Excalidraw's CSS tokens (`--island-bg-color`, `--color-surface-low`, `--text-primary-color`, `--color-primary`, …) and existing classes (`sidebar-trigger`) so the UI follows its light/dark theme. Those tokens only work inside `.excalidraw`, so render our UI inside it: pass it as `<Excalidraw>` children or slots, not as siblings.
 - **`<Footer>` is desktop-only.** Excalidraw doesn't render it on mobile, so every footer action also needs a `MainMenu` item.
 - **`<Footer>` spacing.** Excalidraw exports its `FooterCenter` component as `Footer`. It has no leading margin, so our content needs its own `0.6em` gap from the undo/redo buttons.
+
+## Tests
+
+- Before adding a test, identify the specific behavior, a credible mistake it should catch, and an independently justified expected result.
+- Prefer small, fast, reliable tests whose failures identify the broken behavior. Use integration/E2E tests for interactions isolated tests cannot establish.
+- Do not reproduce implementation logic in assertions or mocks.
+- Protect contracts, not incidental internal structure.
+- Distinguish temporary development scaffolding from checks worth maintaining.
+- Never delete or weaken a failing test just to make the suite pass.

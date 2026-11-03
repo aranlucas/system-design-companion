@@ -123,7 +123,7 @@ pnpm check                              # typecheck, Oxlint, Oxfmt
 pnpm test                               # vitest: scene engine, tidy, rooms, HTTP routes
 pnpm build                       # native production build
 pnpm format                             # apply Oxfmt
-pnpm test test/scene-smoke.test.ts      # scene engine smoke regression
+pnpm test test/scene-ops.test.ts        # scene operation contracts
 pnpm exec vitest run test/scene-tidy.test.ts  # layout quality and second-pass idempotence
 ```
 
