@@ -459,19 +459,21 @@ export class DiagramRoom extends DurableObject<Env> {
           return;
         }
 
-        const accepted: El[] = [];
+        const winners = new Map<string, El>();
 
         for (const el of msg.elements) {
-          const cur = this.els.get(el.id);
+          const cur = winners.get(el.id) ?? this.els.get(el.id);
 
           if (
             !cur ||
             el.version > cur.version ||
             (el.version === cur.version && el.versionNonce < cur.versionNonce)
           ) {
-            accepted.push(el);
+            winners.set(el.id, el);
           }
         }
+
+        const accepted = [...winners.values()];
 
         if (accepted.length) {
           this.persist(accepted);

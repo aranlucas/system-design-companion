@@ -440,9 +440,13 @@ export async function copyFiles(env: Env, from: string, to: string, elements: El
     [...ids].map(async (fileId) => {
       const obj = await env.BUCKET.get(fileKey(from, fileId));
 
-      if (obj) {
-        await env.BUCKET.put(fileKey(to, fileId), obj.body, { httpMetadata: obj.httpMetadata });
+      if (!obj) {
+        throw new Error(
+          `Referenced image ${fileId} is not available. Retry after its upload completes.`,
+        );
       }
+
+      await env.BUCKET.put(fileKey(to, fileId), obj.body, { httpMetadata: obj.httpMetadata });
     }),
   );
 

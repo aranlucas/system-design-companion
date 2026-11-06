@@ -113,6 +113,8 @@ interface CanvasProps {
 /** The heart gesture being drawn: where, and when it started (it fades out). */
 type Heart = { x: number; y: number; startedAt: number };
 
+type ElementSignature = { version: number; versionNonce: number };
+
 type RpcMessage = Extract<ServerMessage, { type: "rpc" }>;
 
 const renameResultSchema = z.object({ name: z.string() });
@@ -316,7 +318,7 @@ export function Canvas({ id, k }: CanvasProps) {
     [],
   );
 
-  const synced = useRef(new Map<string, number>()); // element id → last version exchanged with the room
+  const synced = useRef(new Map<string, ElementSignature>()); // element id → last signature exchanged with the room
   const pendingSend = useRef<number | null>(null);
   const uploadedFiles = useRef(new Set<string>()); // file ids the room already has
   const libraryRequested = useRef(false);
@@ -634,8 +636,10 @@ export function Canvas({ id, k }: CanvasProps) {
 
         const merged = local.length ? reconcileElements(local, remote, api.getAppState()) : remote;
 
+        synced.current.clear();
+
         for (const e of msg.elements) {
-          synced.current.set(e.id, e.version);
+          synced.current.set(e.id, { version: e.version, versionNonce: e.versionNonce });
         }
 
         api.updateScene({
@@ -670,7 +674,7 @@ export function Canvas({ id, k }: CanvasProps) {
         );
 
         for (const e of msg.elements) {
-          synced.current.set(e.id, Math.max(e.version, synced.current.get(e.id) ?? 0));
+          synced.current.set(e.id, { version: e.version, versionNonce: e.versionNonce });
         }
 
         api.updateScene({
@@ -769,9 +773,15 @@ export function Canvas({ id, k }: CanvasProps) {
         continue;
       }
 
-      if (e.version > (synced.current.get(e.id) ?? 0)) {
+      const previous = synced.current.get(e.id);
+
+      if (
+        !previous ||
+        e.version > previous.version ||
+        (e.version === previous.version && e.versionNonce < previous.versionNonce)
+      ) {
         changed.push(e);
-        synced.current.set(e.id, e.version);
+        synced.current.set(e.id, { version: e.version, versionNonce: e.versionNonce });
       }
     }
 

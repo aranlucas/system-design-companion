@@ -365,6 +365,57 @@ describe("failed batch persistence", () => {
 });
 
 describe("concurrent-edit merge rule", () => {
+  it("reliability regression: invalid index cannot poison a room across hibernation", async () => {
+    const { env } = makeEnv();
+    const ctx = makeRoomCtx();
+    const room = new DiagramRoom(ctx.ctx, env);
+    await room.init("indices", "Indices");
+    const ws = makeWs();
+    const close = vi.fn();
+    ws.close = close;
+    await room.webSocketMessage(
+      ws,
+      JSON.stringify({
+        type: "update",
+        elements: [{ ...rect("bad", 0, 0), index: 42 }],
+      }),
+    );
+    expect(close).toHaveBeenCalledWith(1008, "Invalid canvas message");
+    expect(ctx.sql.elements.size).toBe(0);
+    const rehydrated = new DiagramRoom(ctx.ctx, env);
+    await ctx.drain();
+    expect(await rehydrated.getRaw()).toEqual([]);
+  });
+
+  // A duplicated wire ID must obey the same version/nonce contract as separate messages.
+  it.each([
+    { reverse: false, tie: false },
+    { reverse: true, tie: false },
+    { reverse: false, tie: true },
+    { reverse: true, tie: true },
+  ])(
+    "reliability regression: duplicate IDs preserve the winner ($reverse, $tie)",
+    async ({ reverse, tie }) => {
+      const { env } = makeEnv();
+      const ctx = makeRoomCtx();
+      const room = new DiagramRoom(ctx.ctx, env);
+      await room.init("duplicates", "Duplicates");
+      const sender = makeWs();
+      const observer = makeWs();
+      ctx.addWs(observer);
+      const winner = { ...rect("same", 300, 0), version: 3, versionNonce: 10 };
+      const loser = { ...winner, x: 100, version: tie ? 3 : 2, versionNonce: 20 };
+      const elements = reverse ? [loser, winner] : [winner, loser];
+      await room.webSocketMessage(sender, JSON.stringify({ type: "update", elements }));
+      expect(await room.getRaw()).toEqual([winner]);
+      expect(
+        storedElementSchema.parse(JSON.parse(requiredTestValue(ctx.sql.elements.get("same")))),
+      ).toEqual(winner);
+      const updates = observer.sent.map((raw) => serverMessageSchema.parse(JSON.parse(raw)));
+      expect(updates).toEqual([{ type: "update", elements: [winner], origin: "human" }]);
+    },
+  );
+
   it("higher version wins; stale versions are ignored", async () => {
     const { cur, send, versionOf } = await roomWithNode();
     await send({ ...structuredClone(cur), version: 0, versionNonce: 0 });
