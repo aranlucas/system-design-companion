@@ -1,3 +1,6 @@
+import type { z } from "zod/mini";
+import type { serverMessageSchema } from "./schemas.ts";
+
 // Wire protocol between canvas tabs and the DiagramRoom Durable Object.
 
 /** A point of a linear element, relative to the element's x/y. */
@@ -55,24 +58,7 @@ export type ClientMessage =
   | { type: "rpc_result"; reqId: string; ok: true; data: unknown }
   | { type: "rpc_result"; reqId: string; ok: false; error: string };
 
-export type ServerMessage =
-  | { type: "init"; elements: El[]; name: string }
-  | { type: "rename"; name: string }
-  | { type: "update"; elements: El[]; origin: "human" | "agent" | "system" }
-  | { type: "rpc"; reqId: string; method: "screenshot"; params: ScreenshotParams }
-  | { type: "rpc"; reqId: string; method: "mermaid"; params: MermaidParams }
-  | { type: "rpc"; reqId: string; method: "focus_view"; params: FocusViewParams }
-  | { type: "peers"; count: number }
-  /** Another tab's presence; relayed so Excalidraw can draw its cursor and selection. */
-  | {
-      type: "collaborator";
-      id: string;
-      username?: string;
-      selection?: string[];
-      pointer?: Pointer;
-      button?: "up" | "down";
-    }
-  | { type: "collaborator_left"; id: string };
+export type ServerMessage = z.infer<typeof serverMessageSchema>;
 
 export interface ScreenshotParams {
   elementIds?: string[];

@@ -1,6 +1,6 @@
 import { requiredValue } from "../shared/required-value.ts";
 import { componentByKind } from "../shared/components.ts";
-import type { Op, Scene } from "./scene.ts";
+import type { Op, Scene } from "../shared/scene.ts";
 
 const compact = (value: string, limit: number) => {
   const text = value.replaceAll(/\s+/g, " ").trim();

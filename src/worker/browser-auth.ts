@@ -1,10 +1,11 @@
+import { sha256 } from "../shared/identity.ts";
 import { HTTPException } from "hono/http-exception";
-import { sha256 } from "./store.ts";
+
 import { takeBudget } from "./request-limits.ts";
 
 const SESSION_SECONDS = 7 * 24 * 60 * 60;
 
-const LOGIN_SECONDS = 600;
+export const LOGIN_SECONDS = 600;
 
 type BrowserSession = { userId: string; expiresAt: number };
 

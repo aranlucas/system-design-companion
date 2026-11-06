@@ -1,7 +1,7 @@
 import * as oidc from "openid-client";
 import { HTTPException } from "hono/http-exception";
 import { AUTH_CALLBACK_PATH } from "./oauth-paths.ts";
-import type { LoginState } from "./browser-auth.ts";
+import { LOGIN_SECONDS, type LoginState } from "./browser-auth.ts";
 
 export const AUTH_ISSUER = "https://auth.aranlucas.workers.dev/api/auth";
 
@@ -35,7 +35,7 @@ export async function startLogin(request: Request, env: Env, returnTo: string) {
     state: oidc.randomState(),
     nonce: oidc.randomNonce(),
     verifier: oidc.randomPKCECodeVerifier(),
-    expiresAt: Date.now() + 600_000,
+    expiresAt: Date.now() + LOGIN_SECONDS * 1000,
     returnTo: loginDestination(request, returnTo),
   };
 

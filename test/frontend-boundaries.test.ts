@@ -15,8 +15,7 @@ const created = { id: "d", key: "k", name: "Diagram" };
 
 describe("small home-route validation boundaries", () => {
   it("preserves valid values and rejects malformed response and local-storage fields", () => {
-    assertBoundary(created, isCreatedDiagram);
-    expect(created.id).toBe("d");
+    expect(() => assertBoundary(created, isCreatedDiagram)).not.toThrow();
     expect(isBrowserSession({ signedIn: false })).toBe(true);
     expect(isBrowserSession({ signedIn: "false" })).toBe(false);
     expect(isTemplateList([{ id: "t", name: "Template", description: "" }])).toBe(true);

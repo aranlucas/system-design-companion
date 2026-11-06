@@ -39,13 +39,13 @@ export const socketMessageSchema = z.discriminatedUnion("type", [
     pointer: z.object({ x: coordinate, y: coordinate, tool: z.enum(["pointer", "laser"]) }),
     button: z.enum(["up", "down"]),
   }),
-  z
-    .object({
+  z.discriminatedUnion("ok", [
+    z.object({ type: z.literal("rpc_result"), reqId: id, ok: z.literal(true), data: z.unknown() }),
+    z.object({
       type: z.literal("rpc_result"),
       reqId: id,
-      ok: z.boolean(),
-      data: z.unknown().optional(),
-      error: z.string().max(1000).optional(),
-    })
-    .refine((message) => message.ok || message.error !== undefined),
+      ok: z.literal(false),
+      error: z.string().max(1000),
+    }),
+  ]),
 ]);

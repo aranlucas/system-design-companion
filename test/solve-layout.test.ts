@@ -1,6 +1,6 @@
 // The overlap-removal and alignment solver behind tidy, on its own.
 import { describe, expect, it } from "vitest";
-import { solveLayout, type Box, type LayoutItem } from "@/worker/solve-layout.ts";
+import { solveLayout, type Box, type LayoutItem } from "@/shared/solve-layout.ts";
 
 const GAP = 24;
 

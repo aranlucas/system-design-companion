@@ -2,7 +2,7 @@ import { requiredTestValue } from "@test/helpers/required-test-value.ts";
 // Built-in templates: every starter layout applies cleanly and reads back correctly.
 import { describe, expect, it } from "vitest";
 import { BUILTIN_TEMPLATES } from "@/worker/templates.ts";
-import { Scene, graphView } from "@/worker/scene.ts";
+import { Scene, graphView } from "@/shared/scene.ts";
 
 function applied(id: string): Scene {
   const t = requiredTestValue(BUILTIN_TEMPLATES.find((x) => x.id === id));

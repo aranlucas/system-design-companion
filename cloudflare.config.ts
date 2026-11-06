@@ -5,43 +5,6 @@ import { RUN_WORKER_FIRST } from "./src/worker/oauth-paths.ts";
 const COMPATIBILITY_FLAGS = ["nodejs_compat", "global_fetch_strictly_public"];
 
 export default defineConfig((ctx) => {
-  if (ctx.isPreview) {
-    return {
-      worker: {
-        exports: {
-          DiagramRoom: exports.durableObject({ storage: "sqlite" }),
-        },
-        name: "system-design-companion",
-        compatibilityDate: "2026-09-01",
-        compatibilityFlags: COMPATIBILITY_FLAGS,
-        entrypoint: "src/worker/index.ts",
-        observability: {
-          enabled: true,
-        },
-        assets: {
-          notFoundHandling: "single-page-application",
-          runWorkerFirst: RUN_WORKER_FIRST,
-        },
-        env: {
-          DB: bindings.d1({
-            name: "system-design-companion-preview",
-            id: "511519d3-cbd6-44be-8f66-a67e835bc5eb",
-          }),
-          BUCKET: bindings.r2({
-            name: "system-design-companion-preview",
-          }),
-          // bindings.kv takes only the id; wrangler.jsonc is where the name lives.
-          OAUTH_KV: bindings.kv({ id: "274ca9d72ca54cb39cb05ca61d50b21b" }),
-          ROOM: bindings.durableObject({
-            worker: "system-design-companion",
-            exportName: "DiagramRoom",
-          }),
-          ASSETS: bindings.assets(),
-        },
-      },
-    };
-  }
-
   return {
     worker: {
       exports: {
@@ -60,14 +23,20 @@ export default defineConfig((ctx) => {
       },
       env: {
         DB: bindings.d1({
-          name: "system-design-companion",
-          id: "821bb52f-1ad9-4534-9db0-09232af6e753",
+          name: ctx.isPreview ? "system-design-companion-preview" : "system-design-companion",
+          id: ctx.isPreview
+            ? "511519d3-cbd6-44be-8f66-a67e835bc5eb"
+            : "821bb52f-1ad9-4534-9db0-09232af6e753",
         }),
         BUCKET: bindings.r2({
-          name: "system-design-companion",
+          name: ctx.isPreview ? "system-design-companion-preview" : "system-design-companion",
         }),
         // bindings.kv takes only the id; wrangler.jsonc is where the name lives.
-        OAUTH_KV: bindings.kv({ id: "41212830bf3f4cf983bfe78f6e86a55d" }),
+        OAUTH_KV: bindings.kv({
+          id: ctx.isPreview
+            ? "274ca9d72ca54cb39cb05ca61d50b21b"
+            : "41212830bf3f4cf983bfe78f6e86a55d",
+        }),
         ROOM: bindings.durableObject({
           worker: "system-design-companion",
           exportName: "DiagramRoom",

@@ -1,7 +1,7 @@
 import { elementAttribute } from "@/shared/element-attributes.ts";
 // Placement hints, overlap nudging, frame inference and frame moves.
 import { describe, expect, it } from "vitest";
-import { Scene, type Op } from "@/worker/scene.ts";
+import { Scene, type Op } from "@/shared/scene.ts";
 
 function build(ops: Op[]): Scene {
   const s = new Scene([]);

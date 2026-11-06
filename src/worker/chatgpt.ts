@@ -1,10 +1,10 @@
+import { ensureSchema } from "./database.ts";
 import {
   createChatGPTHandler,
   type ChatGPTHandler,
   type KeyValueStore,
 } from "@opencoredev/loginwithchatgpt-server";
 import { HTTPException } from "hono/http-exception";
-import { ensureSchema } from "./store.ts";
 
 interface StoredValue {
   value: string;

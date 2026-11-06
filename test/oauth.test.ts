@@ -1,3 +1,4 @@
+import { sha256 } from "@/shared/identity.ts";
 import { promiseResult } from "@/shared/promise-result.ts";
 import { requiredTestValue } from "@test/helpers/required-test-value.ts";
 import type { JsonInput } from "@test/helpers/response-schemas.ts";
@@ -7,7 +8,7 @@ import { jsonObjectSchema, rpcResultSchema, tokensSchema } from "@test/helpers/r
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "@/worker/index.ts";
 import { deliverDiagramEvent } from "@/worker/events.ts";
-import { createDiagram, shareLink, sha256 } from "@/worker/store.ts";
+import { createDiagram, shareLink } from "@/worker/store.ts";
 import { makeEnv, testCtx, type TestEnv } from "@test/helpers/fakes.ts";
 
 const ORIGIN = "https://design.example";

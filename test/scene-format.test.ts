@@ -4,7 +4,7 @@ import { storedElementsSchema } from "@/shared/schemas.ts";
 // Formatting: word wrapping, tidy guarantees, layout, addForeign, restoreTo.
 import { describe, expect, it } from "vitest";
 import type { El } from "@/shared/protocol.ts";
-import { Scene, graphView, wrapText, type Op } from "@/worker/scene.ts";
+import { Scene, graphView, wrapText, type Op } from "@/shared/scene.ts";
 
 function build(ops: Op[]): Scene {
   const s = new Scene([]);

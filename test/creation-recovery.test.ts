@@ -1,3 +1,4 @@
+import { ensureSchema } from "@/worker/database.ts";
 import { promiseResult } from "@/shared/promise-result.ts";
 import { requiredTestValue } from "@test/helpers/required-test-value.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -6,7 +7,6 @@ import { DiagramRoom } from "@/worker/room.ts";
 import {
   createDiagram,
   deleteDiagram,
-  ensureSchema,
   listDiagrams,
   listTemplates,
   ownsDiagram,

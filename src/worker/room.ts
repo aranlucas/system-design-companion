@@ -21,7 +21,7 @@ import type {
   MermaidParams,
   FocusViewParams,
 } from "../shared/protocol.ts";
-import { Scene, graphView, type Author, type Op } from "./scene.ts";
+import { Scene, graphView, type Author, type Op } from "../shared/scene.ts";
 import { deliverDiagramEvent, type DiagramEventData } from "./events.ts";
 import { patchSnapshotName } from "./patch-name.ts";
 import { copyFiles } from "./store.ts";
@@ -428,19 +428,7 @@ export class DiagramRoom extends DurableObject<Env> {
     let msg: ClientMessage;
 
     try {
-      const parsed = socketMessageSchema.parse(JSON.parse(text));
-
-      if (parsed.type !== "rpc_result") {
-        msg = parsed;
-      } else if (parsed.ok) {
-        msg = { ...parsed, ok: true, data: parsed.data };
-      } else {
-        if (parsed.error === undefined) {
-          throw new Error("Missing RPC error");
-        }
-
-        msg = { ...parsed, ok: false, error: parsed.error };
-      }
+      msg = socketMessageSchema.parse(JSON.parse(text));
     } catch {
       ws.close(1008, "Invalid canvas message");
 
