@@ -55,7 +55,7 @@ export type ClientMessage =
       username?: string;
     }
   | { type: "pointer"; pointer: Pointer; button: "up" | "down" }
-  | { type: "rpc_result"; reqId: string; ok: true; data: unknown }
+  | { type: "rpc_result"; reqId: string; ok: true; data?: unknown }
   | { type: "rpc_result"; reqId: string; ok: false; error: string };
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>;

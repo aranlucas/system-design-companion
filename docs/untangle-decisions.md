@@ -89,3 +89,12 @@ remaining imports, scene consumers, authentication, RPC handling, event delivery
 resource identities and tests; retained special cases remain justified. Local
 lint, formatting and whitespace checks passed. Runtime regression validation is
 pending PR CI; no local tests, builds, benchmarks or browser checks ran.
+
+## CI correction
+
+PR CI run 42268122985 passed typecheck, lint and build and 319 unit tests,
+but the new omitted-data RPC case caught an introduced compatibility regression.
+Zod requires unknown fields to be explicitly optional in the installed version.
+Keep successful RPC data optional in both the wire schema and ClientMessage;
+consumers already validate the method-specific payload before using it. The
+regression test remains unchanged. No local reproduction/test execution.

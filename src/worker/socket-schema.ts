@@ -40,7 +40,12 @@ export const socketMessageSchema = z.discriminatedUnion("type", [
     button: z.enum(["up", "down"]),
   }),
   z.discriminatedUnion("ok", [
-    z.object({ type: z.literal("rpc_result"), reqId: id, ok: z.literal(true), data: z.unknown() }),
+    z.object({
+      type: z.literal("rpc_result"),
+      reqId: id,
+      ok: z.literal(true),
+      data: z.unknown().optional(),
+    }),
     z.object({
       type: z.literal("rpc_result"),
       reqId: id,
