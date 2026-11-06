@@ -1,18 +1,18 @@
-import { requiredValue } from "../shared/required-value.ts";
+import { newId } from "./identity.ts";
+import { requiredValue } from "./required-value.ts";
 import {
   elementAttribute,
   requiredElementAttribute,
   type ElementAttributes,
-} from "../shared/element-attributes.ts";
+} from "./element-attributes.ts";
 import { z } from "zod";
-import { elementPoints, requiredPoint } from "../shared/schemas.ts";
-import { errorMessage } from "../shared/errors.ts";
-// Scene engine: semantic ops ⇄ Excalidraw elements. Pure logic, no Workers APIs.
+import { elementPoints, requiredPoint } from "./schemas.ts";
+import { errorMessage } from "./errors.ts";
 import { graphlib, layout as layoutGraph } from "@dagrejs/dagre";
 import { generateKeyBetween } from "fractional-indexing";
-import { iconElements } from "../shared/icons.ts";
-import { componentByKind } from "../shared/components.ts";
-import { AGENT_STROKE, type El, type Point } from "../shared/protocol.ts";
+import { iconElements } from "./icons.ts";
+import { componentByKind } from "./components.ts";
+import { AGENT_STROKE, type El, type Point } from "./protocol.ts";
 import {
   pointAt,
   routeOrthogonal,
@@ -279,18 +279,6 @@ type AddFrameOp = Extract<Op, { op: "add_frame" }>;
 type AddNoteOp = Extract<Op, { op: "add_note" }>;
 
 const rnd = () => Math.floor(Math.random() * 2 ** 31);
-
-const ID_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-";
-
-export function newId(): string {
-  let s = "";
-
-  for (let i = 0; i < 21; i++) {
-    s += ID_CHARS[Math.floor(Math.random() * ID_CHARS.length)];
-  }
-
-  return s;
-}
 
 const NOTE_WRAP = 64; // chars per line for plain-text notes
 

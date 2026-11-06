@@ -2,14 +2,11 @@ import { z } from "zod";
 import { elementAttribute } from "@/shared/element-attributes.ts";
 import { requiredTestValue } from "@test/helpers/required-test-value.ts";
 import { storedElementSchema, serverMessageSchema } from "@/shared/schemas.ts";
-// DiagramRoom on fake storage: ops layer, snapshots, merge rule, presence.
 import { describe, expect, it, vi } from "vitest";
 import { AGENT_STROKE, type El, type ClientMessage } from "@/shared/protocol.ts";
 import { DiagramRoom, TOMBSTONE_TTL_MS } from "@/worker/room.ts";
-import type { Op } from "@/worker/scene.ts";
+import type { Op } from "@/shared/scene.ts";
 import { makeEnv, makeRoom, makeRoomCtx, makeWs } from "@test/helpers/fakes.ts";
-
-/** The socket handlers, called directly with a fake socket. */
 
 function graphOf(room: DiagramRoom) {
   return room.getGraph();

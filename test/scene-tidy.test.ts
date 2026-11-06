@@ -4,7 +4,7 @@ import { requiredTestValue } from "@test/helpers/required-test-value.ts";
 // verified with the layout metrics in test/helpers/layout-report.ts.
 import { describe, expect, it } from "vitest";
 import type { El, Point } from "@/shared/protocol.ts";
-import { Scene, graphView, type Op } from "@/worker/scene.ts";
+import { Scene, graphView, type Op } from "@/shared/scene.ts";
 import { BUILTIN_TEMPLATES } from "@/worker/templates.ts";
 import { DISPATCH_ARCHITECTURE } from "@test/fixtures/dispatch-architecture.ts";
 import { layoutReport } from "@test/helpers/layout-report.ts";

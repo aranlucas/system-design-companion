@@ -1,4 +1,4 @@
-import type { Op } from "./scene.ts";
+import type { Op } from "../shared/scene.ts";
 
 export interface BuiltinTemplate {
   id: string;

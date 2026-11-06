@@ -17,7 +17,7 @@ import { z } from "zod";
 import { COMPONENT_KINDS, COMPONENTS } from "../shared/components.ts";
 import { registerEvents } from "./events.ts";
 import type { McpPrincipal } from "./principal.ts";
-import { GEOMETRIES, type Op } from "./scene.ts";
+import { GEOMETRIES, type Op } from "../shared/scene.ts";
 import { RUBRIC } from "./rubric.ts";
 import {
   createDiagram,

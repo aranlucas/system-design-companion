@@ -4,7 +4,7 @@ import { requiredTestValue } from "@test/helpers/required-test-value.ts";
 import { describe, expect, it } from "vitest";
 import { AGENT_STROKE } from "@/shared/protocol.ts";
 import { COMPONENTS } from "@/shared/components.ts";
-import { Scene, type Author, type Op } from "@/worker/scene.ts";
+import { Scene, type Author, type Op } from "@/shared/scene.ts";
 
 function fresh(): Scene {
   return new Scene([]);

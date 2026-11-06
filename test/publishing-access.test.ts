@@ -1,9 +1,10 @@
+import { sha256 } from "@/shared/identity.ts";
 import { promiseResult } from "@/shared/promise-result.ts";
 import { requiredTestValue } from "@test/helpers/required-test-value.ts";
 import { createdSchema, librarySchema } from "@test/helpers/response-schemas.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "@/worker/index.ts";
-import { createDiagram, listTemplates, saveAsTemplate, sha256, verifyKey } from "@/worker/store.ts";
+import { createDiagram, listTemplates, saveAsTemplate, verifyKey } from "@/worker/store.ts";
 import { readBounded, takeBudget } from "@/worker/request-limits.ts";
 import { makeEnv, testCtx, type TestEnv } from "@test/helpers/fakes.ts";
 

@@ -20,7 +20,7 @@ Owners sign in through shared Auth to create diagrams and manage their private l
 
 ## Capabilities and Constraints
 
-React/Vite frontend with a Cloudflare Worker, D1, R2, and Durable Objects. Keep persistence, capabilities, creation compensation, socket reconciliation, versions, and keyboard/touch behavior. Use Excalidraw components and theme tokens inside the canvas. Do not modify src/worker/route-orthogonal.ts; the benchmark baseline is frozen. Preserve public repository visibility and existing deployment/access settings.
+React/Vite frontend with a Cloudflare Worker, D1, R2, and Durable Objects. Keep persistence, capabilities, creation compensation, socket reconciliation, versions, and keyboard/touch behavior. Use Excalidraw components and theme tokens inside the canvas. Do not modify src/shared/route-orthogonal.ts; the benchmark baseline is frozen. Preserve public repository visibility and existing deployment/access settings.
 
 ## Brand Commitments
 

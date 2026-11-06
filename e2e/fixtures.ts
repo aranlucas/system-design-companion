@@ -1,7 +1,7 @@
 import { test as base } from "@e2e-dev/web";
 import { z } from "zod";
 import { storedElementsSchema } from "../src/shared/schemas.ts";
-import { Scene, graphView } from "../src/worker/scene.ts";
+import { Scene, graphView } from "../src/shared/scene.ts";
 import { live } from "./web-engine.ts";
 
 interface MockWorkspace {

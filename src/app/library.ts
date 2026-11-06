@@ -1,5 +1,5 @@
 import { COMPONENTS } from "../shared/components.ts";
-import { Scene } from "../worker/scene.ts";
+import { Scene } from "../shared/scene.ts";
 
 /** Excalidraw's library importer restores and validates the serialized scene elements. */
 export function componentLibrary(): Blob {

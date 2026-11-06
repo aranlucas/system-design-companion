@@ -1,7 +1,8 @@
+import { sha256 } from "@/shared/identity.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import worker from "@/worker/index.ts";
-import { sha256 } from "@/worker/store.ts";
+
 import { AUTH_ISSUER } from "@/worker/oidc.ts";
 import { authServer } from "@test/helpers/auth-server.ts";
 import { makeEnv, testCtx } from "@test/helpers/fakes.ts";

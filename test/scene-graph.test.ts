@@ -2,7 +2,7 @@ import { requiredTestValue } from "@test/helpers/required-test-value.ts";
 // Read model: graph(), graphView(), selection, inferred edges, sketches.
 import { describe, expect, it } from "vitest";
 import type { El, Point } from "@/shared/protocol.ts";
-import { Scene, graphView, type Op } from "@/worker/scene.ts";
+import { Scene, graphView, type Op } from "@/shared/scene.ts";
 
 let seq = 0;
 

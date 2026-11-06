@@ -1,4 +1,4 @@
-import { requiredValue } from "../shared/required-value.ts";
+import { requiredValue } from "./required-value.ts";
 // Orthogonal connector routing: right-angle routes that go around boxes, cross each other as
 // little as possible, and leave room for their labels. Arrows are routed one at a time (shortest
 // first) with A* over a sparse grid built from obstacle edges and the channels between them.

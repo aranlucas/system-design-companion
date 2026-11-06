@@ -1,3 +1,5 @@
+import { sha256 } from "../shared/identity.ts";
+import { ensureSchema } from "./database.ts";
 import { requiredValue } from "../shared/required-value.ts";
 import type { JsonValue } from "../shared/schemas.ts";
 // MCP Events: the catalog, subscription storage, and signed webhook delivery.
@@ -16,7 +18,7 @@ import { z } from "zod";
 import { boundedResponse } from "./bounded-response.ts";
 import { callbackAllowed, checkCallbackDestination } from "./webhook-destination.ts";
 import type { McpPrincipal } from "./principal.ts";
-import { ensureSchema, parseLink, sha256, verifyKey } from "./store.ts";
+import { parseLink, verifyKey } from "./store.ts";
 
 /** Implementation-defined JSON-RPC codes from the MCP Events draft. */
 const ERR_NOT_FOUND = -32011;
@@ -98,7 +100,6 @@ type DeliveryBody =
       cursor: null;
     };
 
-/** Row shape read back from D1. */
 type SubscriptionRow = {
   id: string;
   user_id: string;
@@ -209,7 +210,6 @@ export function resetVerificationCache(): void {
   verified.clear();
 }
 
-/** Register events/list, events/subscribe and events/unsubscribe on one server. */
 export function registerEvents(server: McpServer, env: Env, principal: McpPrincipal): void {
   const low = server.server;
   low.setRequestHandler(

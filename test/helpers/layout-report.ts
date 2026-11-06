@@ -2,7 +2,7 @@ import { elementAttribute, requiredElementAttribute } from "#app/shared/element-
 import { requiredPoint } from "#app/shared/schemas.ts";
 // Layout problem counts asserted by the tidy regression tests.
 import type { El } from "#app/shared/protocol.ts";
-import type { Scene } from "#app/worker/scene.ts";
+import type { Scene } from "#app/shared/scene.ts";
 
 type Pt = [number, number];
 
