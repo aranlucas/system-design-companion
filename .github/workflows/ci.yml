@@ -89,7 +89,7 @@ jobs:
           assert result['status'] == 'failed', result
           error = result['attempts'][0]['error']
           assert error['code'] == 'ASSERTION_FAILED', error
-          assert 'toBe' in error['message'], error
+          assert 'Local conflict winner was not resent after reconnect' in error['message'], error
           PYCODE
 
       - name: Restore audited implementation

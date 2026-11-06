@@ -1,3 +1,5 @@
+import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
+import { storedElementsSchema } from "../src/shared/schemas.ts";
 import { expect } from "e2e";
 import { test } from "./fixtures.ts";
 import { live } from "./web-engine.ts";
@@ -140,31 +142,55 @@ test("reliability regression: reconnect resends the equal-version local winner",
   await browser.mouse.up();
   await expect.poll(() => workspace.elements.length).toBeGreaterThan(0);
 
-  const local = workspace.elements
-    .flatMap((update) => update.elements)
-    .find((el) => el.type === "rectangle");
+  await browser.keyboard.press("Escape");
+
+  const scene = storedElementsSchema.parse(
+    await live.page().evaluate(() => {
+      // The app deliberately exposes this debugging API; inspect the committed canvas state.
+      const canvas = window as Window & { excalidrawAPI: ExcalidrawImperativeAPI };
+
+      return canvas.excalidrawAPI.getSceneElements();
+    }),
+  );
+
+  const local = scene.find((el) => el.type === "rectangle");
 
   expect(local).toBeDefined();
 
   if (!local) {
     throw new Error("Drawing did not produce a rectangle");
   }
+
+  await expect
+    .poll(() =>
+      workspace.elements
+        .flatMap((update) => update.elements)
+        .some(
+          (el) =>
+            el.id === local.id &&
+            el.version === local.version &&
+            el.versionNonce === local.versionNonce,
+        ),
+    )
+    .toBe(true);
   workspace.remoteElements = [{ ...local, x: local.x + 200, versionNonce: local.versionNonce + 1 }];
   const before = workspace.elements.length;
   await workspace.disconnect();
   await expect.poll(() => workspace.connections).toBe(2);
   await expect
-    .poll(() =>
-      workspace.elements
-        .slice(before)
-        .flatMap((update) => update.elements)
-        .some(
-          (el) =>
-            el.id === local.id &&
-            el.x === local.x &&
-            el.version === local.version &&
-            el.versionNonce === local.versionNonce,
-        ),
+    .poll(
+      () =>
+        workspace.elements
+          .slice(before)
+          .flatMap((update) => update.elements)
+          .some(
+            (el) =>
+              el.id === local.id &&
+              el.x === local.x &&
+              el.version === local.version &&
+              el.versionNonce === local.versionNonce,
+          ),
+      { message: "Local conflict winner was not resent after reconnect" },
     )
     .toBe(true);
 });
