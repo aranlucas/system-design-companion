@@ -24,6 +24,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Set up pnpm, Node.js, and dependencies
         uses: pnpm/setup@a0881977cd8ea73b1ed212236c99ca10dcc80cf4 # v3.1.1
@@ -50,10 +51,67 @@ jobs:
       - name: Test whiteboard journeys
         run: pnpm test:e2e
 
+      - name: Reproduce storage and protocol defects on audit baseline
+        run: |
+          # Native git and runner filtering keep reproduction in CI without a custom script.
+          for file in src/worker/room.ts src/worker/store.ts src/worker/events.ts src/worker/socket-schema.ts src/app/canvas.tsx; do
+            git show 6a6c919:$file > "$file"
+          done
+          set +e
+          pnpm exec vitest run test/room.test.ts test/creation-recovery.test.ts test/mcp-events.test.ts -t 'reliability regression' --reporter=json --outputFile=baseline-vitest.json
+          result=$?
+          set -e
+          test "$result" -eq 1
+          python - <<'PYCODE'
+          import json
+          report = json.load(open('baseline-vitest.json'))
+          failed = [t for s in report['testResults'] for t in s['assertionResults'] if t['status'] == 'failed']
+          for label in ['duplicate IDs', 'missing image', 'library capability', 'invalid index']:
+              matches = [t for t in failed if label in t['fullName']]
+              assert matches, f'Expected baseline behavior failure: {label}'
+              assert all(t['failureMessages'] for t in matches)
+          assert report['numFailedTests'] == 8, report
+          PYCODE
+
+      - name: Reproduce reconnect defect on audit baseline
+        run: |
+          set +e
+          pnpm exec e2e run --grep 'reliability regression' --output .e2e-baseline
+          result=$?
+          set -e
+          test "$result" -eq 1
+          python - <<'PYCODE'
+          import json
+          report = json.load(open('.e2e-baseline/report.json'))['run']
+          results = [r for r in report['results'] if r.get('selected', True)]
+          assert len(results) == 1, results
+          result = results[0]
+          assert result['status'] == 'failed', result
+          error = result['attempts'][0]['error']
+          assert error['code'] == 'ASSERTION_FAILED', error
+          assert 'toBe' in error['message'], error
+          PYCODE
+
+      - name: Restore audited implementation
+        if: always()
+        run: git restore src/worker/room.ts src/worker/store.ts src/worker/events.ts src/worker/socket-schema.ts src/app/canvas.tsx
+
+      - name: Upload baseline regression evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: audit-baseline-regressions
+          path: |
+            baseline-vitest.json
+            .e2e-baseline/
+          include-hidden-files: true
+          retention-days: 7
+
       - name: Upload E2E evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-results
+          include-hidden-files: true
           path: .e2e/
           retention-days: 7

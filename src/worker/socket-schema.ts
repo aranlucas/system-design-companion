@@ -15,6 +15,7 @@ const element = z.looseObject({
   version: z.number().int().nonnegative(),
   versionNonce: z.number().int(),
   isDeleted: z.boolean(),
+  index: z.string().nullable().optional(),
 });
 
 export const socketMessageSchema = z.discriminatedUnion("type", [

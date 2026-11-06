@@ -702,7 +702,9 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-type KeyHashRow = { key_hash: string };
+type AccessKeyRow = { access_key: string };
+
+type KeyHashRow = { key_hash: string; is_template: number };
 
 function validateArguments(
   name: string,
@@ -787,16 +789,27 @@ async function activeSubscription(env: Env, sub: Subscription): Promise<Subscrip
   }
 
   const key = await env.DB.prepare(
-    "SELECT key_hash FROM diagrams WHERE id = ? AND NOT EXISTS (SELECT 1 FROM deleted_diagrams WHERE diagram_id = ?)",
+    "SELECT key_hash, is_template FROM diagrams WHERE id = ? AND NOT EXISTS (SELECT 1 FROM deleted_diagrams WHERE diagram_id = ?)",
   )
     .bind(sub.diagramId, sub.diagramId)
     .first<KeyHashRow>();
 
+  const library =
+    key && !key.is_template && key.key_hash !== sub.keyHash
+      ? await env.DB.prepare("SELECT access_key FROM diagram_library WHERE diagram_id = ?")
+          .bind(sub.diagramId)
+          .first<AccessKeyRow>()
+      : null;
+
+  const capabilityActive =
+    key &&
+    (key.key_hash === sub.keyHash ||
+      (library && (await sha256(library.access_key)) === sub.keyHash));
+
   const { eventAuthorizationActive } = await import("./oauth.ts");
 
   if (
-    !key ||
-    key.key_hash !== sub.keyHash ||
+    !capabilityActive ||
     !(await eventAuthorizationActive(env, sub.userId, sub.authorizationId, sub.resource))
   ) {
     await removeSubscription(env, sub.id);

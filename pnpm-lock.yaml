@@ -258,7 +258,7 @@ importers:
         specifier: ^2.0.0-beta.v.3
         version: 2.0.0-beta.v.3(@types/node@26.6.5)(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(yaml@2.9.1))(workerd@1.20261019.1)
       '@e2e-dev/web':
-        specifier: ^0.15.2
+        specifier: 0.15.2
         version: 0.15.2(e2e@0.21.2(@ai-sdk/openai@4.0.99(zod@4.6.7))(ai@7.0.148(zod@4.6.7)))
       '@types/node':
         specifier: ^26.6.5
@@ -276,7 +276,7 @@ importers:
         specifier: 1.0.0-beta.20
         version: 1.0.0-beta.20(@types/node@26.6.5)
       e2e:
-        specifier: ^0.21.2
+        specifier: 0.21.2
         version: 0.21.2(@ai-sdk/openai@4.0.99(zod@4.6.7))(ai@7.0.148(zod@4.6.7))
       husky:
         specifier: ^9.1.7

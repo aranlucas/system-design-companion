@@ -210,6 +210,34 @@ describe("creation publication and compensation", () => {
     },
   );
 
+  // R2's null read is a missing upload, not a successful copy of the referenced image.
+  it.each([false, true])(
+    "reliability regression: missing image prevents publication (saving=%s)",
+    async (saving) => {
+      const { env, bucket, source, template } = await sourceWithImages();
+      const from = saving ? source.id : template.id;
+      await bucket.delete(`files/${from}/second`);
+      const original = new Map(bucket.objects);
+
+      const create = () =>
+        saving
+          ? saveAsTemplate(env, source.id, "Retry", undefined, owner)
+          : createDiagram(env, "Retry", template.id, owner);
+
+      await expect(create()).rejects.toThrow("Referenced image second is not available");
+      expect(bucket.objects).toEqual(original);
+      expect((await listTemplates(env, owner)).filter((item) => item.name === "Retry")).toEqual([]);
+      expect((await listDiagrams(env, 50, undefined, owner)).items.map((item) => item.id)).toEqual([
+        source.id,
+      ]);
+      await bucket.put(`files/${from}/second`, "second image");
+      const created = await create();
+      expect(await ownsDiagram(env, created.id, owner)).toBe(true);
+      expect(await bucket.head(`files/${created.id}/first`)).not.toBeNull();
+      expect(await bucket.head(`files/${created.id}/second`)).not.toBeNull();
+    },
+  );
+
   it.each([false, true])(
     "waits for every in-flight file copy before cleanup (saving=%s)",
     async (saving) => {

@@ -124,3 +124,47 @@ test("the fixed model starts an interview without model discovery", async ({
   expect(workspace.requests[0]).toContain('"model":"gpt-5.5"');
   await app.screenshot("fixed-model-interview");
 });
+
+// Real canvas reconciliation and socket reconnect; the server snapshot is controlled.
+test("reliability regression: reconnect resends the equal-version local winner", async ({
+  app,
+  browser,
+  workspace,
+}) => {
+  await app.open("/d/practice?k=edit-key");
+  await expect.poll(() => workspace.connections).toBe(1);
+  await browser.keyboard.press("r");
+  await browser.mouse.move(350, 250);
+  await browser.mouse.down();
+  await browser.mouse.move(550, 400);
+  await browser.mouse.up();
+  await expect.poll(() => workspace.elements.length).toBeGreaterThan(0);
+
+  const local = workspace.elements
+    .flatMap((update) => update.elements)
+    .find((el) => el.type === "rectangle");
+
+  expect(local).toBeDefined();
+
+  if (!local) {
+    throw new Error("Drawing did not produce a rectangle");
+  }
+  workspace.remoteElements = [{ ...local, x: local.x + 200, versionNonce: local.versionNonce + 1 }];
+  const before = workspace.elements.length;
+  await workspace.disconnect();
+  await expect.poll(() => workspace.connections).toBe(2);
+  await expect
+    .poll(() =>
+      workspace.elements
+        .slice(before)
+        .flatMap((update) => update.elements)
+        .some(
+          (el) =>
+            el.id === local.id &&
+            el.x === local.x &&
+            el.version === local.version &&
+            el.versionNonce === local.versionNonce,
+        ),
+    )
+    .toBe(true);
+});

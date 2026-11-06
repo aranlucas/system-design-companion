@@ -19,7 +19,7 @@ import type { El } from "@/shared/protocol.ts";
 import { deliverDiagramEvent, resetVerificationCache } from "@/worker/events.ts";
 import { handleMcp } from "@/worker/mcp.ts";
 import { DiagramRoom } from "@/worker/room.ts";
-import { createDiagram, shareLink } from "@/worker/store.ts";
+import { createDiagram, listDiagrams, shareLink } from "@/worker/store.ts";
 import {
   makeEnv,
   makeRoom,
@@ -460,6 +460,29 @@ async function watched(name = "diagram.changed", args: Record<string, JsonInput>
 }
 
 describe("delivery", () => {
+  it("reliability regression: library capability delivers until it is revoked", async () => {
+    const d = await createDiagram(env.env, "Library board", undefined, testPrincipal().userId);
+    const page = await listDiagrams(env.env, 50, undefined, testPrincipal().userId);
+    const key = requiredTestValue(page.items.find((item) => item.id === d.id)).key;
+    const link = shareLink("https://design.example", d.id, key);
+    const { result } = await rpcGrant("events/subscribe", subscribeParams(link));
+    expect(result?.id).toBeDefined();
+    await deliverDiagramEvent(env.env, d.id, "diagram.changed", {
+      diagram_id: d.id,
+      origin: "human",
+      changed_count: 1,
+    });
+    expect(receiver.events()).toHaveLength(1);
+    await env.env.DB.prepare("DELETE FROM diagram_library WHERE diagram_id = ?").bind(d.id).run();
+    await deliverDiagramEvent(env.env, d.id, "diagram.changed", {
+      diagram_id: d.id,
+      origin: "human",
+      changed_count: 1,
+    });
+    expect(receiver.events()).toHaveLength(1);
+    expect(env.db.event_subscriptions.size).toBe(0);
+  });
+
   it("delivers a human edit as a signed event", async () => {
     const { d, room, ctx } = await watched();
     // A person editing arrives over the socket, not through the ops layer.

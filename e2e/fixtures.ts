@@ -11,6 +11,9 @@ interface MockWorkspace {
   modelRequests: number;
   requests: string[];
   elements: RoomUpdate[];
+  remoteElements: z.infer<typeof storedElementsSchema>;
+  connections: number;
+  disconnect: () => Promise<void>;
 }
 
 const roomUpdateSchema = z.object({ type: z.literal("update"), elements: storedElementsSchema });
@@ -58,6 +61,11 @@ export const test = base.extend<WorkspaceFixtures>({
       modelRequests: 0,
       requests: [],
       elements: [],
+      remoteElements: [],
+      connections: 0,
+      disconnect: () => {
+        throw new Error("No canvas socket connected");
+      },
     };
 
     await browser.route("**/api/auth/session", (route) =>
@@ -144,7 +152,15 @@ export const test = base.extend<WorkspaceFixtures>({
     );
     // e2e exposes Playwright through surfaceOf for facilities outside its facade.
     await live.context().routeWebSocket("**/ws/practice?*", (socket) => {
-      socket.send(JSON.stringify({ type: "init", elements: [], name: "Practice board" }));
+      workspace.connections++;
+      workspace.disconnect = () => socket.close({ code: 1012, reason: "Controlled reconnect" });
+      socket.send(
+        JSON.stringify({
+          type: "init",
+          elements: workspace.remoteElements,
+          name: "Practice board",
+        }),
+      );
       socket.onMessage((message) => {
         const parsed = roomUpdateSchema.safeParse(JSON.parse(String(message)));
 
