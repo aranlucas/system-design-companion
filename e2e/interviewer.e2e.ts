@@ -153,10 +153,7 @@ test("reliability regression: reconnect resends the equal-version local winner",
 
   const scene = storedElementsSchema.parse(
     await live.page().evaluate(() => {
-      // SAFETY: Canvas exposes this API before the socket connects; read the committed scene.
-      const canvas = window as CanvasWindow;
-
-      return canvas.excalidrawAPI.getSceneElements();
+      return window.excalidrawAPI?.getSceneElements();
     }),
   );
 
