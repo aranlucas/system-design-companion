@@ -138,11 +138,12 @@ test("the fixed model starts an interview without model discovery", async ({
 test("reliability regression: reconnect resends the equal-version local winner", async ({
   app,
   browser,
+  screen,
   workspace,
 }) => {
   await app.open("/d/practice?k=edit-key");
   await expect.poll(() => workspace.connections).toBe(1);
-  await browser.keyboard.press("r");
+  await screen.getByRole("button", "Rectangle", { exact: true }).tap();
   await browser.mouse.move(350, 250);
   await browser.mouse.down();
   await browser.mouse.move(550, 400);
