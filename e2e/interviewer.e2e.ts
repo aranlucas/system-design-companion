@@ -5,7 +5,11 @@ import { expect } from "e2e";
 import { test } from "./fixtures.ts";
 import { live } from "./web-engine.ts";
 
-type CanvasWindow = Window & { excalidrawAPI: ExcalidrawImperativeAPI };
+declare global {
+  interface Window {
+    excalidrawAPI: ExcalidrawImperativeAPI | null;
+  }
+}
 
 test("Auth sign-in opens the private workspace and creates a board", async ({
   app,

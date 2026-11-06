@@ -102,4 +102,12 @@ Runner/engine versions will be exact-pinned at their existing lockfile versions.
 CI will run the new regressions against baseline source (expected failure) and
 fixed source (full suite), plus existing typecheck/lint/build/e2e gates.
 
-Independent review and CI evidence: pending.
+Independent review: all five findings and fixes challenged by a separate native
+reviewer. Baseline failure count, required event payload, committed drawing capture
+and unique reconnect failure message corrected; final review found no remaining
+concrete objections.
+
+CI evidence so far: runs `42308117031` and `42308402300` passed the full unit suite
+and production build. The latter also passed lint; browser test type declaration
+needed correction. Latest-head full CI, browser journeys and pre-fix reproductions
+remain pending. No local tests or builds ran. PR: #54.
