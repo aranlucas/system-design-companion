@@ -98,8 +98,8 @@ view-only changes, pause/resume, retry, mobile menu and fixed model selection.
 They exercise the frontend with controlled service boundaries, not live OAuth or
 production Worker storage. Vitest covers those protocol/storage boundaries.
 Keep both layers and upload `.e2e/` evidence; no paid model or production secrets.
-Runner/engine versions will be exact-pinned at their existing lockfile versions.
-CI will run the new regressions against baseline source (expected failure) and
+Runner/engine versions are exact-pinned at their existing lockfile versions.
+CI runs the new regressions against baseline source (expected failure) and
 fixed source (full suite), plus existing typecheck/lint/build/e2e gates.
 
 Independent review: all five findings and fixes challenged by a separate native
@@ -107,7 +107,14 @@ reviewer. Baseline failure count, required event payload, committed drawing capt
 and unique reconnect failure message corrected; final review found no remaining
 concrete objections.
 
-CI evidence so far: runs `42308117031` and `42308402300` passed the full unit suite
-and production build. The latter also passed lint; browser test type declaration
-needed correction. Latest-head full CI, browser journeys and pre-fix reproductions
-remain pending. No local tests or builds ran. PR: #54.
+CI evidence for implementation head `353b287`: [run 42309946253](https://github.com/aranlucas/system-design-companion/actions/runs/42309946253)
+passed typecheck, lint/format, production build, 328 Vitest tests across 29 files,
+and all seven deterministic Chromium journeys. Baseline `6a6c919` produced exactly
+eight expected protocol/storage assertion failures (four duplicate-ID variants,
+two missing-image paths, library delivery and invalid index); the reconnect journey
+failed specifically with "Local conflict winner was not resent after reconnect".
+Both baseline report checks passed. Evidence artifacts: `audit-baseline-regressions`
+and `e2e-results` on that run. Initial test setup/type/lint failures were corrected
+without weakening behavior assertions. No local tests or builds ran.
+
+PR: [#54](https://github.com/aranlucas/system-design-companion/pull/54).
