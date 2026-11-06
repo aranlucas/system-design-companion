@@ -1,8 +1,11 @@
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { storedElementsSchema } from "../src/shared/schemas.ts";
 import { expect } from "e2e";
+
 import { test } from "./fixtures.ts";
 import { live } from "./web-engine.ts";
+
+type CanvasWindow = Window & { excalidrawAPI: ExcalidrawImperativeAPI };
 
 test("Auth sign-in opens the private workspace and creates a board", async ({
   app,
@@ -146,8 +149,8 @@ test("reliability regression: reconnect resends the equal-version local winner",
 
   const scene = storedElementsSchema.parse(
     await live.page().evaluate(() => {
-      // The app deliberately exposes this debugging API; inspect the committed canvas state.
-      const canvas = window as Window & { excalidrawAPI: ExcalidrawImperativeAPI };
+      // SAFETY: Canvas exposes this API before the socket connects; read the committed scene.
+      const canvas = window as CanvasWindow;
 
       return canvas.excalidrawAPI.getSceneElements();
     }),
