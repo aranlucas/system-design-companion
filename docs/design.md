@@ -36,6 +36,11 @@ Deletes are tombstones; the room purges them after seven days only while no tab
 is connected. A client offline beyond that window can miss a deletion. Presence
 lives on WebSocket attachments so it survives room hibernation.
 
+Tabs flush local changes at most every 60 ms while drawing. The room rate-limits
+canvas updates in memory, per tab and per board, with headroom above that cadence;
+there is one room per board, so the count is exact and adds no D1 call to an edit.
+Exceeding it closes the tab with 1013; the tab reconnects and re-syncs from `init`.
+
 Agent patches run on cloned scene state, then persist in a SQLite transaction
 before broadcasting. Operations address IDs, unique labels, or earlier batch
 references; ambiguous labels fail. A patch can partially succeed: inspect each

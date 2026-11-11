@@ -2,11 +2,12 @@ import { z } from "zod";
 import { elementAttribute } from "@/shared/element-attributes.ts";
 import { requiredTestValue } from "@test/helpers/required-test-value.ts";
 import { storedElementSchema, serverMessageSchema } from "@/shared/schemas.ts";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AGENT_STROKE, type El, type ClientMessage } from "@/shared/protocol.ts";
 import { DiagramRoom, TOMBSTONE_TTL_MS } from "@/worker/room.ts";
 import type { Op } from "@/shared/scene.ts";
 import { makeEnv, makeRoom, makeRoomCtx, makeWs } from "@test/helpers/fakes.ts";
+import { strictFake } from "@test/helpers/strict-fake.ts";
 
 function graphOf(room: DiagramRoom) {
   return room.getGraph();
@@ -449,6 +450,132 @@ describe("concurrent-edit merge rule", () => {
     expect(ws1.sent).toHaveLength(0);
     expect(ws2.sent).toHaveLength(1);
     expect(JSON.parse(ws2.sent[0])).toMatchObject({ type: "update", origin: "human" });
+  });
+});
+
+/** One canvas flush of an element being dragged: every pointer move bumps its version. */
+const stroke = (id: string, version: number): El => ({ ...rect(id, version, 0), version });
+
+describe("canvas update budget", () => {
+  // The canvas flushes local changes at most every 60 ms while something is being dragged or drawn.
+  const CLIENT_FLUSH_MS = 60;
+  const start = new Date("2026-01-01T00:00:00Z");
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function drawingRoom(env = makeEnv().env) {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(start);
+    const ctx = makeRoomCtx();
+    const room = new DiagramRoom(ctx.ctx, env);
+    await room.init("drawing", "Drawing");
+
+    const tab = () => {
+      const ws = makeWs();
+      const close = vi.fn();
+      ws.close = close;
+      ctx.addWs(ws);
+
+      return { ws, close };
+    };
+
+    const send = (ws: WebSocket, el: El) =>
+      room.webSocketMessage(ws, JSON.stringify({ type: "update", elements: [el] }));
+
+    return { room, ctx, tab, send };
+  }
+
+  it("keeps a tab connected while it drags for a whole minute at the client's flush rate", async () => {
+    const { room, tab, send } = await drawingRoom();
+    const { ws, close } = tab();
+
+    for (let version = 1; version <= 1000; version++) {
+      // oxlint-disable-next-line no-await-in-loop -- one socket delivers its messages in order
+      await send(ws, stroke("dragged", version));
+      vi.advanceTimersByTime(CLIENT_FLUSH_MS);
+    }
+
+    expect(close).not.toHaveBeenCalled();
+    expect((await room.getRaw()).find((el) => el.id === "dragged")?.version).toBe(1000);
+  });
+
+  it("keeps two collaborators connected while both draw at once", async () => {
+    const { room, tab, send } = await drawingRoom();
+    const first = tab();
+    const second = tab();
+
+    for (let version = 1; version <= 500; version++) {
+      // oxlint-disable-next-line no-await-in-loop -- interleave the two tabs' messages in order
+      await send(first.ws, stroke("first", version));
+      // oxlint-disable-next-line no-await-in-loop -- interleave the two tabs' messages in order
+      await send(second.ws, stroke("second", version));
+      vi.advanceTimersByTime(CLIENT_FLUSH_MS);
+    }
+
+    expect(first.close).not.toHaveBeenCalled();
+    expect(second.close).not.toHaveBeenCalled();
+    const versions = new Map((await room.getRaw()).map((el) => [el.id, el.version]));
+    expect(versions.get("first")).toBe(500);
+    expect(versions.get("second")).toBe(500);
+  });
+
+  it("still disconnects a tab that floods updates, without blocking its collaborators", async () => {
+    const { room, tab, send } = await drawingRoom();
+    const flooder = tab();
+    const collaborator = tab();
+
+    for (let version = 1; version <= 1000; version++) {
+      // oxlint-disable-next-line no-await-in-loop -- one socket delivers its messages in order
+      await send(flooder.ws, stroke("flood", version));
+    }
+
+    expect(flooder.close).toHaveBeenCalledWith(1013, "Too many canvas updates");
+    expect((await room.getRaw()).find((el) => el.id === "flood")?.version).toBeLessThan(1000);
+
+    await send(collaborator.ws, stroke("calm", 1));
+    expect(collaborator.close).not.toHaveBeenCalled();
+    expect((await room.getRaw()).some((el) => el.id === "calm")).toBe(true);
+  });
+
+  it("caps the whole board, so opening more tabs does not multiply the allowance", async () => {
+    const { tab, send } = await drawingRoom();
+    const tabs = Array.from({ length: 10 }, () => tab());
+
+    for (const [index, { ws }] of tabs.entries()) {
+      for (let version = 1; version <= 50; version++) {
+        // oxlint-disable-next-line no-await-in-loop -- each socket delivers its messages in order
+        await send(ws, stroke(`tab-${index}`, version));
+      }
+    }
+
+    expect(tabs.some(({ close }) => close.mock.calls.some(([code]) => code === 1013))).toBe(true);
+  });
+
+  it("applies canvas edits while D1 is unavailable", async () => {
+    const { env } = makeEnv();
+
+    env.DB = strictFake<D1Database>({
+      prepare: () => {
+        throw new Error("D1 unavailable");
+      },
+    });
+
+    // Event delivery runs off the editing path and reports its own D1 failure.
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { room, ctx, tab, send } = await drawingRoom(env);
+    const sender = tab();
+    const observer = tab();
+    await send(sender.ws, stroke("offline-d1", 1));
+    await ctx.drain();
+
+    expect(sender.close).not.toHaveBeenCalled();
+    expect((await room.getRaw()).map((el) => el.id)).toEqual(["offline-d1"]);
+    expect(observer.ws.sent.map((raw) => serverMessageSchema.parse(JSON.parse(raw)))).toEqual([
+      { type: "update", elements: [stroke("offline-d1", 1)], origin: "human" },
+    ]);
+    logged.mockRestore();
   });
 });
 
