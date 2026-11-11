@@ -25,7 +25,14 @@ import { Scene, graphView, type Author, type Op } from "../shared/scene.ts";
 import { deliverDiagramEvent, type DiagramEventData } from "./events.ts";
 import { patchSnapshotName } from "./patch-name.ts";
 import { copyFiles } from "./store.ts";
-import { MAX_JSON_BYTES, MAX_SCENE_ELEMENTS, MAX_PATCH_OPS, takeBudget } from "./request-limits.ts";
+import {
+  MAX_JSON_BYTES,
+  MAX_SCENE_ELEMENTS,
+  MAX_PATCH_OPS,
+  ROOM_UPDATE_RATE,
+  SOCKET_UPDATE_RATE,
+  TokenBucket,
+} from "./request-limits.ts";
 import { socketMessageSchema } from "./socket-schema.ts";
 
 /** A tab RPC waiting for its reply. */
@@ -100,6 +107,9 @@ export class DiagramRoom extends DurableObject<Env> {
   private pending = new Map<string, PendingCall>();
   private lastFocusAt = 0;
   private deleted = false;
+  /** Canvas update allowances; hibernation only happens while idle, so resetting them then is fine. */
+  private roomUpdates = new TokenBucket(ROOM_UPDATE_RATE);
+  private socketUpdates = new WeakMap<WebSocket, TokenBucket>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -412,7 +422,23 @@ export class DiagramRoom extends DurableObject<Env> {
     });
   }
 
-  async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
+  /** Spend the sender's allowance first, so a flooding tab drains its own budget before the board's. */
+  private takeUpdateBudget(ws: WebSocket, now = Date.now()) {
+    let socket = this.socketUpdates.get(ws);
+
+    if (!socket) {
+      socket = new TokenBucket(SOCKET_UPDATE_RATE, now);
+      this.socketUpdates.set(ws, socket);
+    }
+
+    return socket.take(now) && this.roomUpdates.take(now);
+  }
+
+  webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
+    return promiseResult(() => this.handleSocketMessage(ws, raw));
+  }
+
+  private handleSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
     if (this.deleted) {
       return;
     }
@@ -437,15 +463,9 @@ export class DiagramRoom extends DurableObject<Env> {
 
     switch (msg.type) {
       case "update": {
-        try {
-          await takeBudget(this.env, `board-update:${this.diagramId}`, 240);
-        } catch {
+        if (!this.takeUpdateBudget(ws)) {
           ws.close(1013, "Too many canvas updates");
 
-          return;
-        }
-
-        if (this.deleted) {
           return;
         }
 

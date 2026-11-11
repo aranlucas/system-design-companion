@@ -53,6 +53,48 @@ export async function readBounded(
   return bytes;
 }
 
+export interface UpdateRate {
+  perSecond: number;
+  burst: number;
+}
+
+/** Canvas tabs flush local changes at most every 60 ms (~17/s) while drawing or dragging. */
+export const SOCKET_UPDATE_RATE: UpdateRate = { perSecond: 20, burst: 100 };
+
+/** Board-wide ceiling, so many sockets opened from one link cannot multiply the allowance. */
+export const ROOM_UPDATE_RATE: UpdateRate = { perSecond: 60, burst: 300 };
+
+/**
+ * Continuous-refill allowance held in memory. A board's Durable Object is its only
+ * instance, so counting there is exact and costs no I/O per canvas message.
+ */
+export class TokenBucket {
+  private tokens: number;
+  private updatedAt: number;
+
+  constructor(
+    private readonly rate: UpdateRate,
+    now = Date.now(),
+  ) {
+    this.tokens = rate.burst;
+    this.updatedAt = now;
+  }
+
+  take(now = Date.now()) {
+    const refill = (Math.max(0, now - this.updatedAt) / 1000) * this.rate.perSecond;
+    this.tokens = Math.min(this.rate.burst, this.tokens + refill);
+    this.updatedAt = now;
+
+    if (this.tokens < 1) {
+      return false;
+    }
+
+    this.tokens -= 1;
+
+    return true;
+  }
+}
+
 /** D1's atomic upsert makes the allowance consistent across Worker isolates. */
 export async function takeBudget(env: Env, key: string, limit: number, seconds = 60) {
   await env.DB.prepare(
