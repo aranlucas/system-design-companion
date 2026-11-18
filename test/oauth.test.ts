@@ -15,6 +15,8 @@ const ORIGIN = "https://design.example";
 
 const RESOURCE = `${ORIGIN}/mcp`;
 
+const RESOURCE_METADATA = `${ORIGIN}/.well-known/oauth-protected-resource/mcp`;
+
 const REDIRECT = "https://client.example/callback";
 
 const VERSION = "2026-07-28";
@@ -214,6 +216,85 @@ async function rpcBody(response: Response): Promise<RpcResult> {
 }
 
 describe("OAuth authorization", () => {
+  it("publishes the authorization server metadata reached through resource discovery", async () => {
+    const resource = await call(RESOURCE_METADATA);
+    expect(resource.status).toBe(200);
+    const metadata = jsonObjectSchema.parse(await resource.json());
+    expect(metadata).toMatchObject({
+      resource: RESOURCE,
+      authorization_servers: [ORIGIN],
+      bearer_methods_supported: ["header"],
+      scopes_supported: ["mcp:read"],
+    });
+
+    const issuer = z.array(z.string()).parse(metadata.authorization_servers)[0];
+    const server = await call(`${issuer}/.well-known/oauth-authorization-server`);
+    expect(server.status).toBe(200);
+    const serverMetadata = jsonObjectSchema.parse(await server.json());
+    expect(serverMetadata).toMatchObject({
+      issuer: ORIGIN,
+      authorization_endpoint: `${ORIGIN}/authorize`,
+      token_endpoint: `${ORIGIN}/oauth/token`,
+      registration_endpoint: `${ORIGIN}/oauth/register`,
+      code_challenge_methods_supported: ["S256"],
+      scopes_supported: ["mcp:read", "mcp:write"],
+    });
+    expect(serverMetadata.grant_types_supported).toContain("authorization_code");
+    expect(serverMetadata.grant_types_supported).toContain("refresh_token");
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it("challenges an unrecognized bearer token as invalid", async () => {
+    const response = await rpc("invalid-token", "events/list");
+    expect(response.status).toBe(401);
+    expect(response.headers.get("WWW-Authenticate")).toContain('error="invalid_token"');
+    expect(response.headers.get("WWW-Authenticate")).toContain(
+      `resource_metadata="${RESOURCE_METADATA}"`,
+    );
+    expect(response.headers.get("WWW-Authenticate")).toContain('scope="mcp:read"');
+  });
+
+  it("challenges an expired issued token and accepts a refreshed token without upstream Auth", async () => {
+    const auth = await authorize();
+    const issued = await exchange(auth);
+    expect(issued.status).toBe(200);
+
+    const { access_token, refresh_token, expires_in } = tokensSchema
+      .extend({ expires_in: z.number().int().positive() })
+      .parse(await issued.json());
+
+    expect((await rpc(access_token, "events/list")).status).toBe(200);
+
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + (expires_in + 1) * 1000);
+
+    try {
+      const expired = await rpc(access_token, "events/list");
+      expect(expired.status).toBe(401);
+      expect(expired.headers.get("WWW-Authenticate")).toContain('error="invalid_token"');
+      expect(expired.headers.get("WWW-Authenticate")).toContain(
+        `resource_metadata="${RESOURCE_METADATA}"`,
+      );
+      expect(expired.headers.get("WWW-Authenticate")).toContain('scope="mcp:read"');
+
+      const refresh = await call("/oauth/token", {
+        method: "POST",
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          client_id: auth.clientId,
+          refresh_token,
+          resource: RESOURCE,
+        }),
+      });
+
+      expect(refresh.status).toBe(200);
+      const replacement = tokensSchema.parse(await refresh.json());
+      expect((await rpc(replacement.access_token, "events/list")).status).toBe(200);
+      expect(upstream).not.toHaveBeenCalled();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it("completes consent, Auth session, token exchange and authenticated event discovery", async () => {
     const { tokens: issued } = await tokens();
 
@@ -296,7 +377,11 @@ describe("OAuth authorization", () => {
     const { tokens: issued } = await tokens("mcp:write");
     const response = await rpc(issued.access_token, "events/list");
     expect(response.status).toBe(403);
-    expect(response.headers.get("www-authenticate")).toContain('scope="mcp:read"');
+    const challenge = requiredTestValue(response.headers.get("WWW-Authenticate"));
+    expect(challenge).toMatch(/^Bearer /);
+    expect(challenge).toContain('error="insufficient_scope"');
+    expect(challenge).toContain('scope="mcp:read"');
+    expect(challenge).toContain(`resource_metadata="${RESOURCE_METADATA}"`);
   });
 
   it("permits reads and challenges writes before a read-only token mutates anything", async () => {
@@ -309,7 +394,11 @@ describe("OAuth authorization", () => {
     });
 
     expect(response.status).toBe(403);
-    expect(response.headers.get("www-authenticate")).toContain("mcp:write");
+    const challenge = requiredTestValue(response.headers.get("WWW-Authenticate"));
+    expect(challenge).toMatch(/^Bearer /);
+    expect(challenge).toContain('error="insufficient_scope"');
+    expect(challenge).toContain('scope="mcp:read mcp:write"');
+    expect(challenge).toContain(`resource_metadata="${RESOURCE_METADATA}"`);
     expect(env.db.diagrams.size).toBe(0);
   });
 
@@ -356,7 +445,9 @@ describe("OAuth authorization", () => {
     });
 
     expect(revoked.status).toBe(200);
-    expect((await rpc(replacement.access_token, "events/list")).status).toBe(401);
+    const rejected = await rpc(replacement.access_token, "events/list");
+    expect(rejected.status).toBe(401);
+    expect(rejected.headers.get("WWW-Authenticate")).toContain('error="invalid_token"');
   });
 
   it("rejects a consent POST without its browser binding cookie", async () => {

@@ -588,6 +588,7 @@ describe("routing", () => {
       'resource_metadata="http://localhost/.well-known/oauth-protected-resource/mcp"',
     );
     expect(challenge).toContain('scope="mcp:read"');
+    expect(challenge).not.toContain("error=");
   });
 
   it("publishes protected resource metadata naming this deployment as the issuer", async () => {
