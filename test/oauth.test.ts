@@ -81,8 +81,8 @@ async function client(): Promise<string> {
   return registered.client_id;
 }
 
-async function consent(scope = "mcp:read mcp:write") {
-  const clientId = await client();
+async function consent(scope = "mcp:read mcp:write", registeredClientId?: string) {
+  const clientId = registeredClientId ?? (await client());
   const verifier = crypto.randomUUID() + crypto.randomUUID();
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
 
@@ -117,8 +117,8 @@ async function consent(scope = "mcp:read mcp:write") {
   return { clientId, verifier, handle, cookie: `${sessionCookie}; ${cookies(page)}`, html };
 }
 
-async function authorize(scope = "mcp:read mcp:write"): Promise<Authorization> {
-  const started = await consent(scope);
+async function authorize(scope = "mcp:read mcp:write", clientId?: string): Promise<Authorization> {
+  const started = await consent(scope, clientId);
   const form = new URLSearchParams({ handle: started.handle, decision: "allow" });
 
   for (const item of scope.split(" ")) {
@@ -384,14 +384,16 @@ describe("OAuth authorization", () => {
     expect(challenge).toContain(`resource_metadata="${RESOURCE_METADATA}"`);
   });
 
-  it("permits reads and challenges writes before a read-only token mutates anything", async () => {
-    const { tokens: issued } = await tokens("mcp:read");
+  it("blocks a read-only client from writing until it reauthorizes with the challenged scopes", async () => {
+    const { auth, tokens: issued } = await tokens("mcp:read");
     expect((await rpc(issued.access_token, "events/list")).status).toBe(200);
 
-    const response = await rpc(issued.access_token, "tools/call", {
+    const write = {
       name: "create_diagram",
-      arguments: { name: "Forbidden" },
-    });
+      arguments: { name: "Scope upgrade" },
+    };
+
+    const response = await rpc(issued.access_token, "tools/call", write);
 
     expect(response.status).toBe(403);
     const challenge = requiredTestValue(response.headers.get("WWW-Authenticate"));
@@ -400,6 +402,20 @@ describe("OAuth authorization", () => {
     expect(challenge).toContain('scope="mcp:read mcp:write"');
     expect(challenge).toContain(`resource_metadata="${RESOURCE_METADATA}"`);
     expect(env.db.diagrams.size).toBe(0);
+
+    const metadataUrl = requiredTestValue(/resource_metadata="([^"]+)"/.exec(challenge))[1];
+    expect((await call(metadataUrl)).status).toBe(200);
+
+    const scope = requiredTestValue(/\bscope="([^"]+)"/.exec(challenge))[1];
+    const upgraded = await authorize(scope, auth.clientId);
+    const exchanged = await exchange(upgraded);
+    expect(exchanged.status).toBe(200);
+
+    const replacement = tokensSchema.parse(await exchanged.json());
+    const retried = await rpc(replacement.access_token, "tools/call", write);
+    expect(retried.status).toBe(200);
+    expect(env.db.diagrams.size).toBe(1);
+    expect(upstream).not.toHaveBeenCalled();
   });
 
   it("rejects an incorrect PKCE verifier and never redeems an authorization code twice", async () => {
