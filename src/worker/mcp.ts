@@ -56,6 +56,7 @@ export async function handleMcp(request: Request, env: Env, principal: McpPrinci
       clientId: principal.clientId,
       scopes: principal.scopes,
       expiresAt: principal.expiresAt,
+      resource: new URL(principal.resource),
       extra: { userId: principal.userId },
     },
   });
